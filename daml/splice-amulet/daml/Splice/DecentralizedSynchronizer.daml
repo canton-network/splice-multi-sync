@@ -148,6 +148,37 @@ template RegisteredSynchronizer with
 instance HasCheckedFetch RegisteredSynchronizer ForDso where
     contractGroupId RegisteredSynchronizer{..} = ForDso with ..
 
+-- PoC (dedicated-synchronizer traffic): the record of extra traffic purchased for a dedicated
+-- synchronizer. It mirrors `MemberTraffic` but is OBSERVED by the synchronizer's operator, so the
+-- operator's node can ingest purchases on-ledger (event-driven, no polling). It is a SEPARATE
+-- template so the shared `MemberTraffic` (and its many Scala/TS codegen consumers) is untouched by
+-- this PoC. Created by `AmuletRules_BuyDedicatedSyncTraffic`.
+template DedicatedSyncTraffic with
+    dso : Party
+      -- ^ signatory; the DSO of the global synchronizer where the CC was burned
+    operator : Party
+      -- ^ observer; the dedicated synchronizer's operator (taken from the `RegisteredSynchronizer`)
+    memberId : Text
+      -- ^ the participant (member) whose dedicated-sync traffic was bought
+    synchronizerId : Text
+      -- ^ the dedicated synchronizer this traffic is for (taken from the `RegisteredSynchronizer`)
+    migrationId : Int
+    totalPurchased : Int -- ^ bytes of extra traffic bought
+    numPurchases : Int
+    amuletSpent : Decimal -- ^ CC burned for this purchase
+    usdSpent : Decimal -- ^ USD-equivalent cost
+  where
+    signatory dso
+    observer operator
+
+    ensure totalPurchased >= 0
+      && numPurchases >= 0
+      && amuletSpent >= 0.0
+      && usdSpent >= 0.0
+      && migrationId >= 0
+      && not (T.isEmpty memberId)
+      && not (T.isEmpty synchronizerId)
+
 instance Patchable BaseRateTrafficLimits where
   patch new base current = BaseRateTrafficLimits with
     burstAmount = patch new.burstAmount base.burstAmount current.burstAmount
