@@ -27,7 +27,9 @@ import Splice.Round
 import Splice.Types
 import Splice.ValidatorLicense
 import Splice.Wallet.Subscriptions
-import Splice.DecentralizedSynchronizer (MemberTraffic)
+-- `RegisteredSynchronizer` (PoC): created by `DsoRules_RegisterSynchronizer` below; the template
+-- itself lives in splice-amulet because AmuletRules must be able to fetch it.
+import Splice.DecentralizedSynchronizer (MemberTraffic, RegisteredSynchronizer(..))
 
 import qualified Splice.CometBft as CometBft
 import Splice.Ans
@@ -117,6 +119,10 @@ data DsoRules_ActionRequiringConfirmation
     -- ^ Create TransferCommandCounter contract for the given sender if it does not already exist
   | SRARC_CreateUnallocatedUnclaimedActivityRecord DsoRules_CreateUnallocatedUnclaimedActivityRecord
     -- ^ Voted action to create an UnallocatedUnclaimedActivityRecord contract.
+  | SRARC_RegisterSynchronizer DsoRules_RegisterSynchronizer
+    -- ^ PoC (dedicated-synchronizer traffic): voted action to register a dedicated (non-global)
+    --   synchronizer by binding its id to an operator party, so its traffic can be funded in CC.
+    --   Executed via a DSO vote; see the `DsoRules_RegisterSynchronizer` choice.
   | SRARC_CreateBootstrapExternalPartyConfigStateInstruction DsoRules_CreateBootstrapExternalPartyConfigStateInstruction
     -- ^ Create BootstrapExternalPartyConfigStateInstruction
   | SRARC_UpdateFeaturedAppRight DsoRules_UpdateFeaturedAppRight
@@ -331,6 +337,10 @@ data DsoRules_AmuletRules_ConvertFeaturedAppActivityMarkersResult = DsoRules_Amu
 
 data DsoRules_CreateUnallocatedUnclaimedActivityRecordResult = DsoRules_CreateUnallocatedUnclaimedActivityRecordResult with
     unallocatedUnclaimedActivityRecordCid : ContractId UnallocatedUnclaimedActivityRecord
+
+-- | Result of `DsoRules_RegisterSynchronizer`: the cid of the created registration.
+data DsoRules_RegisterSynchronizerResult = DsoRules_RegisterSynchronizerResult with
+    registeredSynchronizerCid : ContractId RegisteredSynchronizer
 
 data DsoRules_AllocateUnallocatedUnclaimedActivityRecordResult = DsoRules_AllocateUnallocatedUnclaimedActivityRecordResult with
     unclaimedActivityRecordCid : ContractId UnclaimedActivityRecord
@@ -1680,6 +1690,22 @@ template DsoRules with
             expiresAt
         pure $ DsoRules_CreateUnallocatedUnclaimedActivityRecordResult with ..
 
+    -- | PoC (dedicated-synchronizer traffic): governed registration of a dedicated synchronizer.
+    --   Creates a `RegisteredSynchronizer` (in splice-amulet) binding `synchronizerId` to its
+    --   `operator`. This is the only way the registry is populated; `AmuletRules_BuyDedicatedSyncTraffic`
+    --   then reads that contract (via explicit disclosure) to authorize CC burns for the synchronizer.
+    --   `controller dso` + `nonconsuming`: a vote reaches this via `executeActionRequiringConfirmation`,
+    --   and the `DsoRules` contract is not archived by exercising it.
+    nonconsuming choice DsoRules_RegisterSynchronizer : DsoRules_RegisterSynchronizerResult
+      with
+        synchronizerId : Text -- ^ stable id of the dedicated synchronizer to register
+        operator : Party -- ^ the party operating that synchronizer
+      controller dso
+      do
+        require "synchronizerId is non-empty" (not (T.isEmpty synchronizerId))
+        registeredSynchronizerCid <- create RegisteredSynchronizer with dso; synchronizerId; operator
+        pure $ DsoRules_RegisterSynchronizerResult with ..
+
     nonconsuming choice DsoRules_AllocateUnallocatedUnclaimedActivityRecord : DsoRules_AllocateUnallocatedUnclaimedActivityRecordResult
       with
         unallocatedUnclaimedActivityRecordCid : ContractId UnallocatedUnclaimedActivityRecord
@@ -1816,6 +1842,8 @@ executeActionRequiringConfirmation dso dsoRulesCid amuletRulesCid act = case act
       SRARC_CreateExternalPartyAmuletRules choiceArg -> void $ exercise dsoRulesCid choiceArg
       SRARC_CreateTransferCommandCounter choiceArg -> void $ exercise dsoRulesCid choiceArg
       SRARC_CreateUnallocatedUnclaimedActivityRecord choiceArg -> void $ exercise dsoRulesCid choiceArg
+      -- PoC: an accepted vote to register a dedicated synchronizer runs the choice on DsoRules.
+      SRARC_RegisterSynchronizer choiceArg -> void $ exercise dsoRulesCid choiceArg
       SRARC_CreateBootstrapExternalPartyConfigStateInstruction choiceArg -> void $ exercise dsoRulesCid choiceArg
   ARC_AnsEntryContext with .. -> do
     void $ fetchChecked (ForDso with dso) ansEntryContextCid

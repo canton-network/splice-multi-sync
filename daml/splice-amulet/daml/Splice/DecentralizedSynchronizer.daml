@@ -100,6 +100,51 @@ instance HasCheckedFetch MemberTraffic ForDso where
 instance HasCheckedFetch MemberTraffic ForMemberTraffic where
     contractGroupId MemberTraffic{..} = ForMemberTraffic with ..
 
+-- Dedicated-synchronizer registration (PoC)
+------------------------------------------------
+--
+-- A "dedicated synchronizer" is a non-global synchronizer (stood up with the Splice software)
+-- whose traffic we want to fund by burning CC on the global synchronizer. Before any CC can be
+-- burned for such a synchronizer it is registered once, by DSO governance, via
+-- `DsoRules_RegisterSynchronizer` (splice-dso-governance), which creates this contract.
+--
+-- The registration binds a stable synchronizer id to the `operator` party that runs it. Two
+-- consumers read it:
+--   * `AmuletRules_BuyDedicatedSyncTraffic` (splice-amulet) authorizes a CC burn for a
+--     synchronizer id only if a matching `RegisteredSynchronizer` is supplied (via explicit
+--     disclosure), and uses `operator` as the observer of the resulting traffic record.
+--   * the `operator` itself, which observes this contract and thus learns it is registered.
+--
+-- This template lives in splice-amulet (not splice-dso-governance) so that `AmuletRules` can
+-- `fetch` it: splice-dso-governance depends on splice-amulet, not the reverse.
+template RegisteredSynchronizer with
+    dso : Party
+      -- ^ The DSO of the global synchronizer; sole signatory. A DSO vote creates this contract.
+    synchronizerId : Text
+      -- ^ Id of the dedicated synchronizer this registration authorizes CC-funded traffic for.
+    operator : Party
+      -- ^ The party operating the dedicated synchronizer. Observes this registration and every
+      --   traffic purchase for its synchronizer (see `DedicatedSyncTraffic`).
+  where
+    signatory dso
+    observer operator
+
+    ensure not (T.isEmpty synchronizerId)
+
+    -- | Public fetch choice, mirroring `OpenMiningRound_Fetch`: lets a buyer who is neither
+    --   signatory nor observer read this contract inside `AmuletRules_BuyDedicatedSyncTraffic`
+    --   when it is passed via explicit disclosure. Returns the contract unchanged.
+    nonconsuming choice RegisteredSynchronizer_Fetch : RegisteredSynchronizer
+      with
+        p : Party -- ^ the reader (the buyer/provider); authorizes the fetch
+      controller p
+      do pure this
+
+-- Group-id check for `fetchPublicReferenceData`: a `RegisteredSynchronizer` belongs to its DSO,
+-- so reads are validated against the expected DSO party (mirrors the `MemberTraffic`/`ForDso` instance).
+instance HasCheckedFetch RegisteredSynchronizer ForDso where
+    contractGroupId RegisteredSynchronizer{..} = ForDso with ..
+
 instance Patchable BaseRateTrafficLimits where
   patch new base current = BaseRateTrafficLimits with
     burstAmount = patch new.burstAmount base.burstAmount current.burstAmount
