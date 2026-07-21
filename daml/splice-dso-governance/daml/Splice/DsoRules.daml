@@ -119,14 +119,16 @@ data DsoRules_ActionRequiringConfirmation
     -- ^ Create TransferCommandCounter contract for the given sender if it does not already exist
   | SRARC_CreateUnallocatedUnclaimedActivityRecord DsoRules_CreateUnallocatedUnclaimedActivityRecord
     -- ^ Voted action to create an UnallocatedUnclaimedActivityRecord contract.
-  | SRARC_RegisterSynchronizer DsoRules_RegisterSynchronizer
-    -- ^ PoC (dedicated-synchronizer traffic): voted action to register a dedicated (non-global)
-    --   synchronizer by binding its id to an operator party, so its traffic can be funded in CC.
-    --   Executed via a DSO vote; see the `DsoRules_RegisterSynchronizer` choice.
   | SRARC_CreateBootstrapExternalPartyConfigStateInstruction DsoRules_CreateBootstrapExternalPartyConfigStateInstruction
     -- ^ Create BootstrapExternalPartyConfigStateInstruction
   | SRARC_UpdateFeaturedAppRight DsoRules_UpdateFeaturedAppRight
     -- ^ Update a specific featured app right.
+  | SRARC_RegisterSynchronizer DsoRules_RegisterSynchronizer
+    -- ^ PoC (dedicated-synchronizer traffic): voted action to register a dedicated (non-global)
+    --   synchronizer by binding its id to an operator party, so its traffic can be funded in CC.
+    --   Executed via a DSO vote; see the `DsoRules_RegisterSynchronizer` choice.
+    --   Kept last in this variant on purpose: Daml smart-contract-upgrade rules require new
+    --   constructors of a serializable variant to be appended after all existing ones.
   deriving (Eq, Show)
 
 data AnsEntryContext_ActionRequiringConfirmation
