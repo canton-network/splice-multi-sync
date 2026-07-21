@@ -1690,12 +1690,13 @@ template DsoRules with
             expiresAt
         pure $ DsoRules_CreateUnallocatedUnclaimedActivityRecordResult with ..
 
-    -- | PoC (dedicated-synchronizer traffic): governed registration of a dedicated synchronizer.
-    --   Creates a `RegisteredSynchronizer` (in splice-amulet) binding `synchronizerId` to its
-    --   `operator`. This is the only way the registry is populated; `AmuletRules_BuyDedicatedSyncTraffic`
-    --   then reads that contract (via explicit disclosure) to authorize CC burns for the synchronizer.
-    --   `controller dso` + `nonconsuming`: a vote reaches this via `executeActionRequiringConfirmation`,
-    --   and the `DsoRules` contract is not archived by exercising it.
+    -- PoC (dedicated-synchronizer traffic): governed registration of a dedicated synchronizer.
+    -- Creates a RegisteredSynchronizer (in splice-amulet) binding synchronizerId to its
+    -- operator. This is the only way the registry is populated; AmuletRules_BuyDedicatedSyncTraffic
+    -- then reads that contract (via explicit disclosure) to authorize CC burns for the synchronizer.
+    -- controller dso + nonconsuming: a vote reaches this via executeActionRequiringConfirmation,
+    -- and the DsoRules contract is not archived by exercising it.
+    -- (Plain comment, not a `-- |` doc comment: damlc docs rejects a doc comment attached to a choice.)
     nonconsuming choice DsoRules_RegisterSynchronizer : DsoRules_RegisterSynchronizerResult
       with
         synchronizerId : Text -- ^ stable id of the dedicated synchronizer to register

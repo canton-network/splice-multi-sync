@@ -131,12 +131,14 @@ template RegisteredSynchronizer with
 
     ensure not (T.isEmpty synchronizerId)
 
-    -- | Public fetch choice, mirroring `OpenMiningRound_Fetch`: lets a buyer who is neither
-    --   signatory nor observer read this contract inside `AmuletRules_BuyDedicatedSyncTraffic`
-    --   when it is passed via explicit disclosure. Returns the contract unchanged.
+    -- Public read choice, mirroring OpenMiningRound_Fetch: lets a buyer who is neither
+    -- signatory nor observer read this contract inside AmuletRules_BuyDedicatedSyncTraffic
+    -- when it is passed via explicit disclosure. Returns the contract unchanged.
+    -- (Plain comment, not a `-- |` doc comment: damlc docs rejects a doc comment attached
+    -- directly to a choice.)
     nonconsuming choice RegisteredSynchronizer_Fetch : RegisteredSynchronizer
       with
-        p : Party -- ^ the reader (buyer/provider) authorized to read this disclosed contract
+        p : Party -- the reader (buyer/provider) authorized to read this disclosed contract
       controller p
       do pure this
 
