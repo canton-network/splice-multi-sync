@@ -136,7 +136,7 @@ template RegisteredSynchronizer with
     --   when it is passed via explicit disclosure. Returns the contract unchanged.
     nonconsuming choice RegisteredSynchronizer_Fetch : RegisteredSynchronizer
       with
-        p : Party -- ^ the reader (the buyer/provider); authorizes the fetch
+        p : Party -- ^ the reader (buyer/provider) authorized to read this disclosed contract
       controller p
       do pure this
 
