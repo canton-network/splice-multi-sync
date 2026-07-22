@@ -305,20 +305,20 @@ template AmuletRules
           senderChangeAmulet = transferResult.senderChangeAmulet
           meta = Some meta
 
-    -- PoC (dedicated-synchronizer traffic): buy extra traffic for a DEDICATED (non-global)
+    -- PoC (dedicated-synchronizer traffic): buy extra traffic for a DEDICATED (non-decentralized)
     -- synchronizer that has been registered via governance (see `RegisteredSynchronizer` and
     -- `DsoRules_RegisterSynchronizer`, rung 1). This is a sibling of `AmuletRules_BuyMemberTraffic`;
     -- the differences are:
     --   * the target synchronizer is authorized by a disclosed `RegisteredSynchronizer` contract
-    --     rather than by membership in `requiredSynchronizers` (which today holds only the global sync);
+    --     rather than by membership in `requiredSynchronizers` (which today holds only the decentralized sync);
     --   * the created record (`DedicatedSyncTraffic`) is OBSERVED by the synchronizer's operator so
     --     the operator's node can ingest the purchase on-ledger.
-    -- CC burning and fee computation are reused unchanged (`splitAndBurn`, `computeSynchronizerFees`).
+    -- Amulet burning and fee computation are reused unchanged (`splitAndBurn`, `computeSynchronizerFees`).
     nonconsuming choice AmuletRules_BuyDedicatedSyncTraffic : AmuletRules_BuyDedicatedSyncTrafficResult
       with
         inputs : [TransferInput] -- ^ amulet inputs funding the burn
         context : TransferContext -- ^ standard transfer context (open mining round, etc.)
-        provider : Party -- ^ the buyer; burns CC from its own balance
+        provider : Party -- ^ the buyer; burns Amulet from its own balance
         memberId : Text -- ^ participant whose dedicated-sync traffic is credited (need not be `provider`)
         migrationId : Int
         trafficAmount : Int
