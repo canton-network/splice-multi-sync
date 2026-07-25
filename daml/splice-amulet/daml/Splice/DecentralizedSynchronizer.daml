@@ -4,6 +4,7 @@
 -- | Types and contracts for managing synchronizer fees
 module Splice.DecentralizedSynchronizer where
 
+import DA.Optional (optionalToList)
 import qualified DA.Set as Set
 import DA.Text as T
 import DA.Time
@@ -64,8 +65,14 @@ template MemberTraffic with
     numPurchases : Int -- ^ Number of times extra traffic has been purchased
     amuletSpent : Decimal -- ^ Total Amulet spent on extra traffic
     usdSpent : Decimal -- ^ Total USD spent on extra traffic
+    operator : Optional Party
+      -- ^ For traffic purchased for a governance-registered synchronizer (see
+      -- `RegisteredSynchronizer`): its operator, made an observer of this contract so the
+      -- operator's node can ingest the purchase on-ledger. `None` for traffic on the
+      -- decentralized synchronizer itself. Appended last so existing contracts upgrade cleanly.
   where
     signatory dso
+    observer (optionalToList operator)
 
     ensure totalPurchased >= 0
       && numPurchases >= 0
@@ -76,8 +83,8 @@ template MemberTraffic with
       && not (T.isEmpty synchronizerId)
 
 
-initialMemberTraffic : Party -> Text -> Text -> Int -> MemberTraffic
-initialMemberTraffic dso memberId synchronizerId migrationId = MemberTraffic with
+initialMemberTraffic : Party -> Text -> Text -> Int -> Optional Party -> MemberTraffic
+initialMemberTraffic dso memberId synchronizerId migrationId operator = MemberTraffic with
     dso
     memberId
     migrationId
@@ -86,6 +93,7 @@ initialMemberTraffic dso memberId synchronizerId migrationId = MemberTraffic wit
     numPurchases = 0
     amuletSpent = 0.0
     usdSpent = 0.0
+    operator
 
 data ForMemberTraffic = ForMemberTraffic with
     dso : Party
@@ -110,9 +118,10 @@ instance HasCheckedFetch MemberTraffic ForMemberTraffic where
 --
 -- The registration binds a stable synchronizer id to the `operator` party that runs it. Two
 -- consumers read it:
---   * `AmuletRules_BuyDedicatedSyncTraffic` (splice-amulet) authorizes an Amulet burn for a
---     synchronizer id only if a matching `RegisteredSynchronizer` is supplied (via explicit
---     disclosure), and uses `operator` as the observer of the resulting traffic record.
+--   * `AmuletRules_BuyMemberTraffic` (splice-amulet) accepts a matching `RegisteredSynchronizer`
+--     (via explicit disclosure) as authorization for a synchronizer id outside
+--     `requiredSynchronizers`, and sets its `operator` as an observer on the `MemberTraffic`
+--     it creates.
 --   * the `operator` itself, which observes this contract and thus learns it is registered.
 --
 -- This template lives in splice-amulet (not the DSO governance package) so that `AmuletRules` can
@@ -124,7 +133,7 @@ template RegisteredSynchronizer with
       -- ^ Id of the dedicated synchronizer this registration authorizes Amulet-funded traffic for.
     operator : Party
       -- ^ The party operating the dedicated synchronizer. Observes this registration and every
-      --   traffic purchase for its synchronizer (see `DedicatedSyncTraffic`).
+      --   traffic purchase for its synchronizer (via the `operator` field on `MemberTraffic`).
   where
     signatory dso
     observer operator
@@ -132,7 +141,7 @@ template RegisteredSynchronizer with
     ensure not (T.isEmpty synchronizerId)
 
     -- Public read choice, mirroring OpenMiningRound_Fetch: lets a buyer who is neither
-    -- signatory nor observer read this contract inside AmuletRules_BuyDedicatedSyncTraffic
+    -- signatory nor observer read this contract inside AmuletRules_BuyMemberTraffic
     -- when it is passed via explicit disclosure. Returns the contract unchanged.
     -- (Plain comment, not a `-- |` doc comment: damlc docs rejects a doc comment attached
     -- directly to a choice.)
@@ -146,37 +155,6 @@ template RegisteredSynchronizer with
 -- so reads are validated against the expected DSO party (mirrors the `MemberTraffic` group-id check).
 instance HasCheckedFetch RegisteredSynchronizer ForDso where
     contractGroupId RegisteredSynchronizer{..} = ForDso with ..
-
--- PoC (dedicated-synchronizer traffic): the record of extra traffic purchased for a dedicated
--- synchronizer. It mirrors `MemberTraffic` but is OBSERVED by the synchronizer's operator, so the
--- operator's node can ingest purchases on-ledger (event-driven, no polling). It is a SEPARATE
--- template so the shared `MemberTraffic` (and its many Scala/TS codegen consumers) is untouched by
--- this PoC. Created by `AmuletRules_BuyDedicatedSyncTraffic`.
-template DedicatedSyncTraffic with
-    dso : Party
-      -- ^ signatory; the DSO party of the decentralized synchronizer where the Amulet was burned
-    operator : Party
-      -- ^ observer; the dedicated synchronizer's operator (taken from the `RegisteredSynchronizer`)
-    memberId : Text
-      -- ^ the participant (member) whose dedicated-sync traffic was bought
-    synchronizerId : Text
-      -- ^ the dedicated synchronizer this traffic is for (taken from the `RegisteredSynchronizer`)
-    migrationId : Int
-    totalPurchased : Int -- ^ bytes of extra traffic bought
-    numPurchases : Int
-    amuletSpent : Decimal -- ^ Amulet burned for this purchase
-    usdSpent : Decimal -- ^ USD-equivalent cost
-  where
-    signatory dso
-    observer operator
-
-    ensure totalPurchased >= 0
-      && numPurchases >= 0
-      && amuletSpent >= 0.0
-      && usdSpent >= 0.0
-      && migrationId >= 0
-      && not (T.isEmpty memberId)
-      && not (T.isEmpty synchronizerId)
 
 instance Patchable BaseRateTrafficLimits where
   patch new base current = BaseRateTrafficLimits with

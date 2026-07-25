@@ -276,12 +276,33 @@ template AmuletRules
         -- Party that the sender expects to represent the DSO party of the AmuletRules contract they are calling.
         -- Must always be set to protect from malicious delegees swapping the AmuletRules contract out for
         -- one under their control.
+        optRegisteredSynchronizer : Optional (ContractId RegisteredSynchronizer)
+        -- For traffic on a governance-registered synchronizer (see `RegisteredSynchronizer`): the
+        -- registration authorizing it, supplied via explicit disclosure. It replaces the
+        -- `requiredSynchronizers` gate for the given synchronizer id, and its `operator` becomes an
+        -- observer of the created `MemberTraffic`. `None` buys traffic on the decentralized
+        -- synchronizer exactly as before. Appended last so existing callers upgrade cleanly.
       controller provider
       do
         checkExpectedDso dso expectedDso
+        -- For a governance-registered synchronizer, the disclosed registration both authorizes the
+        -- synchronizer id and names the operator that observes the purchase record.
+        -- `RegisteredSynchronizer_Fetch` lets `provider` read a contract it is not a stakeholder of,
+        -- mirroring how `computeSynchronizerFees` reads the OpenMiningRound.
+        optOperator <- case optRegisteredSynchronizer of
+          None -> pure None
+          Some registeredCid -> do
+            registered <- fetchPublicReferenceData (ForDso dso) registeredCid (RegisteredSynchronizer_Fetch provider)
+            require "RegisteredSynchronizer matches the synchronizer id of the purchase"
+              (registered.synchronizerId == synchronizerId)
+            pure (Some registered.operator)
         -- validate choice parameters
         configUsd <- getValueAsOfLedgerTime configSchedule
-        case validateBuyMemberTrafficInputs configUsd synchronizerId trafficAmount of
+        let validation = case optRegisteredSynchronizer of
+              -- the registration replaces the `requiredSynchronizers` gate; the min-topup floor still applies
+              Some _ -> validateMinTopupAmount configUsd trafficAmount
+              None -> validateBuyMemberTrafficInputs configUsd synchronizerId trafficAmount
+        case validation of
           Left failureStatus -> failWithStatus failureStatus
           Right _ -> pure ()
         (trafficCostAmulet, trafficCostUsd) <- computeSynchronizerFees dso provider trafficAmount this context
@@ -296,6 +317,7 @@ template AmuletRules
           numPurchases = 1
           amuletSpent = trafficCostAmulet
           usdSpent =  trafficCostUsd
+          operator = optOperator
         -- return result
         return AmuletRules_BuyMemberTrafficResult with
           round = transferResult.round
@@ -304,62 +326,6 @@ template AmuletRules
           purchasedTraffic
           senderChangeAmulet = transferResult.senderChangeAmulet
           meta = Some meta
-
-    -- PoC (dedicated-synchronizer traffic): buy extra traffic for a DEDICATED (non-decentralized)
-    -- synchronizer that has been registered via governance (see `RegisteredSynchronizer` and
-    -- `DsoRules_RegisterSynchronizer`, rung 1). This is a sibling of `AmuletRules_BuyMemberTraffic`;
-    -- the differences are:
-    --   * the target synchronizer is authorized by a disclosed `RegisteredSynchronizer` contract
-    --     rather than by membership in `requiredSynchronizers` (which today holds only the decentralized sync);
-    --   * the created record (`DedicatedSyncTraffic`) is OBSERVED by the synchronizer's operator so
-    --     the operator's node can ingest the purchase on-ledger.
-    -- Amulet burning and fee computation are reused unchanged (`splitAndBurn`, `computeSynchronizerFees`).
-    nonconsuming choice AmuletRules_BuyDedicatedSyncTraffic : AmuletRules_BuyDedicatedSyncTrafficResult
-      with
-        inputs : [TransferInput] -- ^ amulet inputs funding the burn
-        context : TransferContext -- ^ standard transfer context (open mining round, etc.)
-        provider : Party -- ^ the buyer; burns Amulet from its own balance
-        memberId : Text -- ^ participant whose dedicated-sync traffic is credited (need not be `provider`)
-        migrationId : Int
-        trafficAmount : Int
-        registeredSynchronizerCid : ContractId RegisteredSynchronizer
-          -- ^ the registration authorizing this synchronizer; supplied via explicit disclosure
-        expectedDso : Optional Party -- ^ guards against a swapped-out AmuletRules (as in BuyMemberTraffic)
-      controller provider
-      do
-        checkExpectedDso dso expectedDso
-        -- Read the registration (disclosed). Its `synchronizerId` is authoritative and its `operator`
-        -- becomes the observer. `RegisteredSynchronizer_Fetch` lets `provider` read a contract it is
-        -- not a stakeholder of, mirroring how `computeSynchronizerFees` reads the OpenMiningRound.
-        registered <- fetchPublicReferenceData (ForDso dso) registeredSynchronizerCid (RegisteredSynchronizer_Fetch provider)
-        let synchronizerId = registered.synchronizerId
-        -- Only the min-topup floor applies here; the `requiredSynchronizers` gate is intentionally
-        -- skipped because the `RegisteredSynchronizer` is what authorizes this synchronizer id.
-        configUsd <- getValueAsOfLedgerTime configSchedule
-        case validateDedicatedSyncTopupAmount configUsd trafficAmount of
-          Left failureStatus -> failWithStatus failureStatus
-          Right _ -> pure ()
-        (trafficCostAmulet, trafficCostUsd) <- computeSynchronizerFees dso provider trafficAmount this context
-        (transferResult, meta) <- splitAndBurn (toInterfaceContractId self) provider trafficCostAmulet inputs context dso "dedicated sync traffic purchase"
-        -- Record the purchase, observed by the operator so its node can pick it up on-ledger.
-        dedicatedTraffic <- create DedicatedSyncTraffic with
-          dso
-          operator = registered.operator
-          memberId
-          synchronizerId
-          migrationId
-          totalPurchased = trafficAmount
-          numPurchases = 1
-          amuletSpent = trafficCostAmulet
-          usdSpent = trafficCostUsd
-        return AmuletRules_BuyDedicatedSyncTrafficResult with
-          round = transferResult.round
-          summary = transferResult.summary
-          amuletPaid = trafficCostAmulet
-          dedicatedTraffic
-          senderChangeAmulet = transferResult.senderChangeAmulet
-          meta = Some meta
-
 
     nonconsuming choice AmuletRules_MergeMemberTrafficContracts : AmuletRules_MergeMemberTrafficContractsResult
       with
@@ -377,6 +343,9 @@ template AmuletRules
                 migrationId = first.migrationId
           fetchAndArchive expectedTrafficContract trafficCid
         let traffics = first::rest
+        -- all merged contracts must agree on the operator observer, which carries through the merge
+        require "Operator matches across all merged member traffic contracts"
+          (all (\traffic -> traffic.operator == first.operator) traffics)
 
         -- create a new aggregated member traffic contract.
         let mergedTraffic = foldl (\acc traffic -> MemberTraffic with
@@ -388,7 +357,8 @@ template AmuletRules
                 numPurchases = acc.numPurchases + traffic.numPurchases
                 usdSpent = acc.usdSpent + traffic.usdSpent
                 amuletSpent = acc.amuletSpent + traffic.amuletSpent
-              ) (initialMemberTraffic dso first.memberId first.synchronizerId first.migrationId) traffics
+                operator = acc.operator
+              ) (initialMemberTraffic dso first.memberId first.synchronizerId first.migrationId first.operator) traffics
         mergedTrafficCid <- create mergedTraffic
         return AmuletRules_MergeMemberTrafficContractsResult with ..
 
@@ -1774,15 +1744,12 @@ validateBuyMemberTrafficInputs : AmuletConfig Unit.USD -> Text -> Int -> Either 
 validateBuyMemberTrafficInputs configUsd synchronizerId trafficAmount
   | not (synchronizerId `Set.member` configUsd.decentralizedSynchronizer.requiredSynchronizers) =
       Left $ mkUnknownSynchronizerFailure synchronizerId
-  | trafficAmount < configUsd.decentralizedSynchronizer.fees.minTopupAmount =
-      Left $ mkInsufficientTopupAmountFailure trafficAmount configUsd.decentralizedSynchronizer.fees.minTopupAmount
-  | otherwise = Right ()
+  | otherwise = validateMinTopupAmount configUsd trafficAmount
 
--- PoC (dedicated-synchronizer traffic): like `validateBuyMemberTrafficInputs` but WITHOUT the
--- `requiredSynchronizers` gate. `AmuletRules_BuyDedicatedSyncTraffic` authorizes the synchronizer via
--- a `RegisteredSynchronizer` contract instead, so only the `minTopupAmount` floor is enforced here.
-validateDedicatedSyncTopupAmount : AmuletConfig Unit.USD -> Int -> Either FailureStatus ()
-validateDedicatedSyncTopupAmount configUsd trafficAmount
+-- The `minTopupAmount` floor on its own: for purchases authorized by a disclosed
+-- `RegisteredSynchronizer` the `requiredSynchronizers` gate does not apply, but the floor does.
+validateMinTopupAmount : AmuletConfig Unit.USD -> Int -> Either FailureStatus ()
+validateMinTopupAmount configUsd trafficAmount
   | trafficAmount < configUsd.decentralizedSynchronizer.fees.minTopupAmount =
       Left $ mkInsufficientTopupAmountFailure trafficAmount configUsd.decentralizedSynchronizer.fees.minTopupAmount
   | otherwise = Right ()
@@ -1953,17 +1920,6 @@ data AmuletRules_BuyMemberTrafficResult = AmuletRules_BuyMemberTrafficResult wit
     summary : TransferSummary
     amuletPaid : Decimal
     purchasedTraffic : ContractId MemberTraffic
-    senderChangeAmulet : Optional (ContractId Amulet)
-    meta : Optional Metadata
-  deriving (Show, Eq)
-
--- | Result of `AmuletRules_BuyDedicatedSyncTraffic` (PoC). Same shape as
---   `AmuletRules_BuyMemberTrafficResult` but returns the `DedicatedSyncTraffic` cid.
-data AmuletRules_BuyDedicatedSyncTrafficResult = AmuletRules_BuyDedicatedSyncTrafficResult with
-    round : Round
-    summary : TransferSummary
-    amuletPaid : Decimal
-    dedicatedTraffic : ContractId DedicatedSyncTraffic
     senderChangeAmulet : Optional (ContractId Amulet)
     meta : Optional Metadata
   deriving (Show, Eq)

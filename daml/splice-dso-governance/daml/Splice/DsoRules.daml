@@ -1694,7 +1694,7 @@ template DsoRules with
 
     -- PoC (dedicated-synchronizer traffic): governed registration of a dedicated synchronizer.
     -- Creates a RegisteredSynchronizer (in splice-amulet) binding synchronizerId to its
-    -- operator. This is the only way the registry is populated; AmuletRules_BuyDedicatedSyncTraffic
+    -- operator. This is the only way the registry is populated; AmuletRules_BuyMemberTraffic
     -- then reads that contract (via explicit disclosure) to authorize Amulet burns for the synchronizer.
     -- the controller is the DSO party and the choice is nonconsuming: a vote reaches this via
     -- executeActionRequiringConfirmation, and the DsoRules contract is not archived by exercising it.
