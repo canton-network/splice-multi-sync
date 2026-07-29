@@ -193,6 +193,39 @@ test_BuyRegisteredSyncTraffic_belowMinTopup = do
       expectedDso = Some app.dso
       optRegisteredSynchronizer = Some registeredCid
 
+-- | Negative: a registered synchronizer has no migration history — its purchases must carry
+--   `migrationId = 0`. A non-zero id is rejected (it would create a record the operator's
+--   reconciler never counts).
+test_BuyRegisteredSyncTraffic_nonZeroMigrationId : Script ()
+test_BuyRegisteredSyncTraffic_nonZeroMigrationId = do
+  d <- setupDefaultAppWithUsers
+  let app = d.app
+  let provider = d.provider1
+  runNextIssuance app
+
+  operator <- allocateParty "registeredSyncOperator"
+  let registeredSyncId = "registered-sync::1220adadadadadadadadadadadadadadadadadadadadadadadadadadadadadad"
+  registeredCid <- submit app.dso $ createCmd RegisteredSynchronizer with
+    dso = app.dso
+    synchronizerId = registeredSyncId
+    operator
+
+  amuletCid <- tap app provider 1_000_000.0
+  context <- getTransferContext app provider None
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+
+  submitMustFail (actAs provider.primaryParty <> readAs app.dso) $
+    exerciseCmd amuletRulesCid AmuletRules_BuyMemberTraffic with
+      inputs = [InputAmulet amuletCid]
+      context
+      provider = provider.primaryParty
+      memberId = "PAR::participant::1220efefefefefefefefefefefefefefefefefefefefefefefefefefefefefef"
+      synchronizerId = registeredSyncId
+      migrationId = 1 -- registered synchronizers must use migrationId 0
+      trafficAmount = 1_000_000
+      expectedDso = Some app.dso
+      optRegisteredSynchronizer = Some registeredCid
+
 -- | Negative: the expected DSO party argument guards against a swapped-out AmuletRules. A
 --   mismatched expected DSO party (here, a party that is not the DSO party) is rejected before
 --   any Amulet burn.

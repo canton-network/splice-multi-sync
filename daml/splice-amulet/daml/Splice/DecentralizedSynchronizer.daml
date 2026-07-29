@@ -69,7 +69,7 @@ template MemberTraffic with
       -- ^ For traffic purchased for a governance-registered synchronizer (see
       -- `RegisteredSynchronizer`): its operator, made an observer of this contract so the
       -- operator's node can ingest the purchase on-ledger. `None` for traffic on the
-      -- decentralized synchronizer itself. Appended last so existing contracts upgrade cleanly.
+      -- decentralized synchronizer itself.
   where
     signatory dso
     observer (optionalToList operator)

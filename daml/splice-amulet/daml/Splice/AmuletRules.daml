@@ -281,7 +281,7 @@ template AmuletRules
         -- registration authorizing it, supplied via explicit disclosure. It replaces the
         -- `requiredSynchronizers` gate for the given synchronizer id, and its `operator` becomes an
         -- observer of the created `MemberTraffic`. `None` buys traffic on the decentralized
-        -- synchronizer exactly as before. Appended last so existing callers upgrade cleanly.
+        -- synchronizer.
       controller provider
       do
         checkExpectedDso dso expectedDso
@@ -289,22 +289,14 @@ template AmuletRules
         -- synchronizer id and names the operator that observes the purchase record.
         -- `RegisteredSynchronizer_Fetch` lets `provider` read a contract it is not a stakeholder of,
         -- mirroring how `computeSynchronizerFees` reads the OpenMiningRound.
-        optOperator <- case optRegisteredSynchronizer of
-          None -> pure None
-          Some registeredCid -> do
-            registered <- fetchPublicReferenceData (ForDso dso) registeredCid (RegisteredSynchronizer_Fetch provider)
-            require "RegisteredSynchronizer matches the synchronizer id of the purchase"
-              (registered.synchronizerId == synchronizerId)
-            pure (Some registered.operator)
+        optRegistered <- forA optRegisteredSynchronizer $ \registeredCid ->
+          fetchPublicReferenceData (ForDso dso) registeredCid (RegisteredSynchronizer_Fetch provider)
         -- validate choice parameters
         configUsd <- getValueAsOfLedgerTime configSchedule
-        let validation = case optRegisteredSynchronizer of
-              -- the registration replaces the `requiredSynchronizers` gate; the min-topup floor still applies
-              Some _ -> validateMinTopupAmount configUsd trafficAmount
-              None -> validateBuyMemberTrafficInputs configUsd synchronizerId trafficAmount
-        case validation of
+        case validateBuyMemberTrafficInputs configUsd optRegistered synchronizerId migrationId trafficAmount of
           Left failureStatus -> failWithStatus failureStatus
           Right _ -> pure ()
+        let optOperator = fmap (\registered -> registered.operator) optRegistered
         (trafficCostAmulet, trafficCostUsd) <- computeSynchronizerFees dso provider trafficAmount this context
         (transferResult, meta) <- splitAndBurn (toInterfaceContractId self) provider trafficCostAmulet inputs context dso "traffic purchase"
         -- create a new MemberTraffic contract for the purchased traffic
@@ -343,7 +335,9 @@ template AmuletRules
                 migrationId = first.migrationId
           fetchAndArchive expectedTrafficContract trafficCid
         let traffics = first::rest
-        -- all merged contracts must agree on the operator observer, which carries through the merge
+        -- defence in depth: contracts for the same synchronizer always name the same operator, so
+        -- this never triggers unless duplicate registrations exist; refusing the merge keeps a
+        -- mixed-operator set visible instead of silently blending it
         require "Operator matches across all merged member traffic contracts"
           (all (\traffic -> traffic.operator == first.operator) traffics)
 
@@ -1092,6 +1086,24 @@ mkInsufficientTopupAmountFailure requestedAmount minAmount =
       , ("minTopupAmount", show minAmount)
       ])
 
+mkRegisteredSynchronizerMismatchFailure : Text -> Text -> FailureStatus
+mkRegisteredSynchronizerMismatchFailure registeredId requestedId =
+  mkFailureStatus
+    (spliceErrorId "registered-synchronizer-mismatch")
+    InvalidIndependentOfSystemState
+    ("The disclosed registration is for synchronizer " <> registeredId
+      <> " but the purchase names synchronizer " <> requestedId)
+    (TextMap.fromList [("registeredSynchronizerId", registeredId), ("synchronizerId", requestedId)])
+
+mkNonZeroMigrationIdFailure : Int -> FailureStatus
+mkNonZeroMigrationIdFailure migrationId =
+  mkFailureStatus
+    (spliceErrorId "non-zero-migration-id")
+    InvalidIndependentOfSystemState
+    ("Traffic for a registered synchronizer must be bought with migrationId 0, got "
+      <> show migrationId)
+    (TextMap.fromList [("migrationId", show migrationId)])
+
 mkMaximumInputsExceededFailure : FailureStatus
 mkMaximumInputsExceededFailure =
   mkFailureStatus
@@ -1740,19 +1752,27 @@ transferConfigAmuletFromExternalPartyConfigState : ExternalPartyConfigState -> T
 transferConfigAmuletFromExternalPartyConfigState externalPartyConfigState =
   scaleFees2 (1.0 / externalPartyConfigState.amuletPrice) externalPartyConfigState.transferConfig
 
-validateBuyMemberTrafficInputs : AmuletConfig Unit.USD -> Text -> Int -> Either FailureStatus ()
-validateBuyMemberTrafficInputs configUsd synchronizerId trafficAmount
-  | not (synchronizerId `Set.member` configUsd.decentralizedSynchronizer.requiredSynchronizers) =
-      Left $ mkUnknownSynchronizerFailure synchronizerId
-  | otherwise = validateMinTopupAmount configUsd trafficAmount
-
--- The `minTopupAmount` floor on its own: for purchases authorized by a disclosed
--- `RegisteredSynchronizer` the `requiredSynchronizers` gate does not apply, but the floor does.
-validateMinTopupAmount : AmuletConfig Unit.USD -> Int -> Either FailureStatus ()
-validateMinTopupAmount configUsd trafficAmount
+-- All validation for buying member traffic, for both the decentralized synchronizer and
+-- governance-registered synchronizers:
+--   * the `minTopupAmount` floor applies in all cases;
+--   * without a registration, the synchronizer id must be in `requiredSynchronizers`;
+--   * with a registration, the synchronizer id must match the registration's, and `migrationId`
+--     must be 0 (migration ids exist for the decentralized synchronizer's history of migrations
+--     with downtime; registered synchronizers always use 0).
+validateBuyMemberTrafficInputs : AmuletConfig Unit.USD -> Optional RegisteredSynchronizer -> Text -> Int -> Int -> Either FailureStatus ()
+validateBuyMemberTrafficInputs configUsd optRegistered synchronizerId migrationId trafficAmount
   | trafficAmount < configUsd.decentralizedSynchronizer.fees.minTopupAmount =
       Left $ mkInsufficientTopupAmountFailure trafficAmount configUsd.decentralizedSynchronizer.fees.minTopupAmount
-  | otherwise = Right ()
+  | otherwise = case optRegistered of
+      None
+        | synchronizerId `Set.member` configUsd.decentralizedSynchronizer.requiredSynchronizers -> Right ()
+        | otherwise -> Left $ mkUnknownSynchronizerFailure synchronizerId
+      Some registered
+        | registered.synchronizerId /= synchronizerId ->
+            Left $ mkRegisteredSynchronizerMismatchFailure registered.synchronizerId synchronizerId
+        | migrationId /= 0 ->
+            Left $ mkNonZeroMigrationIdFailure migrationId
+        | otherwise -> Right ()
 
 -- | Computing synchronizer fees
 computeSynchronizerFees : Party -> Party -> Int -> AmuletRules -> TransferContext -> Update (Decimal, Decimal)
