@@ -109,6 +109,8 @@ data AmuletRules_ClaimExpiredRewardsV2Result = AmuletRules_ClaimExpiredRewardsV2
 
 data AmuletRules_StartProcessingRewardsV2Result = AmuletRules_StartProcessingRewardsV2Result {}
 
+data AmuletRules_StartProcessingExtensionRewardsV2Result = AmuletRules_StartProcessingExtensionRewardsV2Result {}
+
 data AmuletRules_UnhideRewardCouponsV2Result = AmuletRules_UnhideRewardCouponsV2Result {}
 
 data AmuletRules_ArchiveDryRunRewardAccountingV2Result = AmuletRules_ArchiveDryRunRewardAccountingV2Result {}
@@ -750,8 +752,39 @@ template AmuletRules
           dryRun = calculateRewards.dryRun
           rewardCouponTimeToLive = calculateRewards.rewardCouponTimeToLive
           batchHash
+          expander = None
+          issuancePerActivityUnit = None
 
         return AmuletRules_StartProcessingRewardsV2Result {}
+
+    -- PoC (extension reward reporting): start reward processing for a registered synchronizer's
+    -- reported activity. Consumes the operator's report and creates the root ProcessRewardsV2
+    -- with the operator as expander and the issuance rate computed by DSO automation; the operator then expands
+    -- its committed batches into RewardCouponV2 contracts. The rate computation (app-reward
+    -- tranche split by burn share, the voted per-synchronizer weight, and the reported-vs-purchased
+    -- cap) happens off-ledger in the SV apps before this action is confirmed.
+    nonconsuming choice AmuletRules_StartProcessingExtensionRewardsV2 : AmuletRules_StartProcessingExtensionRewardsV2Result
+      with
+        reportCid : ContractId ExtensionActivityReport
+        issuancePerActivityUnit : Decimal -- ^ Amulet minted per unit of reported activity weight
+        rewardCouponTimeToLive : RelTime
+        dryRun : Bool
+      controller dso
+      do
+        require "issuance rate is positive" (issuancePerActivityUnit > 0.0)
+        report <- fetchAndArchive (ForDso with dso) reportCid
+        now <- getTime
+        create ProcessRewardsV2 with
+          dso
+          round = report.round
+          roundClosedAt = now
+          dryRun
+          rewardCouponTimeToLive
+          batchHash = report.activityRootHash
+          expander = Some report.operator
+          issuancePerActivityUnit = Some issuancePerActivityUnit
+
+        return AmuletRules_StartProcessingExtensionRewardsV2Result {}
 
     -- batch conversion of coupons not yet observable by their providers
     nonconsuming choice AmuletRules_UnhideRewardCouponsV2 : AmuletRules_UnhideRewardCouponsV2Result

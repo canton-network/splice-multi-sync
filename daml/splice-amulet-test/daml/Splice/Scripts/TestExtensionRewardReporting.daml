@@ -1,0 +1,189 @@
+-- Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- | PoC (extension reward reporting): a registered synchronizer's operator reports its per-round
+--   activity on the decentralized synchronizer as a Merkle root-hash commitment plus total, the
+--   DSO party starts reward processing with an issuance rate, and the operator expands its
+--   committed batches into `RewardCouponV2` contracts (amount = activity weight * rate).
+--
+--   The registration itself (rung 1) and the vote plumbing are exercised elsewhere; here the
+--   reporting state is created directly as the DSO party and the start-processing choice is
+--   exercised directly, to isolate the reporting and expansion mechanics.
+module Splice.Scripts.TestExtensionRewardReporting where
+
+import DA.Assert
+import DA.Foldable (forA_)
+import qualified DA.Set as Set
+import DA.Time
+
+import Daml.Script
+
+import Splice.Amulet (RewardCouponV2(..))
+import Splice.Amulet.CryptoHash qualified as CryptoHash
+import Splice.Amulet.RewardAccountingV2
+import Splice.AmuletRules
+import Splice.DecentralizedSynchronizer
+import Splice.Types (Round(..))
+
+import Splice.Scripts.Util
+
+testSyncId : Text
+testSyncId = "registered-sync::1220fafafafafafafafafafafafafafafafafafafafafafafafafafafafafafa"
+
+-- | Common setup: app, an operator with a reporting state, two featured providers, and a
+--   two-level batch tree over activity weights (10 + 30 for the providers, 10 for the operator's
+--   own cut), reported for round 1.
+setupReportedActivity : Script (AmuletApp, Party, Party, Party, ContractId ExtensionActivityReport, Batch, Batch, Batch)
+setupReportedActivity = do
+  d <- setupDefaultAppWithUsers
+  let app = d.app
+  operator <- allocateParty "registeredSyncOperator"
+  featuredA <- allocateParty "featuredAppA"
+  featuredB <- allocateParty "featuredAppB"
+
+  stateCid <- submit app.dso $ createCmd DedicatedSynchronizerState with
+    dso = app.dso
+    synchronizerId = testSyncId
+    operator
+    lastReportedRound = None
+    totalActivityReported = 0.0
+
+  -- the operator's committed tree: leaves are activity weights, not Amulet
+  let leaf1 = BatchOfMintingAllowances
+        [ MintingAllowance with provider = featuredA; amount = 10.0
+        , MintingAllowance with provider = featuredB; amount = 30.0
+        ]
+      leaf2 = BatchOfMintingAllowances
+        [ MintingAllowance with provider = operator; amount = 10.0 ]
+      root = BatchOfBatches [CryptoHash.hash leaf1, CryptoHash.hash leaf2]
+
+  result <- submit operator $ exerciseCmd stateCid DedicatedSynchronizerState_ReportActivity with
+    round = Round 1
+    activityRootHash = CryptoHash.hash root
+    totalActivity = 50.0
+
+  -- the report is on-ledger and the running state advanced
+  Some st <- queryContractId app.dso result.stateCid
+  st.lastReportedRound === Some (Round 1)
+  st.totalActivityReported === 50.0
+
+  pure (app, operator, featuredA, featuredB, result.reportCid, root, leaf1, leaf2)
+
+-- | Happy path: report -> start processing at a rate -> operator expands root and leaves ->
+--   coupons carry weight * rate.
+test_ReportAndExpand : Script ()
+test_ReportAndExpand = do
+  (app, operator, featuredA, featuredB, reportCid, root, leaf1, leaf2) <- setupReportedActivity
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+
+  submit app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
+    reportCid
+    issuancePerActivityUnit = 2.0
+    rewardCouponTimeToLive = days 30
+    dryRun = False
+
+  -- the report is consumed; the root ProcessRewardsV2 names the operator as expander
+  None <- queryContractId app.dso reportCid
+  [(rootCid, rootState)] <- query @ProcessRewardsV2 operator
+  rootState.expander === Some operator
+  rootState.batchHash === CryptoHash.hash root
+  rootState.issuancePerActivityUnit === Some 2.0
+  rootState.round === Round 1
+
+  -- operator expands the root, then each leaf (matching contracts by committed hash)
+  submit operator $ exerciseCmd rootCid ProcessRewardsV2_ProcessBatch with
+    batch = root
+    providersWithWrongVettingState = Set.empty
+  children <- query @ProcessRewardsV2 operator
+  length children === 2
+  forA_ children $ \(cid, st) -> do
+    let batch = if st.batchHash == CryptoHash.hash leaf1 then leaf1 else leaf2
+    CryptoHash.hash batch === st.batchHash
+    submit operator $ exerciseCmd cid ProcessRewardsV2_ProcessBatch with
+      batch
+      providersWithWrongVettingState = Set.empty
+  [] <- query @ProcessRewardsV2 operator
+
+  -- coupons mint at weight * rate
+  couponsA <- query @RewardCouponV2 featuredA
+  map (\(_, c) -> (c.provider, c.amount, c.round)) couponsA === [(featuredA, 20.0, Round 1)]
+  couponsB <- query @RewardCouponV2 featuredB
+  map (\(_, c) -> c.amount) couponsB === [60.0]
+  couponsOp <- query @RewardCouponV2 operator
+  map (\(_, c) -> c.amount) couponsOp === [20.0]
+
+-- | Reports must use strictly increasing rounds; totals accumulate across reports.
+test_Report_monotonicRounds : Script ()
+test_Report_monotonicRounds = do
+  (app, operator, _, _, _, _, _, _) <- setupReportedActivity
+  [(stateCid, _)] <- query @DedicatedSynchronizerState operator
+
+  -- same round again: rejected
+  submitMustFail operator $ exerciseCmd stateCid DedicatedSynchronizerState_ReportActivity with
+    round = Round 1
+    activityRootHash = CryptoHash.hash (BatchOfMintingAllowances [])
+    totalActivity = 1.0
+  -- earlier round: rejected
+  submitMustFail operator $ exerciseCmd stateCid DedicatedSynchronizerState_ReportActivity with
+    round = Round 0
+    activityRootHash = CryptoHash.hash (BatchOfMintingAllowances [])
+    totalActivity = 1.0
+  -- negative total: rejected
+  submitMustFail operator $ exerciseCmd stateCid DedicatedSynchronizerState_ReportActivity with
+    round = Round 2
+    activityRootHash = CryptoHash.hash (BatchOfMintingAllowances [])
+    totalActivity = -1.0
+  -- next round: accepted, running total accumulates
+  result <- submit operator $ exerciseCmd stateCid DedicatedSynchronizerState_ReportActivity with
+    round = Round 2
+    activityRootHash = CryptoHash.hash (BatchOfMintingAllowances [])
+    totalActivity = 7.0
+  Some st <- queryContractId app.dso result.stateCid
+  st.lastReportedRound === Some (Round 2)
+  st.totalActivityReported === 57.0
+  -- only the operator can report
+  submitMustFail app.dso $ exerciseCmd result.stateCid DedicatedSynchronizerState_ReportActivity with
+    round = Round 3
+    activityRootHash = CryptoHash.hash (BatchOfMintingAllowances [])
+    totalActivity = 1.0
+
+-- | Expansion is bound to the commitment: a tampered batch fails the hash check, and only the
+--   expander can process extension batches (the DSO party cannot).
+test_Expand_hashAndAuthorization : Script ()
+test_Expand_hashAndAuthorization = do
+  (app, operator, featuredA, _, reportCid, root, leaf1, _) <- setupReportedActivity
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+
+  -- a non-positive rate is rejected up front
+  submitMustFail app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
+    reportCid
+    issuancePerActivityUnit = 0.0
+    rewardCouponTimeToLive = days 30
+    dryRun = False
+
+  submit app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
+    reportCid
+    issuancePerActivityUnit = 2.0
+    rewardCouponTimeToLive = days 30
+    dryRun = False
+  [(rootCid, _)] <- query @ProcessRewardsV2 operator
+
+  -- tampered pre-image: an inflated leaf in place of the committed root fails the hash check
+  let tampered = BatchOfMintingAllowances [MintingAllowance with provider = featuredA; amount = 1000000.0]
+  submitMustFail operator $ exerciseCmd rootCid ProcessRewardsV2_ProcessBatch with
+    batch = tampered
+    providersWithWrongVettingState = Set.empty
+  -- correct pre-image but wrong controller: the DSO party is not the expander
+  submitMustFail app.dso $ exerciseCmd rootCid ProcessRewardsV2_ProcessBatch with
+    batch = root
+    providersWithWrongVettingState = Set.empty
+  -- the committed pre-image from the expander works
+  submit operator $ exerciseCmd rootCid ProcessRewardsV2_ProcessBatch with
+    batch = root
+    providersWithWrongVettingState = Set.empty
+  -- a leaf batch cannot be replayed against the other leaf's hash
+  children <- query @ProcessRewardsV2 operator
+  let Some (wrongCid, _) = find (\(_, st) -> st.batchHash /= CryptoHash.hash leaf1) children
+  submitMustFail operator $ exerciseCmd wrongCid ProcessRewardsV2_ProcessBatch with
+    batch = leaf1
+    providersWithWrongVettingState = Set.empty

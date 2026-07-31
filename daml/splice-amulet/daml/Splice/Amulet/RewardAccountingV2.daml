@@ -14,6 +14,7 @@ module Splice.Amulet.RewardAccountingV2 where
 
 import DA.Action (unless)
 import DA.Foldable (forA_)
+import DA.Optional (fromOptional, optionalToList)
 import DA.Set as Set
 import DA.Time
 
@@ -69,8 +70,19 @@ template ProcessRewardsV2 with
     dryRun : Bool -- ^ Whether to only simulate the processing without creating any RewardCouponV2 contracts.
     rewardCouponTimeToLive : RelTime
     batchHash : CryptoHash.Hash
+    expander : Optional Party
+      -- ^ For a registered synchronizer's rewards (PoC, extension reward reporting): the
+      -- synchronizer's operator, the only party holding the committed batch data and thus the
+      -- one that processes the batches. `None` for the decentralized synchronizer's own rewards,
+      -- which the DSO party processes as before.
+    issuancePerActivityUnit : Optional Decimal
+      -- ^ For a registered synchronizer's rewards: the issuance rate computed by DSO automation. When set, the
+      -- committed batch amounts are activity weights and each coupon mints weight * rate; `None`
+      -- means the amounts are Amulet directly, as for the decentralized synchronizer.
   where
     signatory dso
+    -- the expander holds the committed batch data off-ledger and must see these contracts to act
+    observer (optionalToList expander)
 
     choice ProcessRewardsV2_ProcessBatch : ProcessRewardsV2_ProcessBatchResult
       with
@@ -78,7 +90,7 @@ template ProcessRewardsV2 with
         providersWithWrongVettingState : Set Party
           -- ^ Service providers that do not have the correct vetting state for receiving rewards.
       observer batchProviders providersWithWrongVettingState batch
-      controller dso
+      controller fromOptional dso expander
       do
         let actualHash = CryptoHash.hash batch
         require "batch hash matches" (actualHash == batchHash)
@@ -92,6 +104,8 @@ template ProcessRewardsV2 with
                 rewardCouponTimeToLive
                 dryRun
                 batchHash = newBatchHash
+                expander
+                issuancePerActivityUnit
           BatchOfMintingAllowances mintingAllowances -> do
             unless dryRun $ do
               -- Coupon expiry is determined here based on the time of creation to ensure
@@ -104,7 +118,8 @@ template ProcessRewardsV2 with
                   dso
                   round
                   provider
-                  amount
+                  -- committed amounts are activity weights when an issuance rate is set
+                  amount = optional amount (amount *) issuancePerActivityUnit
                   expiresAt
                   providerIsObserver =
                     not $ Set.member provider providersWithWrongVettingState
