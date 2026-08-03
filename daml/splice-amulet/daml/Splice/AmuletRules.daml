@@ -757,13 +757,14 @@ template AmuletRules
 
         return AmuletRules_StartProcessingRewardsV2Result {}
 
-    -- PoC (extension reward reporting): start reward processing for a registered synchronizer's
-    -- reported activity. Consumes the operator's report and creates the root ProcessRewardsV2
-    -- with the operator as expander and the issuance rate computed by DSO automation; the operator then expands
-    -- its committed batches into RewardCouponV2 contracts. The rate computation (app-reward
-    -- tranche split by burn share, the voted per-synchronizer weight, and the reported-vs-purchased
-    -- cap) happens off-ledger in the SV apps before this action is confirmed.
     nonconsuming choice AmuletRules_StartProcessingExtensionRewardsV2 : AmuletRules_StartProcessingExtensionRewardsV2Result
+      -- ^ PoC (extension reward reporting): start reward processing for a registered synchronizer's
+      -- reported activity. Consumes the operator's report and creates the root ProcessRewardsV2
+      -- with the operator as expander and the issuance rate computed by DSO automation; the
+      -- operator then expands its committed batches into RewardCouponV2 contracts. The rate
+      -- computation (app-reward tranche split by burn share, the voted per-synchronizer weight,
+      -- and the reported-vs-purchased cap) happens off-ledger in the SV apps before this action
+      -- is confirmed.
       with
         reportCid : ContractId ExtensionActivityReport
         issuancePerActivityUnit : Decimal -- ^ Amulet minted per unit of reported activity weight

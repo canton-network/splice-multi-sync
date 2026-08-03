@@ -65,7 +65,8 @@ template ProcessRewardsV2 with
     roundClosedAt : Time
       -- ^ The time at which the round was closed.
       --
-      -- Copied from the originating CalculateRewardsV2 contract.
+      -- Copied from the originating CalculateRewardsV2 contract; for a registered synchronizer's
+      -- rewards it is the time processing was started, as the reports carry no round-close time.
       -- We store this for ease of doing debugging and gathering metrics.
     dryRun : Bool -- ^ Whether to only simulate the processing without creating any RewardCouponV2 contracts.
     rewardCouponTimeToLive : RelTime

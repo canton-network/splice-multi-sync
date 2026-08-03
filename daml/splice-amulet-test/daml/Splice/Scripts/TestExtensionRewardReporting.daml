@@ -30,10 +30,22 @@ import Splice.Scripts.Util
 testSyncId : Text
 testSyncId = "registered-sync::1220fafafafafafafafafafafafafafafafafafafafafafafafafafafafafafa"
 
--- | Common setup: app, an operator with a reporting state, two featured providers, and a
---   two-level batch tree over activity weights (10 + 30 for the providers, 10 for the operator's
---   own cut), reported for round 1.
-setupReportedActivity : Script (AmuletApp, Party, Party, Party, ContractId ExtensionActivityReport, Batch, Batch, Batch)
+-- | Everything the tests need after an operator has reported: the app, the parties, the
+--   on-ledger report, and the committed tree (root + both leaves).
+data ReportedActivitySetup = ReportedActivitySetup with
+    app : AmuletApp
+    operator : Party
+    featuredA : Party
+    featuredB : Party
+    reportCid : ContractId ExtensionActivityReport
+    root : Batch
+    leaf1 : Batch
+    leaf2 : Batch
+
+-- | Common setup: an operator with a reporting state, two featured providers, and a two-level
+--   batch tree over activity weights (10 + 30 for the providers, 10 for the operator's own cut),
+--   reported for round 1.
+setupReportedActivity : Script ReportedActivitySetup
 setupReportedActivity = do
   d <- setupDefaultAppWithUsers
   let app = d.app
@@ -67,13 +79,13 @@ setupReportedActivity = do
   st.lastReportedRound === Some (Round 1)
   st.totalActivityReported === 50.0
 
-  pure (app, operator, featuredA, featuredB, result.reportCid, root, leaf1, leaf2)
+  pure ReportedActivitySetup with app; operator; featuredA; featuredB; reportCid = result.reportCid; root; leaf1; leaf2
 
 -- | Happy path: report -> start processing at a rate -> operator expands root and leaves ->
 --   coupons carry weight * rate.
 test_ReportAndExpand : Script ()
 test_ReportAndExpand = do
-  (app, operator, featuredA, featuredB, reportCid, root, leaf1, leaf2) <- setupReportedActivity
+  ReportedActivitySetup{..} <- setupReportedActivity
   (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
 
   submit app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
@@ -115,7 +127,7 @@ test_ReportAndExpand = do
 -- | Reports must use strictly increasing rounds; totals accumulate across reports.
 test_Report_monotonicRounds : Script ()
 test_Report_monotonicRounds = do
-  (app, operator, _, _, _, _, _, _) <- setupReportedActivity
+  ReportedActivitySetup{app, operator} <- setupReportedActivity
   [(stateCid, _)] <- query @DedicatedSynchronizerState operator
 
   -- same round again: rejected
@@ -151,7 +163,7 @@ test_Report_monotonicRounds = do
 --   expander can process extension batches (the DSO party cannot).
 test_Expand_hashAndAuthorization : Script ()
 test_Expand_hashAndAuthorization = do
-  (app, operator, featuredA, _, reportCid, root, leaf1, _) <- setupReportedActivity
+  ReportedActivitySetup{app, operator, featuredA, reportCid, root, leaf1} <- setupReportedActivity
   (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
 
   -- a non-positive rate is rejected up front
@@ -187,3 +199,27 @@ test_Expand_hashAndAuthorization = do
   submitMustFail operator $ exerciseCmd wrongCid ProcessRewardsV2_ProcessBatch with
     batch = leaf1
     providersWithWrongVettingState = Set.empty
+
+-- | Dry run: the whole expansion executes and consumes its contracts without minting coupons.
+test_Expand_dryRun : Script ()
+test_Expand_dryRun = do
+  ReportedActivitySetup{..} <- setupReportedActivity
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+  submit app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
+    reportCid
+    issuancePerActivityUnit = 2.0
+    rewardCouponTimeToLive = days 30
+    dryRun = True
+  [(rootCid, _)] <- query @ProcessRewardsV2 operator
+  submit operator $ exerciseCmd rootCid ProcessRewardsV2_ProcessBatch with
+    batch = root
+    providersWithWrongVettingState = Set.empty
+  children <- query @ProcessRewardsV2 operator
+  forA_ children $ \(cid, st) -> do
+    let batch = if st.batchHash == CryptoHash.hash leaf1 then leaf1 else leaf2
+    submit operator $ exerciseCmd cid ProcessRewardsV2_ProcessBatch with
+      batch
+      providersWithWrongVettingState = Set.empty
+  [] <- query @ProcessRewardsV2 operator
+  coupons <- query @RewardCouponV2 featuredA
+  coupons === []
