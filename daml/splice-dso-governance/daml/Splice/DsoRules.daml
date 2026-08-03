@@ -124,11 +124,10 @@ data DsoRules_ActionRequiringConfirmation
   | SRARC_UpdateFeaturedAppRight DsoRules_UpdateFeaturedAppRight
     -- ^ Update a specific featured app right.
   | SRARC_RegisterSynchronizer DsoRules_RegisterSynchronizer
-    -- ^ PoC (dedicated-synchronizer traffic): voted action to register a dedicated (non-decentralized)
-    --   synchronizer by binding its id to an operator party, so its traffic can be funded in Amulet.
-    --   Executed via a DSO governance vote; see the `DsoRules_RegisterSynchronizer` choice.
-    --   Kept last in this variant on purpose: Daml smart-contract-upgrade rules require new
-    --   constructors of a serializable variant to be appended after all existing ones.
+    -- ^ PoC (dedicated-synchronizer traffic): voted action to register a dedicated synchronizer
+    --   (one run by its own operator) by binding its id to an operator party, so its traffic can
+    --   be funded in Amulet. Executed via DSO governance; see the `DsoRules_RegisterSynchronizer`
+    --   choice.
   deriving (Eq, Show)
 
 data AnsEntryContext_ActionRequiringConfirmation
@@ -1692,14 +1691,11 @@ template DsoRules with
             expiresAt
         pure $ DsoRules_CreateUnallocatedUnclaimedActivityRecordResult with ..
 
-    -- PoC (dedicated-synchronizer traffic): governed registration of a dedicated synchronizer.
-    -- Creates a RegisteredSynchronizer (in splice-amulet) binding synchronizerId to its
-    -- operator. This is the only way the registry is populated; AmuletRules_BuyMemberTraffic
-    -- then reads that contract (via explicit disclosure) to authorize Amulet burns for the synchronizer.
-    -- the controller is the DSO party and the choice is nonconsuming: a vote reaches this via
-    -- executeActionRequiringConfirmation, and the DsoRules contract is not archived by exercising it.
-    -- (Plain comment, not a `-- |` doc comment: damlc docs rejects a doc comment attached to a choice.)
     nonconsuming choice DsoRules_RegisterSynchronizer : DsoRules_RegisterSynchronizerResult
+      -- ^ PoC (dedicated-synchronizer traffic): governed registration of a dedicated synchronizer.
+      -- Creates a RegisteredSynchronizer (in splice-amulet) binding synchronizerId to its
+      -- operator. This is the only way the registry is populated; the member-traffic buy choice
+      -- then reads that contract (via explicit disclosure) to authorize Amulet burns for the synchronizer.
       with
         synchronizerId : Text -- ^ stable id of the dedicated synchronizer to register
         operator : Party -- ^ the party operating that synchronizer

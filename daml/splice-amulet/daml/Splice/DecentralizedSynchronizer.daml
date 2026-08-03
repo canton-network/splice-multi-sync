@@ -111,10 +111,11 @@ instance HasCheckedFetch MemberTraffic ForMemberTraffic where
 -- Dedicated-synchronizer registration (PoC)
 ------------------------------------------------
 --
--- A "dedicated synchronizer" is a non-decentralized synchronizer (stood up with the Splice software)
--- whose traffic we want to fund by burning Amulet on the decentralized synchronizer. Before any Amulet can be
+-- A "dedicated synchronizer" is a synchronizer run by its own operator (stood up with the
+-- Splice software), separate from the decentralized synchronizer that hosts Amulet. Its traffic
+-- is funded by burning Amulet on the decentralized synchronizer. Before any Amulet can be
 -- burned for such a synchronizer it is registered once, by DSO governance, via
--- `DsoRules_RegisterSynchronizer` (in the DSO governance package), which creates this contract.
+-- `DsoRules_RegisterSynchronizer` (in the governance package), which creates this contract.
 --
 -- The registration binds a stable synchronizer id to the `operator` party that runs it. Two
 -- consumers read it:
@@ -124,11 +125,11 @@ instance HasCheckedFetch MemberTraffic ForMemberTraffic where
 --     it creates.
 --   * the `operator` itself, which observes this contract and thus learns it is registered.
 --
--- This template lives in splice-amulet (not the DSO governance package) so that `AmuletRules` can
--- read it: the DSO governance package depends on splice-amulet, not the reverse.
+-- This template lives in splice-amulet (not the governance package) so that `AmuletRules` can
+-- `fetch` it: the governance package depends on splice-amulet, not the reverse.
 template RegisteredSynchronizer with
     dso : Party
-      -- ^ The DSO party of the decentralized synchronizer; sole signatory. A DSO governance vote creates this contract.
+      -- ^ The DSO party; sole signatory. Created by DSO governance (a `DsoRules` vote).
     synchronizerId : Text
       -- ^ Id of the dedicated synchronizer this registration authorizes Amulet-funded traffic for.
     operator : Party
@@ -151,8 +152,8 @@ template RegisteredSynchronizer with
       controller p
       do pure this
 
--- Group-id check for `fetchPublicReferenceData`: a `RegisteredSynchronizer` belongs to its DSO party,
--- so reads are validated against the expected DSO party (mirrors the `MemberTraffic` group-id check).
+-- Group-id check for `fetchPublicReferenceData`: a `RegisteredSynchronizer` is scoped to the
+-- DSO party, so reads are validated against the expected DSO party (mirrors `MemberTraffic`).
 instance HasCheckedFetch RegisteredSynchronizer ForDso where
     contractGroupId RegisteredSynchronizer{..} = ForDso with ..
 

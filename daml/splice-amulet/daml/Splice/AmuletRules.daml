@@ -1762,18 +1762,21 @@ transferConfigAmuletFromExternalPartyConfigState externalPartyConfigState =
 --     with downtime; registered synchronizers always use 0).
 validateBuyMemberTrafficInputs : AmuletConfig Unit.USD -> Optional RegisteredSynchronizer -> Text -> Int -> Int -> Either FailureStatus ()
 validateBuyMemberTrafficInputs configUsd optRegistered synchronizerId migrationId trafficAmount =
-  case optRegistered of
-    None
-      | not (synchronizerId `Set.member` configUsd.decentralizedSynchronizer.requiredSynchronizers) ->
-          Left $ mkUnknownSynchronizerFailure synchronizerId
-      | otherwise -> validateTopupAmount
-    Some registered
-      | registered.synchronizerId /= synchronizerId ->
-          Left $ mkRegisteredSynchronizerMismatchFailure registered.synchronizerId synchronizerId
-      | migrationId /= 0 ->
-          Left $ mkNonZeroMigrationIdFailure migrationId
-      | otherwise -> validateTopupAmount
+  validateSynchronizerAuthorization *> validateTopupAmount
   where
+    -- authorization is checked first, matching the failure precedence callers observed before
+    -- registrations existed
+    validateSynchronizerAuthorization = case optRegistered of
+      None
+        | not (synchronizerId `Set.member` configUsd.decentralizedSynchronizer.requiredSynchronizers) ->
+            Left $ mkUnknownSynchronizerFailure synchronizerId
+        | otherwise -> Right ()
+      Some registered
+        | registered.synchronizerId /= synchronizerId ->
+            Left $ mkRegisteredSynchronizerMismatchFailure registered.synchronizerId synchronizerId
+        | migrationId /= 0 ->
+            Left $ mkNonZeroMigrationIdFailure migrationId
+        | otherwise -> Right ()
     validateTopupAmount
       | trafficAmount < configUsd.decentralizedSynchronizer.fees.minTopupAmount =
           Left $ mkInsufficientTopupAmountFailure trafficAmount configUsd.decentralizedSynchronizer.fees.minTopupAmount
