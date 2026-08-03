@@ -14,7 +14,7 @@ module Splice.Amulet.RewardAccountingV2 where
 
 import DA.Action (unless)
 import DA.Foldable (forA_)
-import DA.Optional (fromOptional, optionalToList)
+import DA.Optional (fromOptional, isNone, isSome, optionalToList)
 import DA.Set as Set
 import DA.Time
 
@@ -50,9 +50,21 @@ data MintingAllowance = MintingAllowance with
 
 type MintingAllowances = [MintingAllowance]
 
+-- | A child batch reference inside a weighted internal node: the child's hash together with
+-- the total activity weight its subtree may mint. The weight is part of the hashed commitment,
+-- so it is fixed when the root is reported.
+data WeightedBatchRef = WeightedBatchRef with
+    batchHash : CryptoHash.Hash
+    weight : Decimal
+  deriving (Eq, Show)
+
 data Batch
   = BatchOfBatches [CryptoHash.Hash]
   | BatchOfMintingAllowances MintingAllowances
+  | BatchOfWeightedBatches [WeightedBatchRef]
+    -- ^ Internal node for a registered synchronizer's rewards: expansion checks the declared
+    -- child weights against this contract's budget and endows each child with its declared
+    -- weight, bounding the whole tree's minting by the reported total.
   deriving (Eq, Show)
 
 data ProcessRewardsV2_ProcessBatchResult = ProcessRewardsV2_ProcessBatchResult {}
@@ -80,6 +92,11 @@ template ProcessRewardsV2 with
       -- ^ For a registered synchronizer's rewards: the issuance rate computed by DSO automation. When set, the
       -- committed batch amounts are activity weights and each coupon mints weight * rate; `None`
       -- means the amounts are Amulet directly, as for the decentralized synchronizer.
+    weightBudget : Optional Decimal
+      -- ^ For a registered synchronizer's rewards: the activity weight this contract's subtree
+      -- may mint, threaded down from the reported round total. Together with the per-level
+      -- checks in `ProcessRewardsV2_ProcessBatch` this bounds the total minted by the reported
+      -- (and vote-checked) activity. `None` for the decentralized synchronizer's own rewards.
   where
     signatory dso
     -- the expander holds the committed batch data off-ledger and must see these contracts to act
@@ -97,6 +114,8 @@ template ProcessRewardsV2 with
         require "batch hash matches" (actualHash == batchHash)
         case batch of
           BatchOfBatches batchHashes -> do
+            require "unweighted internal nodes are only for decentralized-synchronizer rewards"
+              (isNone issuancePerActivityUnit)
             forA_ batchHashes $ \newBatchHash ->
               create ProcessRewardsV2 with
                 dso
@@ -107,7 +126,35 @@ template ProcessRewardsV2 with
                 batchHash = newBatchHash
                 expander
                 issuancePerActivityUnit
+                weightBudget
+          BatchOfWeightedBatches weightedRefs -> do
+            require "weighted internal nodes are only for registered-synchronizer rewards"
+              (isSome issuancePerActivityUnit)
+            budget <- case weightBudget of
+              Some b -> pure b
+              None -> abort "weighted batch without a weight budget"
+            require "declared child weights are positive"
+              (all (\ref -> ref.weight > 0.0) weightedRefs)
+            require "declared child weights are within this subtree's budget"
+              (sum (map (\ref -> ref.weight) weightedRefs) <= budget)
+            forA_ weightedRefs $ \ref ->
+              create ProcessRewardsV2 with
+                dso
+                round
+                roundClosedAt
+                rewardCouponTimeToLive
+                dryRun
+                batchHash = ref.batchHash
+                expander
+                issuancePerActivityUnit
+                weightBudget = Some ref.weight
           BatchOfMintingAllowances mintingAllowances -> do
+            forA_ issuancePerActivityUnit $ \_ -> do
+              budget <- case weightBudget of
+                Some b -> pure b
+                None -> abort "weighted leaf without a weight budget"
+              require "allowance weights are within this subtree's budget"
+                (sum [ ma.amount | ma <- mintingAllowances ] <= budget)
             unless dryRun $ do
               -- Coupon expiry is determined here based on the time of creation to ensure
               -- providers are always given the full rewardCouponTimeToLive duration to redeem their coupons,
@@ -132,6 +179,7 @@ template ProcessRewardsV2 with
 batchProviders : Set Party -> Batch -> [Party]
 batchProviders ignoredProviders batch = case batch of
   BatchOfBatches _ -> []
+  BatchOfWeightedBatches _ -> []
   BatchOfMintingAllowances mintingAllowances ->
     [ provider | MintingAllowance{..} <- mintingAllowances, not (Set.member provider ignoredProviders) ]
 
@@ -142,12 +190,18 @@ instance CryptoHash.Hashable MintingAllowance where
   hash MintingAllowance {provider, amount} =
     CryptoHash.hashRecord [CryptoHash.hash provider , CryptoHash.hash amount]
 
+instance CryptoHash.Hashable WeightedBatchRef where
+  hash WeightedBatchRef {batchHash, weight} =
+    CryptoHash.hashRecord [CryptoHash.hash batchHash, CryptoHash.hash weight]
+
 instance CryptoHash.Hashable Batch where
   hash batch = case batch of
     BatchOfBatches batchHashes ->
       CryptoHash.hashVariant "BatchOfBatches" [CryptoHash.hash batchHashes]
     BatchOfMintingAllowances mintingAllowances ->
       CryptoHash.hashVariant "BatchOfMintingAllowances" [CryptoHash.hash mintingAllowances]
+    BatchOfWeightedBatches weightedRefs ->
+      CryptoHash.hashVariant "BatchOfWeightedBatches" [CryptoHash.hash weightedRefs]
 
 instance HasCheckedFetch CalculateRewardsV2 ForDso where
   contractGroupId CalculateRewardsV2 with .. = ForDso with ..

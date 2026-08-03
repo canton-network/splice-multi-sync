@@ -67,7 +67,10 @@ setupReportedActivity = do
         ]
       leaf2 = BatchOfMintingAllowances
         [ MintingAllowance with provider = operator; amount = 10.0 ]
-      root = BatchOfBatches [CryptoHash.hash leaf1, CryptoHash.hash leaf2]
+      root = BatchOfWeightedBatches
+        [ WeightedBatchRef with batchHash = CryptoHash.hash leaf1; weight = 40.0
+        , WeightedBatchRef with batchHash = CryptoHash.hash leaf2; weight = 10.0
+        ]
 
   result <- submit operator $ exerciseCmd stateCid DedicatedSynchronizerState_ReportActivity with
     round = Round 1
@@ -91,6 +94,7 @@ test_ReportAndExpand = do
   submit app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
     reportCid
     issuancePerActivityUnit = 2.0
+    purchasedTotal = 1_000_000
     rewardCouponTimeToLive = days 30
     dryRun = False
 
@@ -170,12 +174,21 @@ test_Expand_hashAndAuthorization = do
   submitMustFail app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
     reportCid
     issuancePerActivityUnit = 0.0
+    purchasedTotal = 1_000_000
+    rewardCouponTimeToLive = days 30
+    dryRun = False
+  -- reported activity above the vote-attested purchased total is rejected
+  submitMustFail app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
+    reportCid
+    issuancePerActivityUnit = 2.0
+    purchasedTotal = 49
     rewardCouponTimeToLive = days 30
     dryRun = False
 
   submit app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
     reportCid
     issuancePerActivityUnit = 2.0
+    purchasedTotal = 1_000_000
     rewardCouponTimeToLive = days 30
     dryRun = False
   [(rootCid, _)] <- query @ProcessRewardsV2 operator
@@ -208,6 +221,7 @@ test_Expand_dryRun = do
   submit app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
     reportCid
     issuancePerActivityUnit = 2.0
+    purchasedTotal = 1_000_000
     rewardCouponTimeToLive = days 30
     dryRun = True
   [(rootCid, _)] <- query @ProcessRewardsV2 operator
@@ -223,3 +237,96 @@ test_Expand_dryRun = do
   [] <- query @ProcessRewardsV2 operator
   coupons <- query @RewardCouponV2 featuredA
   coupons === []
+
+-- | The committed tree cannot mint beyond the reported total: over-declared internal nodes and
+--   over-weight leaves are both rejected against the threaded budget.
+test_Expand_budgetEnforced : Script ()
+test_Expand_budgetEnforced = do
+  d <- setupDefaultAppWithUsers
+  let app = d.app
+  operator <- allocateParty "registeredSyncOperator"
+  featured <- allocateParty "featuredOverclaimer"
+  stateCid <- submit app.dso $ createCmd DedicatedSynchronizerState with
+    dso = app.dso
+    synchronizerId = testSyncId
+    operator
+    lastReportedRound = None
+    totalActivityReported = 0.0
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+
+  -- an internal node declaring more weight than the reported total cannot expand
+  let fatLeaf = BatchOfMintingAllowances [MintingAllowance with provider = featured; amount = 500.0]
+      overRoot = BatchOfWeightedBatches
+        [ WeightedBatchRef with batchHash = CryptoHash.hash fatLeaf; weight = 500.0 ]
+  r1 <- submit operator $ exerciseCmd stateCid DedicatedSynchronizerState_ReportActivity with
+    round = Round 1
+    activityRootHash = CryptoHash.hash overRoot
+    totalActivity = 50.0
+  submit app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
+    reportCid = r1.reportCid
+    issuancePerActivityUnit = 2.0
+    purchasedTotal = 1_000_000
+    rewardCouponTimeToLive = days 30
+    dryRun = False
+  [(overRootCid, _)] <- query @ProcessRewardsV2 operator
+  submitMustFail operator $ exerciseCmd overRootCid ProcessRewardsV2_ProcessBatch with
+    batch = overRoot
+    providersWithWrongVettingState = Set.empty
+
+  -- a leaf claiming more than the weight its parent declared for it cannot expand
+  [(stateCid2, _)] <- query @DedicatedSynchronizerState operator
+  let lyingLeaf = BatchOfMintingAllowances [MintingAllowance with provider = featured; amount = 45.0]
+      root2 = BatchOfWeightedBatches
+        [ WeightedBatchRef with batchHash = CryptoHash.hash lyingLeaf; weight = 40.0 ]
+  r2 <- submit operator $ exerciseCmd stateCid2 DedicatedSynchronizerState_ReportActivity with
+    round = Round 2
+    activityRootHash = CryptoHash.hash root2
+    totalActivity = 50.0
+  submit app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
+    reportCid = r2.reportCid
+    issuancePerActivityUnit = 2.0
+    purchasedTotal = 1_000_000
+    rewardCouponTimeToLive = days 30
+    dryRun = False
+  prs <- query @ProcessRewardsV2 operator
+  let Some (root2Cid, _) = find (\(_, st) -> st.batchHash == CryptoHash.hash root2) prs
+  submit operator $ exerciseCmd root2Cid ProcessRewardsV2_ProcessBatch with
+    batch = root2
+    providersWithWrongVettingState = Set.empty
+  prs2 <- query @ProcessRewardsV2 operator
+  let Some (leafCid, _) = find (\(_, st) -> st.batchHash == CryptoHash.hash lyingLeaf) prs2
+  submitMustFail operator $ exerciseCmd leafCid ProcessRewardsV2_ProcessBatch with
+    batch = lyingLeaf
+    providersWithWrongVettingState = Set.empty
+
+-- | Path exclusivity: unweighted internal nodes are for the decentralized synchronizer only,
+--   so an extension tree cannot smuggle weight past the budget through a plain BatchOfBatches.
+test_Expand_pathExclusivity : Script ()
+test_Expand_pathExclusivity = do
+  d <- setupDefaultAppWithUsers
+  let app = d.app
+  operator <- allocateParty "registeredSyncOperator"
+  featured <- allocateParty "featuredAppX"
+  stateCid <- submit app.dso $ createCmd DedicatedSynchronizerState with
+    dso = app.dso
+    synchronizerId = testSyncId
+    operator
+    lastReportedRound = None
+    totalActivityReported = 0.0
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+  let leaf = BatchOfMintingAllowances [MintingAllowance with provider = featured; amount = 10.0]
+      plainRoot = BatchOfBatches [CryptoHash.hash leaf]
+  r <- submit operator $ exerciseCmd stateCid DedicatedSynchronizerState_ReportActivity with
+    round = Round 1
+    activityRootHash = CryptoHash.hash plainRoot
+    totalActivity = 10.0
+  submit app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
+    reportCid = r.reportCid
+    issuancePerActivityUnit = 2.0
+    purchasedTotal = 1_000_000
+    rewardCouponTimeToLive = days 30
+    dryRun = False
+  [(rootCid, _)] <- query @ProcessRewardsV2 operator
+  submitMustFail operator $ exerciseCmd rootCid ProcessRewardsV2_ProcessBatch with
+    batch = plainRoot
+    providersWithWrongVettingState = Set.empty

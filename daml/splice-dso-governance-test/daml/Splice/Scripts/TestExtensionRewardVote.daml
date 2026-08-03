@@ -62,6 +62,7 @@ test_ExtensionRewards_viaVote = do
       amuletRulesAction = CRARC_StartProcessingExtensionRewardsV2 AmuletRules_StartProcessingExtensionRewardsV2 with
         reportCid = result.reportCid
         issuancePerActivityUnit = 4.0
+        purchasedTotal = 1_000_000
         rewardCouponTimeToLive = days 30
         dryRun = False
 
