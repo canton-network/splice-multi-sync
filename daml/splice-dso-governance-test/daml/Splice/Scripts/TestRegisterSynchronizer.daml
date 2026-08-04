@@ -1,0 +1,56 @@
+-- Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- | PoC (dedicated-synchronizer traffic): register a dedicated synchronizer via DSO governance
+--   (a supermajority vote) and assert the resulting `RegisteredSynchronizer` contract.
+--
+--   This is the first rung of the ladder: it only proves that governance can create the
+--   registry entry that a later Amulet-funded traffic purchase will read. Buying traffic against a
+--   registered synchronizer is exercised in the splice-amulet test (next PR).
+module Splice.Scripts.TestRegisterSynchronizer where
+
+import DA.Assert
+
+import Daml.Script
+
+-- The governance action + its argument record.
+import Splice.DsoRules
+-- The registry contract created by the vote. It lives in splice-amulet (AmuletRules must be
+-- able to fetch it), and this test package data-depends on splice-amulet.
+import Splice.DecentralizedSynchronizer (RegisteredSynchronizer)
+
+-- Shared helpers that spin up a 4-SV network and drive a vote end-to-end.
+import Splice.Scripts.DsoTestUtils
+
+-- | Register a dedicated synchronizer via a supermajority SV vote, then verify the registration:
+--   signed by the DSO party, naming the operator, and observed by that operator.
+test_RegisterSynchronizer_viaVote : Script ()
+test_RegisterSynchronizer_viaVote = do
+  -- 4-SV network; returns the DSO party and the Super Validators `sv1..sv4`.
+  (app, dso, (sv1, sv2, sv3, sv4)) <- initMainNet
+
+  -- The party that will operate the dedicated synchronizer.
+  operator <- allocateParty "dedicatedSyncOperator"
+  let dedicatedSyncId = "dedicated-sync::1220dededededededededededededededededededededededededededededede"
+
+  -- Supermajority SV vote to register the dedicated synchronizer. `initiateAndAcceptVote` routes
+  -- through DsoRules_RequestVote -> DsoRules_CastVote (x3) -> DsoRules_CloseVoteRequest, which on
+  -- acceptance calls executeActionRequiringConfirmation, dispatching to DsoRules_RegisterSynchronizer.
+  initiateAndAcceptVote app [sv1, sv2, sv3, sv4] $
+    ARC_DsoRules with
+      dsoAction = SRARC_RegisterSynchronizer DsoRules_RegisterSynchronizer with
+        synchronizerId = dedicatedSyncId
+        operator
+
+  -- The registration now exists on-ledger with exactly the fields we voted for.
+  registrations <- query @RegisteredSynchronizer dso
+  case registrations of
+    [(_cid, reg)] -> do
+      reg.dso === dso
+      reg.synchronizerId === dedicatedSyncId
+      reg.operator === operator
+    _ -> abort $ "expected exactly one RegisteredSynchronizer, got " <> show (length registrations)
+
+  -- The operator is an observer, so it can see its own registration.
+  operatorView <- query @RegisteredSynchronizer operator
+  length operatorView === 1
