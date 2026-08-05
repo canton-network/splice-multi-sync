@@ -276,14 +276,27 @@ template AmuletRules
         -- Party that the sender expects to represent the DSO party of the AmuletRules contract they are calling.
         -- Must always be set to protect from malicious delegees swapping the AmuletRules contract out for
         -- one under their control.
+        optRegisteredSynchronizer : Optional (ContractId RegisteredSynchronizer)
+        -- For traffic on a governance-registered synchronizer (see `RegisteredSynchronizer`): the
+        -- registration authorizing it, supplied via explicit disclosure. It replaces the
+        -- `requiredSynchronizers` gate for the given synchronizer id, and its `operator` becomes an
+        -- observer of the created `MemberTraffic`. `None` buys traffic on the decentralized
+        -- synchronizer.
       controller provider
       do
         checkExpectedDso dso expectedDso
+        -- For a governance-registered synchronizer, the disclosed registration both authorizes the
+        -- synchronizer id and names the operator that observes the purchase record.
+        -- `RegisteredSynchronizer_Fetch` lets `provider` read a contract it is not a stakeholder of,
+        -- mirroring how `computeSynchronizerFees` reads the OpenMiningRound.
+        optRegistered <- forA optRegisteredSynchronizer $ \registeredCid ->
+          fetchPublicReferenceData (ForDso dso) registeredCid (RegisteredSynchronizer_Fetch provider)
         -- validate choice parameters
         configUsd <- getValueAsOfLedgerTime configSchedule
-        case validateBuyMemberTrafficInputs configUsd synchronizerId trafficAmount of
+        case validateBuyMemberTrafficInputs configUsd optRegistered synchronizerId migrationId trafficAmount of
           Left failureStatus -> failWithStatus failureStatus
           Right _ -> pure ()
+        let optOperator = fmap (\registered -> registered.operator) optRegistered
         (trafficCostAmulet, trafficCostUsd) <- computeSynchronizerFees dso provider trafficAmount this context
         (transferResult, meta) <- splitAndBurn (toInterfaceContractId self) provider trafficCostAmulet inputs context dso "traffic purchase"
         -- create a new MemberTraffic contract for the purchased traffic
@@ -296,6 +309,7 @@ template AmuletRules
           numPurchases = 1
           amuletSpent = trafficCostAmulet
           usdSpent =  trafficCostUsd
+          operator = optOperator
         -- return result
         return AmuletRules_BuyMemberTrafficResult with
           round = transferResult.round
@@ -304,7 +318,6 @@ template AmuletRules
           purchasedTraffic
           senderChangeAmulet = transferResult.senderChangeAmulet
           meta = Some meta
-
 
     nonconsuming choice AmuletRules_MergeMemberTrafficContracts : AmuletRules_MergeMemberTrafficContractsResult
       with
@@ -322,6 +335,11 @@ template AmuletRules
                 migrationId = first.migrationId
           fetchAndArchive expectedTrafficContract trafficCid
         let traffics = first::rest
+        -- defence in depth: contracts for the same synchronizer always name the same operator, so
+        -- this never triggers unless duplicate registrations exist; refusing the merge keeps a
+        -- mixed-operator set visible instead of silently blending it
+        require "Operator matches across all merged member traffic contracts"
+          (all (\traffic -> traffic.operator == first.operator) traffics)
 
         -- create a new aggregated member traffic contract.
         let mergedTraffic = foldl (\acc traffic -> MemberTraffic with
@@ -333,7 +351,8 @@ template AmuletRules
                 numPurchases = acc.numPurchases + traffic.numPurchases
                 usdSpent = acc.usdSpent + traffic.usdSpent
                 amuletSpent = acc.amuletSpent + traffic.amuletSpent
-              ) (initialMemberTraffic dso first.memberId first.synchronizerId first.migrationId) traffics
+                operator = acc.operator
+              ) (initialMemberTraffic dso first.memberId first.synchronizerId first.migrationId first.operator) traffics
         mergedTrafficCid <- create mergedTraffic
         return AmuletRules_MergeMemberTrafficContractsResult with ..
 
@@ -1067,6 +1086,24 @@ mkInsufficientTopupAmountFailure requestedAmount minAmount =
       , ("minTopupAmount", show minAmount)
       ])
 
+mkRegisteredSynchronizerMismatchFailure : Text -> Text -> FailureStatus
+mkRegisteredSynchronizerMismatchFailure registeredId requestedId =
+  mkFailureStatus
+    (spliceErrorId "registered-synchronizer-mismatch")
+    InvalidIndependentOfSystemState
+    ("The disclosed registration is for synchronizer " <> registeredId
+      <> " but the purchase names synchronizer " <> requestedId)
+    (TextMap.fromList [("registeredSynchronizerId", registeredId), ("synchronizerId", requestedId)])
+
+mkNonZeroMigrationIdFailure : Int -> FailureStatus
+mkNonZeroMigrationIdFailure migrationId =
+  mkFailureStatus
+    (spliceErrorId "non-zero-migration-id")
+    InvalidIndependentOfSystemState
+    ("Traffic for a registered synchronizer must be bought with migrationId 0, got "
+      <> show migrationId)
+    (TextMap.fromList [("migrationId", show migrationId)])
+
 mkMaximumInputsExceededFailure : FailureStatus
 mkMaximumInputsExceededFailure =
   mkFailureStatus
@@ -1715,13 +1752,35 @@ transferConfigAmuletFromExternalPartyConfigState : ExternalPartyConfigState -> T
 transferConfigAmuletFromExternalPartyConfigState externalPartyConfigState =
   scaleFees2 (1.0 / externalPartyConfigState.amuletPrice) externalPartyConfigState.transferConfig
 
-validateBuyMemberTrafficInputs : AmuletConfig Unit.USD -> Text -> Int -> Either FailureStatus ()
-validateBuyMemberTrafficInputs configUsd synchronizerId trafficAmount
-  | not (synchronizerId `Set.member` configUsd.decentralizedSynchronizer.requiredSynchronizers) =
-      Left $ mkUnknownSynchronizerFailure synchronizerId
-  | trafficAmount < configUsd.decentralizedSynchronizer.fees.minTopupAmount =
-      Left $ mkInsufficientTopupAmountFailure trafficAmount configUsd.decentralizedSynchronizer.fees.minTopupAmount
-  | otherwise = Right ()
+-- All validation for buying member traffic, for both the decentralized synchronizer and
+-- governance-registered synchronizers. The synchronizer authorization is checked first (matching
+-- the failure precedence callers observed before registrations existed), then the `minTopupAmount`
+-- floor, which applies in all cases:
+--   * without a registration, the synchronizer id must be in `requiredSynchronizers`;
+--   * with a registration, the synchronizer id must match the registration's, and `migrationId`
+--     must be 0 (migration ids exist for the decentralized synchronizer's history of migrations
+--     with downtime; registered synchronizers always use 0).
+validateBuyMemberTrafficInputs : AmuletConfig Unit.USD -> Optional RegisteredSynchronizer -> Text -> Int -> Int -> Either FailureStatus ()
+validateBuyMemberTrafficInputs configUsd optRegistered synchronizerId migrationId trafficAmount =
+  validateSynchronizerAuthorization *> validateTopupAmount
+  where
+    -- authorization is checked first, matching the failure precedence callers observed before
+    -- registrations existed
+    validateSynchronizerAuthorization = case optRegistered of
+      None
+        | not (synchronizerId `Set.member` configUsd.decentralizedSynchronizer.requiredSynchronizers) ->
+            Left $ mkUnknownSynchronizerFailure synchronizerId
+        | otherwise -> Right ()
+      Some registered
+        | registered.synchronizerId /= synchronizerId ->
+            Left $ mkRegisteredSynchronizerMismatchFailure registered.synchronizerId synchronizerId
+        | migrationId /= 0 ->
+            Left $ mkNonZeroMigrationIdFailure migrationId
+        | otherwise -> Right ()
+    validateTopupAmount
+      | trafficAmount < configUsd.decentralizedSynchronizer.fees.minTopupAmount =
+          Left $ mkInsufficientTopupAmountFailure trafficAmount configUsd.decentralizedSynchronizer.fees.minTopupAmount
+      | otherwise = Right ()
 
 -- | Computing synchronizer fees
 computeSynchronizerFees : Party -> Party -> Int -> AmuletRules -> TransferContext -> Update (Decimal, Decimal)
