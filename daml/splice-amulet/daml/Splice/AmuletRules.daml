@@ -768,6 +768,10 @@ template AmuletRules
       -- is confirmed.
       with
         reportCid : ContractId ExtensionActivityReport
+        registeredSynchronizerCid : ContractId RegisteredSynchronizer
+          -- ^ the live registration the report was filed under; processing requires it to match
+          -- the report's synchronizer id and operator, so offboarding (archiving the
+          -- registration) closes the reward path the same way it closes the buy path
         issuancePerActivityUnit : Decimal -- ^ Amulet minted per unit of reported activity weight
         purchasedTotal : Int
           -- ^ total traffic purchased for the synchronizer (bytes), computed off-ledger
@@ -778,6 +782,10 @@ template AmuletRules
       do
         require "issuance rate is positive" (issuancePerActivityUnit > 0.0)
         report <- fetchAndArchive (ForDso with dso) reportCid
+        registration <- fetchChecked (ForDso with dso) registeredSynchronizerCid
+        require "report is for the registered synchronizer and its operator"
+          (registration.synchronizerId == report.synchronizerId
+            && registration.operator == report.operator)
         require "reported activity does not exceed purchased traffic"
           (report.totalActivity <= intToDecimal purchasedTotal)
         now <- getTime

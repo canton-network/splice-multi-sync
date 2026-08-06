@@ -40,6 +40,9 @@ test_ExtensionRewards_viaVote = do
         synchronizerId = dedicatedSyncId
         operator
 
+  -- The vote-created registration authorizes reward processing below.
+  [(regCid, _)] <- query @RegisteredSynchronizer operator
+
   -- Reporting state (created directly as the DSO party in this PoC; production wiring of the
   -- state creation is part of the registration follow-ups).
   stateCid <- submit dso $ createCmd DedicatedSynchronizerState with
@@ -61,6 +64,7 @@ test_ExtensionRewards_viaVote = do
     ARC_AmuletRules with
       amuletRulesAction = CRARC_StartProcessingExtensionRewardsV2 AmuletRules_StartProcessingExtensionRewardsV2 with
         reportCid = result.reportCid
+        registeredSynchronizerCid = regCid
         issuancePerActivityUnit = 4.0
         purchasedTotal = 1_000_000
         rewardCouponTimeToLive = days 30
