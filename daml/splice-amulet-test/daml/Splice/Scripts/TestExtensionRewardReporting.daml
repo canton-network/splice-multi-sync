@@ -397,3 +397,33 @@ test_StartProcessing_registrationGate = do
     purchasedTotal = 1_000_000
     rewardCouponTimeToLive = days 30
     dryRun = False
+
+-- | The purchased-traffic bound is cumulative: rounds that individually fit cannot
+--   together report past what was ever purchased.
+test_StartProcessing_cumulativeBound : Script ()
+test_StartProcessing_cumulativeBound = do
+  ReportedActivitySetup{app, operator, registrationCid, reportCid} <- setupReportedActivity
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+
+  -- round 1: 50 reported, lifetime 50 of 80 purchased - processes fine
+  submit app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
+    reportCid
+    registeredSynchronizerCid = registrationCid
+    issuancePerActivityUnit = 2.0
+    purchasedTotal = 80
+    rewardCouponTimeToLive = days 30
+    dryRun = True
+
+  -- round 2: another 50, individually within 80, but lifetime reported is now 100 of 80
+  [(stateCid, _)] <- query @DedicatedSynchronizerState operator
+  r2 <- submit operator $ exerciseCmd stateCid DedicatedSynchronizerState_ReportActivity with
+    round = Round 2
+    activityRootHash = CryptoHash.hash (BatchOfMintingAllowances [])
+    totalActivity = 50.0
+  submitMustFail app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
+    reportCid = r2.reportCid
+    registeredSynchronizerCid = registrationCid
+    issuancePerActivityUnit = 2.0
+    purchasedTotal = 80
+    rewardCouponTimeToLive = days 30
+    dryRun = True

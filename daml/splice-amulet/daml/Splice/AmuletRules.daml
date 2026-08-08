@@ -774,8 +774,9 @@ template AmuletRules
           -- registration) closes the reward path the same way it closes the buy path
         issuancePerActivityUnit : Decimal -- ^ Amulet minted per unit of reported activity weight
         purchasedTotal : Int
-          -- ^ total traffic purchased for the synchronizer (bytes), computed off-ledger
-          -- by DSO automation and attested by the confirming vote; bounds the reported activity
+          -- ^ total traffic ever purchased for the synchronizer (bytes), computed off-ledger
+          -- by DSO automation and attested by the confirming vote; bounds the synchronizer's
+          -- total reported activity
         rewardCouponTimeToLive : RelTime
         dryRun : Bool
       controller dso
@@ -786,8 +787,8 @@ template AmuletRules
         require "report is for the registered synchronizer and its operator"
           (registration.synchronizerId == report.synchronizerId
             && registration.operator == report.operator)
-        require "reported activity does not exceed purchased traffic"
-          (report.totalActivity <= intToDecimal purchasedTotal)
+        require "total reported activity does not exceed purchased traffic"
+          (report.totalActivityReported <= intToDecimal purchasedTotal)
         now <- getTime
         create ProcessRewardsV2 with
           dso

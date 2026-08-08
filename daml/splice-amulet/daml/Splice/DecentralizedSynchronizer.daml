@@ -199,11 +199,13 @@ template DedicatedSynchronizerState with
         require "totalActivity is non-negative" (totalActivity >= 0.0)
         require "round is later than the last reported round"
           (optional True (< round) lastReportedRound)
+        let newTotalReported = totalActivityReported + totalActivity
         reportCid <- create ExtensionActivityReport with
           dso; synchronizerId; operator; round; activityRootHash; totalActivity
+          totalActivityReported = newTotalReported
         stateCid <- create this with
           lastReportedRound = Some round
-          totalActivityReported = totalActivityReported + totalActivity
+          totalActivityReported = newTotalReported
         pure DedicatedSynchronizerState_ReportActivityResult with ..
 
 -- PoC (extension reward reporting): one report per (synchronizer, round), created by
@@ -217,11 +219,15 @@ template ExtensionActivityReport with
     round : Round
     activityRootHash : CryptoHash.Hash
     totalActivity : Decimal
+    totalActivityReported : Decimal
+      -- ^ running total of all activity ever reported for this synchronizer, including this
+      -- round; start-processing checks it against the synchronizer's purchased traffic
   where
     signatory dso
     observer operator
 
     ensure totalActivity >= 0.0
+      && totalActivityReported >= totalActivity
       && not (T.isEmpty synchronizerId)
 
 instance HasCheckedFetch DedicatedSynchronizerState ForDso where

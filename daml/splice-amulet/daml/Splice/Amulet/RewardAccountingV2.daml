@@ -115,7 +115,7 @@ template ProcessRewardsV2 with
         case batch of
           BatchOfBatches batchHashes -> do
             require "unweighted internal nodes are only for decentralized-synchronizer rewards"
-              (isNone issuancePerActivityUnit)
+              (isNone issuancePerActivityUnit && isNone weightBudget)
             forA_ batchHashes $ \newBatchHash ->
               create ProcessRewardsV2 with
                 dso
