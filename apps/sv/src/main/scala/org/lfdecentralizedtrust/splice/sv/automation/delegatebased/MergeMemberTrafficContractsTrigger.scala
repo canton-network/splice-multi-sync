@@ -49,28 +49,37 @@ class MergeMemberTrafficContractsTrigger(
           // Skip contracts with invalid member ids
           Future.successful(TaskSuccess(s"Skipping MemberTraffic with invalid memberId: ${err}"))
         },
-        memberId => {
-          for {
-            dsoRules <- store.getDsoRules()
-            threshold = dsoRules.payload.config.numMemberTrafficContractsThreshold
-            synchronizerId = SynchronizerId.tryFromString(memberTraffic.payload.synchronizerId)
-            memberTraffics <- store.listMemberTrafficContracts(
-              memberId,
-              synchronizerId,
-              PageLimit.tryCreate(2 * threshold.toInt),
-            )
-            outcome <-
-              if (memberTraffics.length > threshold)
-                mergeMemberTrafficContracts(memberId, memberTraffics, controller)
-              else
+        memberId =>
+          SynchronizerId
+            .fromString(memberTraffic.payload.synchronizerId)
+            .fold(
+              err =>
+                // Skip contracts with invalid synchronizer ids
                 Future.successful(
-                  TaskSuccess(
-                    s"More than ${threshold} member traffic contracts are required for $memberId on domain $synchronizerId " +
-                      s"in order to merge them. Currently, there are only ${memberTraffics.length}."
+                  TaskSuccess(s"Skipping MemberTraffic with invalid synchronizerId: ${err}")
+                ),
+              synchronizerId =>
+                for {
+                  dsoRules <- store.getDsoRules()
+                  threshold = dsoRules.payload.config.numMemberTrafficContractsThreshold
+                  memberTraffics <- store.listMemberTrafficContracts(
+                    memberId,
+                    synchronizerId,
+                    PageLimit.tryCreate(2 * threshold.toInt),
                   )
-                )
-          } yield outcome
-        },
+                  outcome <-
+                    if (memberTraffics.length > threshold)
+                      mergeMemberTrafficContracts(memberId, memberTraffics, controller)
+                    else
+                      Future.successful(
+                        TaskSuccess(
+                          s"More than ${threshold} member traffic contracts are required for " +
+                            s"$memberId on domain $synchronizerId in order to merge them. " +
+                            s"Currently, there are only ${memberTraffics.length}."
+                        )
+                      )
+                } yield outcome,
+            ),
       )
   }
 

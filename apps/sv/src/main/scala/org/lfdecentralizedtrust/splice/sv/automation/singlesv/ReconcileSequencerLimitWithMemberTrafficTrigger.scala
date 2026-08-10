@@ -64,60 +64,78 @@ class ReconcileSequencerLimitWithMemberTrafficTrigger(
           // Skip contracts with invalid member ids
           Future.successful(TaskSuccess(s"Skipping MemberTraffic with invalid memberId: ${err}"))
         },
-        memberId => {
-          val synchronizerId = SynchronizerId.tryFromString(memberTraffic.payload.synchronizerId)
-          synchronizerNodeService.sequencerAdminConnection().flatMap { sequencerAdminConnection =>
-            sequencerAdminConnection.getStatus
-              .map(_.successOption.map(_.synchronizerId))
-              .flatMap {
-                case None =>
-                  Future.failed(
-                    Status.FAILED_PRECONDITION
-                      .withDescription("Sequencer is not yet initialized")
-                      .asRuntimeException()
-                  )
-                case Some(sequencerSynchronizerId)
-                    if sequencerSynchronizerId.logical != synchronizerId =>
-                  Future.failed(
-                    Status.INTERNAL
-                      .withDescription(
-                        s"The MemberTraffic contract synchronizerId must match the connected domain ${sequencerSynchronizerId}"
-                      )
-                      .asRuntimeException()
-                  )
-                case _ =>
-                  store
-                    .getDsoRulesWithSvNodeStates()
-                    .flatMap(rulesAndStates => {
-                      if (
-                        rulesAndStates
-                          .activeSvParticipantAndMediatorIds(synchronizerId)
-                          .contains(memberId)
-                      ) {
-                        // SVs are granted unlimited traffic and do not need to purchase it via MemberTraffic contracts.
-                        // While the top-up trigger for SV validators is disabled by default, we also explicitly ignore
-                        // SV related MemberTraffic contracts here as a safeguard for the case of 3rd party top-ups
-                        // of SV nodes or an SV validator misconfiguration that changes the defaults.
-                        Future
-                          .successful(
-                            TaskSuccess(s"Skipping MemberTraffic contract for SV node $memberId")
+        memberId =>
+          SynchronizerId
+            .fromString(memberTraffic.payload.synchronizerId)
+            .fold(
+              err =>
+                // Skip contracts with invalid synchronizer ids
+                Future.successful(
+                  TaskSuccess(s"Skipping MemberTraffic with invalid synchronizerId: ${err}")
+                ),
+              synchronizerId =>
+                synchronizerNodeService.sequencerAdminConnection().flatMap {
+                  sequencerAdminConnection =>
+                    sequencerAdminConnection.getStatus
+                      .map(_.successOption.map(_.synchronizerId))
+                      .flatMap {
+                        case None =>
+                          Future.failed(
+                            Status.FAILED_PRECONDITION
+                              .withDescription("Sequencer is not yet initialized")
+                              .asRuntimeException()
                           )
-                      } else {
-                        val trafficLimitOffset =
-                          rulesAndStates.dsoRules.payload.initialTrafficState.asScala
-                            .get(memberId.toProtoPrimitive)
-                            .fold(0L)(_.consumedTraffic)
-                        reconcileExtraTrafficLimitForMember(
-                          memberId,
-                          synchronizerId,
-                          trafficLimitOffset,
-                          sequencerAdminConnection,
-                        )
+                        case Some(sequencerSynchronizerId)
+                            if sequencerSynchronizerId.logical != synchronizerId =>
+                          // Traffic can be purchased for any registered synchronizer, so we
+                          // observe MemberTraffic contracts that this sequencer does not serve.
+                          // They are granted by the operator of the synchronizer they name, on
+                          // that synchronizer's own sequencer, so skip them here rather than
+                          // failing the trigger.
+                          Future.successful(
+                            TaskSuccess(
+                              s"Skipping MemberTraffic contract for synchronizer " +
+                                s"$synchronizerId, this sequencer serves " +
+                                s"${sequencerSynchronizerId.logical}"
+                            )
+                          )
+                        case _ =>
+                          store
+                            .getDsoRulesWithSvNodeStates()
+                            .flatMap(rulesAndStates => {
+                              if (
+                                rulesAndStates
+                                  .activeSvParticipantAndMediatorIds(synchronizerId)
+                                  .contains(memberId)
+                              ) {
+                                // SVs are granted unlimited traffic and do not need to purchase
+                                // it via MemberTraffic contracts. While the top-up trigger for SV
+                                // validators is disabled by default, we also explicitly ignore SV
+                                // related MemberTraffic contracts here as a safeguard for the case
+                                // of 3rd party top-ups of SV nodes or an SV validator
+                                // misconfiguration that changes the defaults.
+                                Future
+                                  .successful(
+                                    TaskSuccess(
+                                      s"Skipping MemberTraffic contract for SV node $memberId"
+                                    )
+                                  )
+                              } else {
+                                val trafficLimitOffset =
+                                  rulesAndStates.dsoRules.payload.initialTrafficState.asScala
+                                    .get(memberId.toProtoPrimitive)
+                                    .fold(0L)(_.consumedTraffic)
+                                reconcileExtraTrafficLimitForMember(
+                                  memberId,
+                                  synchronizerId,
+                                  trafficLimitOffset,
+                                  sequencerAdminConnection,
+                                )
+                              }
+                            })
                       }
-                    })
-              }
-          }
-        },
+                },
+            ),
       )
   }
 
