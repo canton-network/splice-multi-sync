@@ -16,6 +16,7 @@ import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.Topol
 import org.lfdecentralizedtrust.splice.store.AppStore
 import org.lfdecentralizedtrust.splice.util.AssignedContract
 
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Grants the traffic purchased via `MemberTraffic` contracts on the sequencer of a single
@@ -25,6 +26,15 @@ import scala.concurrent.{ExecutionContext, Future}
   * naming synchronizers it does not serve. Each instance of this trigger owns exactly one
   * synchronizer, given by [[targetSynchronizerId]], and skips everything else; the operator of
   * another synchronizer grants those purchases on its own sequencer.
+  *
+  * [[targetSynchronizerId]] is a stable value for the lifetime of the trigger, so a node that
+  * changes the logical synchronizer it serves has to be restarted. Note that the sibling
+  * `SvOnboardingUnlimitedTrafficTrigger` instead re-resolves the active synchronizer from
+  * `AmuletConfigSchedule` on every run, so the two source the same concept differently.
+  *
+  * Purchases are matched on the synchronizer id alone. Whether a purchase recorded against a
+  * different migration id of the same synchronizer is visible at all is decided upstream, by the
+  * ingestion filter of the store backing this trigger.
   *
   * This trigger currently relies on enough nodes working on the same set traffic balance request
   * around the same time. It also depends on the sorting of tasks done in OnAssignedContractTrigger
@@ -51,25 +61,28 @@ abstract class ReconcileSequencerLimitWithMemberTrafficTriggerBase(
   /** The synchronizer this trigger reconciles. `MemberTraffic` contracts for any other
     * synchronizer are skipped.
     */
-  protected def targetSynchronizerId()(implicit tc: TraceContext): Future[SynchronizerId]
+  protected def targetSynchronizerId: SynchronizerId
 
   /** Admin connection to the sequencer serving [[targetSynchronizerId]]. */
   protected def sequencerAdminConnection()(implicit
       tc: TraceContext
   ): Future[SequencerAdminConnection]
 
-  /** Total traffic purchased for `memberId` on `synchronizerId`. */
-  protected def getTotalPurchasedMemberTraffic(memberId: Member, synchronizerId: SynchronizerId)(
-      implicit tc: TraceContext
+  /** Total traffic purchased for `memberId` on [[targetSynchronizerId]]. */
+  protected def getTotalPurchasedMemberTraffic(memberId: Member)(implicit
+      tc: TraceContext
   ): Future[Long]
 
   /** The traffic already consumed by `memberId` before this trigger took over its reconciliation,
-    * added to the purchased total when setting the limit. `None` skips the member entirely, which
-    * is how members that are granted unlimited traffic are excluded.
+    * added to the purchased total when setting the limit. A `Left` skips the member and carries the
+    * reason, which is how members that are granted unlimited traffic are excluded.
     */
-  protected def trafficLimitOffset(memberId: Member, synchronizerId: SynchronizerId)(implicit
+  protected def trafficLimitOffset(memberId: Member)(implicit
       tc: TraceContext
-  ): Future[Option[Long]]
+  ): Future[Either[String, Long]]
+
+  /** Guards the one-off check in [[warnOnceIfTargetNotServed]]. */
+  private val targetChecked = new AtomicBoolean(false)
 
   override def completeTask(
       memberTraffic: AssignedContract[
@@ -93,67 +106,82 @@ abstract class ReconcileSequencerLimitWithMemberTrafficTriggerBase(
                   TaskSuccess(s"Skipping MemberTraffic with invalid synchronizerId: ${err}")
                 ),
               synchronizerId =>
-                targetSynchronizerId().flatMap {
-                  case target if target != synchronizerId =>
-                    Future.successful(
-                      TaskSuccess(
-                        s"Skipping MemberTraffic contract for synchronizer $synchronizerId, " +
-                          s"this trigger reconciles $target"
-                      )
+                if (synchronizerId != targetSynchronizerId) {
+                  // A misconfigured target makes every contract land here, which would otherwise
+                  // leave the trigger silently granting nothing, so check the target itself once.
+                  warnOnceIfTargetNotServed().map { _ =>
+                    TaskSuccess(
+                      s"Skipping MemberTraffic contract for synchronizer $synchronizerId, " +
+                        s"this trigger reconciles $targetSynchronizerId"
                     )
-                  case target =>
-                    reconcileOnTargetSequencer(memberId, target)
+                  }
+                } else {
+                  reconcileMember(memberId)
                 },
             ),
       )
   }
 
-  private def reconcileOnTargetSequencer(memberId: Member, synchronizerId: SynchronizerId)(implicit
-      tc: TraceContext
-  ): Future[TaskOutcome] =
-    sequencerAdminConnection().flatMap { sequencerAdminConnection =>
-      sequencerAdminConnection.getStatus
-        .map(_.successOption.map(_.synchronizerId))
-        .flatMap {
-          case None =>
-            Future.failed(
-              Status.FAILED_PRECONDITION
-                .withDescription("Sequencer is not yet initialized")
-                .asRuntimeException()
-            )
-          case Some(sequencerSynchronizerId)
-              if sequencerSynchronizerId.logical != synchronizerId =>
-            // The connection does not serve the synchronizer this trigger was configured for,
-            // so granting traffic here would credit the wrong sequencer.
-            Future.failed(
-              Status.INTERNAL
-                .withDescription(
-                  s"The sequencer admin connection serves ${sequencerSynchronizerId.logical}, " +
-                    s"but this trigger reconciles $synchronizerId"
-                )
-                .asRuntimeException()
-            )
-          case _ =>
-            trafficLimitOffset(memberId, synchronizerId).flatMap {
+  private def reconcileMember(memberId: Member)(implicit tc: TraceContext): Future[TaskOutcome] =
+    trafficLimitOffset(memberId).flatMap {
+      case Left(reason) =>
+        Future.successful(TaskSuccess(s"Skipping MemberTraffic contract for $memberId: $reason"))
+      case Right(offset) =>
+        sequencerAdminConnection().flatMap { sequencerAdminConnection =>
+          sequencerAdminConnection.getStatus
+            .map(_.successOption.map(_.synchronizerId))
+            .flatMap {
               case None =>
-                Future.successful(
-                  TaskSuccess(s"Skipping MemberTraffic contract for member $memberId")
+                Future.failed(
+                  Status.FAILED_PRECONDITION
+                    .withDescription("Sequencer is not yet initialized")
+                    .asRuntimeException()
                 )
-              case Some(offset) =>
-                reconcileExtraTrafficLimitForMember(
-                  memberId,
-                  synchronizerId,
-                  offset,
-                  sequencerAdminConnection,
+              case Some(sequencerSynchronizerId)
+                  if sequencerSynchronizerId.logical != targetSynchronizerId =>
+                // Granting here would credit a sequencer of a different synchronizer. Reported as
+                // retryable so that a connection that is still switching over recovers on its own
+                // instead of dropping the purchase.
+                Future.failed(
+                  Status.FAILED_PRECONDITION
+                    .withDescription(
+                      s"The sequencer admin connection serves ${sequencerSynchronizerId.logical}, " +
+                        s"but this trigger reconciles $targetSynchronizerId"
+                    )
+                    .asRuntimeException()
                 )
+              case _ =>
+                reconcileExtraTrafficLimitForMember(memberId, offset, sequencerAdminConnection)
             }
+        }
+    }
+
+  /** Logs at most once if the sequencer we would grant on does not serve [[targetSynchronizerId]].
+    * A sequencer that is not initialized yet leaves the check pending for a later task.
+    */
+  private def warnOnceIfTargetNotServed()(implicit tc: TraceContext): Future[Unit] =
+    if (targetChecked.get()) {
+      Future.unit
+    } else {
+      sequencerAdminConnection()
+        .flatMap(_.getStatus)
+        .map(_.successOption.map(_.synchronizerId))
+        .map {
+          case Some(sequencerSynchronizerId) =>
+            if (sequencerSynchronizerId.logical != targetSynchronizerId) {
+              logger.warn(
+                s"This trigger reconciles $targetSynchronizerId, but its sequencer serves " +
+                  s"${sequencerSynchronizerId.logical}, so no traffic will ever be granted"
+              )
+            }
+            targetChecked.set(true)
+          case None => ()
         }
     }
 
   private def reconcileExtraTrafficLimitForMember(
       memberId: Member,
-      synchronizerId: SynchronizerId,
-      trafficLimitOffset: Long,
+      offset: Long,
       sequencerAdminConnection: SequencerAdminConnection,
   )(implicit tc: TraceContext): Future[TaskSuccess] = {
     sequencerAdminConnection.lookupSequencerTrafficControlState(memberId).flatMap {
@@ -166,9 +194,9 @@ abstract class ReconcileSequencerLimitWithMemberTrafficTriggerBase(
       case Some(trafficState) =>
         for {
           // Compute new extra traffic limit
-          totalPurchasedTraffic <- getTotalPurchasedMemberTraffic(memberId, synchronizerId)
+          totalPurchasedTraffic <- getTotalPurchasedMemberTraffic(memberId)
           newExtraTrafficLimit = NonNegativeLong
-            .tryCreate(trafficLimitOffset + totalPurchasedTraffic)
+            .tryCreate(offset + totalPurchasedTraffic)
 
           // Get current effective sequencer domain state
           sequencerSynchronizerState <- sequencerAdminConnection
@@ -192,7 +220,7 @@ abstract class ReconcileSequencerLimitWithMemberTrafficTriggerBase(
                   )
                 )
             } else {
-              Future(
+              Future.successful(
                 TaskSuccess(
                   s"Skipping since traffic limit is already up to date (previous limit = ${currentExtraTrafficLimit}, new limit = ${newExtraTrafficLimit})."
                 )
