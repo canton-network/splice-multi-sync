@@ -51,7 +51,7 @@ data MintingAllowance = MintingAllowance with
 type MintingAllowances = [MintingAllowance]
 
 -- | A child batch reference inside a weighted internal node: the child's hash together with
--- the total activity weight its subtree may mint. The weight is part of the hashed commitment,
+-- the total activity weight its subtree mints. The weight is part of the hashed commitment,
 -- so it is fixed when the root is reported.
 data WeightedBatchRef = WeightedBatchRef with
     batchHash : CryptoHash.Hash
@@ -60,11 +60,14 @@ data WeightedBatchRef = WeightedBatchRef with
 
 data Batch
   = BatchOfBatches [CryptoHash.Hash]
+    -- ^ Deprecated plain internal node: produced only by rounds committed before weighted
+    -- trees; kept so those rounds can finish processing.
   | BatchOfMintingAllowances MintingAllowances
   | BatchOfWeightedBatches [WeightedBatchRef]
-    -- ^ Internal node for a registered synchronizer's rewards: expansion checks the declared
-    -- child weights against this contract's budget and endows each child with its declared
-    -- weight, bounding the whole tree's minting by the reported total.
+    -- ^ Weighted internal node: expansion requires the declared child weights to sum to
+    -- exactly this contract's budget and endows each child with its declared weight, pinning
+    -- the whole tree's minting to the round total (activity records exist only for
+    -- reward-eligible providers, so the tree accounts for the full total).
   deriving (Eq, Show)
 
 data ProcessRewardsV2_ProcessBatchResult = ProcessRewardsV2_ProcessBatchResult {}
@@ -89,14 +92,14 @@ template ProcessRewardsV2 with
       -- one that processes the batches. `None` for the decentralized synchronizer's own rewards,
       -- which the DSO party processes as before.
     issuancePerActivityUnit : Optional Decimal
-      -- ^ For a registered synchronizer's rewards: the issuance rate computed by DSO automation. When set, the
-      -- committed batch amounts are activity weights and each coupon mints weight * rate; `None`
-      -- means the amounts are Amulet directly, as for the decentralized synchronizer.
+      -- ^ The issuance rate computed by DSO automation. When set, the committed batch amounts
+      -- are activity weights and each coupon mints weight * rate; `None` means the amounts are
+      -- Amulet directly (a round committed in the deprecated plain format).
     weightBudget : Optional Decimal
-      -- ^ For a registered synchronizer's rewards: the activity weight this contract's subtree
-      -- may mint, threaded down from the reported round total. Together with the per-level
-      -- checks in `ProcessRewardsV2_ProcessBatch` this bounds the total minted by the reported
-      -- (and vote-checked) activity. `None` for the decentralized synchronizer's own rewards.
+      -- ^ The activity weight this contract's subtree mints, threaded down from the round
+      -- total. Together with the per-level exact-sum checks in `ProcessRewardsV2_ProcessBatch`
+      -- this pins the total minted to the vote-checked round total. `None` for rounds committed
+      -- in the deprecated plain format.
   where
     signatory dso
     -- the expander holds the committed batch data off-ledger and must see these contracts to act
@@ -114,7 +117,7 @@ template ProcessRewardsV2 with
         require "batch hash matches" (actualHash == batchHash)
         case batch of
           BatchOfBatches batchHashes -> do
-            require "unweighted internal nodes are only for decentralized-synchronizer rewards"
+            require "unweighted internal nodes carry no issuance rate or budget"
               (isNone issuancePerActivityUnit && isNone weightBudget)
             forA_ batchHashes $ \newBatchHash ->
               create ProcessRewardsV2 with
@@ -128,15 +131,15 @@ template ProcessRewardsV2 with
                 issuancePerActivityUnit
                 weightBudget
           BatchOfWeightedBatches weightedRefs -> do
-            require "weighted internal nodes are only for registered-synchronizer rewards"
+            require "weighted internal nodes require an issuance rate"
               (isSome issuancePerActivityUnit)
             budget <- case weightBudget of
               Some b -> pure b
               None -> abort "weighted batch without a weight budget"
             require "declared child weights are positive"
               (all (\ref -> ref.weight > 0.0) weightedRefs)
-            require "declared child weights are within this subtree's budget"
-              (sum (map (\ref -> ref.weight) weightedRefs) <= budget)
+            require "declared child weights sum to this subtree's budget"
+              (sum (map (\ref -> ref.weight) weightedRefs) == budget)
             forA_ weightedRefs $ \ref ->
               create ProcessRewardsV2 with
                 dso
@@ -153,8 +156,8 @@ template ProcessRewardsV2 with
               budget <- case weightBudget of
                 Some b -> pure b
                 None -> abort "weighted leaf without a weight budget"
-              require "allowance weights are within this subtree's budget"
-                (sum [ ma.amount | ma <- mintingAllowances ] <= budget)
+              require "allowance weights sum to this subtree's budget"
+                (sum [ ma.amount | ma <- mintingAllowances ] == budget)
             unless dryRun $ do
               -- Coupon expiry is determined here based on the time of creation to ensure
               -- providers are always given the full rewardCouponTimeToLive duration to redeem their coupons,

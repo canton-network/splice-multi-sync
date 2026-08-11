@@ -742,8 +742,19 @@ template AmuletRules
       with
         calculateRewardsCid : ContractId CalculateRewardsV2
         batchHash : CryptoHash.Hash
+        issuancePerActivityUnit : Optional Decimal
+          -- ^ when set, the round's committed tree is weighted (`BatchOfWeightedBatches`): batch
+          -- amounts are activity weights and coupons mint at weight * rate. `None` is a round
+          -- committed in the plain format. Appended as Optional because released vote requests
+          -- carry the old shape of this action.
+        weightBudget : Optional Decimal
+          -- ^ the round's total activity, the root's exact-sum budget; set together with the rate
       controller dso
       do
+        require "issuance rate and weight budget are set together"
+          (isSome issuancePerActivityUnit == isSome weightBudget)
+        forA_ issuancePerActivityUnit $ \rate ->
+          require "issuance rate is positive" (rate > 0.0)
         calculateRewards <- fetchAndArchive (ForDso with dso) calculateRewardsCid
         create ProcessRewardsV2 with
           dso
@@ -753,8 +764,8 @@ template AmuletRules
           rewardCouponTimeToLive = calculateRewards.rewardCouponTimeToLive
           batchHash
           expander = None
-          issuancePerActivityUnit = None
-          weightBudget = None
+          issuancePerActivityUnit
+          weightBudget
 
         return AmuletRules_StartProcessingRewardsV2Result {}
 

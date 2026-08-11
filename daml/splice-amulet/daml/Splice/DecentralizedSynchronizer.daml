@@ -168,6 +168,11 @@ data DedicatedSynchronizerState_ReportActivityResult = DedicatedSynchronizerStat
 -- over its activity records plus the round total. The records themselves stay with the operator;
 -- the root binds the later expansion (see `ProcessRewardsV2`) to what was committed here, and the
 -- running total supports the reported-vs-purchased comparison done by the SV apps off-ledger.
+--
+-- Deliberately a separate template from `RegisteredSynchronizer`: reporting recreates this
+-- contract every round (fresh contract id), while the registration must stay stable - the buy
+-- path attaches it via explicit disclosure and governance votes pin it in their arguments, so
+-- fusing the two would let a routine report contend with purchases and invalidate open votes.
 template DedicatedSynchronizerState with
     dso : Party
       -- ^ signatory; reports are visible to all SV nodes via the DSO party

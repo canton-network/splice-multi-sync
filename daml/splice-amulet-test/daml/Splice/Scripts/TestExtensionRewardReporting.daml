@@ -248,8 +248,8 @@ test_Expand_dryRun = do
   coupons <- query @RewardCouponV2 featuredA
   coupons === []
 
--- | The committed tree cannot mint beyond the reported total: over-declared internal nodes and
---   over-weight leaves are both rejected against the threaded budget.
+-- | The committed tree must sum to exactly the reported total at every level (activity records
+--   exist only for reward-eligible providers): over- and under-declarations both fail.
 test_Expand_budgetEnforced : Script ()
 test_Expand_budgetEnforced = do
   d <- setupDefaultAppWithUsers
@@ -296,7 +296,7 @@ test_Expand_budgetEnforced = do
   r2 <- submit operator $ exerciseCmd stateCid2 DedicatedSynchronizerState_ReportActivity with
     round = Round 2
     activityRootHash = CryptoHash.hash root2
-    totalActivity = 50.0
+    totalActivity = 40.0
   submit app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
     reportCid = r2.reportCid
     registeredSynchronizerCid = registrationCid
@@ -313,6 +313,55 @@ test_Expand_budgetEnforced = do
   let Some (leafCid, _) = find (\(_, st) -> st.batchHash == CryptoHash.hash lyingLeaf) prs2
   submitMustFail operator $ exerciseCmd leafCid ProcessRewardsV2_ProcessBatch with
     batch = lyingLeaf
+    providersWithWrongVettingState = Set.empty
+
+  -- an internal node declaring less than the reported total cannot expand either
+  [(stateCid3, _)] <- query @DedicatedSynchronizerState operator
+  let underLeaf = BatchOfMintingAllowances [MintingAllowance with provider = featured; amount = 45.0]
+      underRoot = BatchOfWeightedBatches
+        [ WeightedBatchRef with batchHash = CryptoHash.hash underLeaf; weight = 45.0 ]
+  r3 <- submit operator $ exerciseCmd stateCid3 DedicatedSynchronizerState_ReportActivity with
+    round = Round 3
+    activityRootHash = CryptoHash.hash underRoot
+    totalActivity = 50.0
+  submit app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
+    reportCid = r3.reportCid
+    registeredSynchronizerCid = registrationCid
+    issuancePerActivityUnit = 2.0
+    purchasedTotal = 1_000_000
+    rewardCouponTimeToLive = days 30
+    dryRun = False
+  prs3 <- query @ProcessRewardsV2 operator
+  let Some (underRootCid, _) = find (\(_, st) -> st.batchHash == CryptoHash.hash underRoot) prs3
+  submitMustFail operator $ exerciseCmd underRootCid ProcessRewardsV2_ProcessBatch with
+    batch = underRoot
+    providersWithWrongVettingState = Set.empty
+
+  -- a leaf whose contents fall short of its declared weight cannot expand either
+  [(stateCid4, _)] <- query @DedicatedSynchronizerState operator
+  let shortLeaf = BatchOfMintingAllowances [MintingAllowance with provider = featured; amount = 35.0]
+      root4 = BatchOfWeightedBatches
+        [ WeightedBatchRef with batchHash = CryptoHash.hash shortLeaf; weight = 40.0 ]
+  r4 <- submit operator $ exerciseCmd stateCid4 DedicatedSynchronizerState_ReportActivity with
+    round = Round 4
+    activityRootHash = CryptoHash.hash root4
+    totalActivity = 40.0
+  submit app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
+    reportCid = r4.reportCid
+    registeredSynchronizerCid = registrationCid
+    issuancePerActivityUnit = 2.0
+    purchasedTotal = 1_000_000
+    rewardCouponTimeToLive = days 30
+    dryRun = False
+  prs4 <- query @ProcessRewardsV2 operator
+  let Some (root4Cid, _) = find (\(_, st) -> st.batchHash == CryptoHash.hash root4) prs4
+  submit operator $ exerciseCmd root4Cid ProcessRewardsV2_ProcessBatch with
+    batch = root4
+    providersWithWrongVettingState = Set.empty
+  prs4b <- query @ProcessRewardsV2 operator
+  let Some (shortLeafCid, _) = find (\(_, st) -> st.batchHash == CryptoHash.hash shortLeaf) prs4b
+  submitMustFail operator $ exerciseCmd shortLeafCid ProcessRewardsV2_ProcessBatch with
+    batch = shortLeaf
     providersWithWrongVettingState = Set.empty
 
 -- | Path exclusivity: unweighted internal nodes are for the decentralized synchronizer only,
