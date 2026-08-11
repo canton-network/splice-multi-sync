@@ -422,7 +422,12 @@ class TrafficBasedRewardsSvAppTimeBasedIntegrationTest
           eventually() {
             val startProcessingAction = new ARC_AmuletRules(
               new CRARC_StartProcessingRewardsV2(
-                new AmuletRules_StartProcessingRewardsV2(calculateRewardsCid, new Hash(rootHash))
+                new AmuletRules_StartProcessingRewardsV2(
+                  calculateRewardsCid,
+                  new Hash(rootHash),
+                  java.util.Optional.empty(),
+                  java.util.Optional.empty(),
+                )
               )
             )
             sv1Backend.appState.dsoStore
@@ -626,7 +631,12 @@ class TrafficBasedRewardsSvAppTimeBasedIntegrationTest
           }
         val sv2ConfirmationAction = new ARC_AmuletRules(
           new CRARC_StartProcessingRewardsV2(
-            new AmuletRules_StartProcessingRewardsV2(calculateRewardsCid, new Hash(sv2RootHash))
+            new AmuletRules_StartProcessingRewardsV2(
+              calculateRewardsCid,
+              new Hash(sv2RootHash),
+              java.util.Optional.empty(),
+              java.util.Optional.empty(),
+            )
           )
         )
         val sv2DryRunConfirmationAction = new ARC_AmuletRules(
@@ -634,6 +644,8 @@ class TrafficBasedRewardsSvAppTimeBasedIntegrationTest
             new AmuletRules_StartProcessingRewardsV2(
               dryRunCalculateRewardsCid,
               new Hash(sv2RootHash),
+              java.util.Optional.empty(),
+              java.util.Optional.empty(),
             )
           )
         )
