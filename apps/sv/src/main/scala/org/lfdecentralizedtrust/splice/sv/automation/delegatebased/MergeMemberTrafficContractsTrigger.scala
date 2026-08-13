@@ -53,11 +53,14 @@ class MergeMemberTrafficContractsTrigger(
           SynchronizerId
             .fromString(memberTraffic.payload.synchronizerId)
             .fold(
-              err =>
-                // Skip contracts with invalid synchronizer ids
+              err => {
+                // Unlike a foreign synchronizer id, an unparseable one means corrupt data and
+                // should never be routine, so it is worth an alarm as well as a skip.
+                logger.warn(s"Skipping MemberTraffic with unparseable synchronizerId: ${err}")
                 Future.successful(
                   TaskSuccess(s"Skipping MemberTraffic with invalid synchronizerId: ${err}")
-                ),
+                )
+              },
               synchronizerId =>
                 for {
                   dsoRules <- store.getDsoRules()
