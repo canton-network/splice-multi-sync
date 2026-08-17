@@ -96,6 +96,10 @@ data AmuletRules_ActionRequiringConfirmation
     -- ^ Voted action to change the `AmuletConfig`. Not idempotent.
   | CRARC_StartProcessingRewardsV2 AmuletRules_StartProcessingRewardsV2
     -- ^ Automated action to start the processing of rewards where the minting allowances were computed off-ledger.
+  | CRARC_StartProcessingExtensionRewardsV2 AmuletRules_StartProcessingExtensionRewardsV2
+    -- ^ PoC (extension reward reporting): voted action to start reward processing for a registered
+    --   synchronizer's reported activity, consuming the operator's report and creating the
+    --   ProcessRewardsV2 the operator expands.
   deriving (Eq, Show)
 
 data DsoRules_ActionRequiringConfirmation
@@ -1827,6 +1831,7 @@ executeActionRequiringConfirmation dso dsoRulesCid amuletRulesCid act = case act
           CRARC_RemoveFutureAmuletConfigSchedule choiceArg -> void $ exercise amuletRulesCid choiceArg
           CRARC_UpdateFutureAmuletConfigSchedule choiceArg -> void $ exercise amuletRulesCid choiceArg
           CRARC_StartProcessingRewardsV2 choiceArg -> void $ exercise amuletRulesCid choiceArg
+          CRARC_StartProcessingExtensionRewardsV2 choiceArg -> void $ exercise amuletRulesCid choiceArg
   ARC_DsoRules with .. -> do
     void $ fetchChecked (ForDso with dso) dsoRulesCid
     case dsoAction of
@@ -1898,6 +1903,7 @@ actionRequiringConfirmationEffectiveAt action =
         CRARC_MiningRound_Archive _ -> None
         CRARC_MiningRound_StartIssuing _ -> None
         CRARC_StartProcessingRewardsV2 _ -> None
+        CRARC_StartProcessingExtensionRewardsV2 _ -> None
     ARC_DsoRules with .. -> None
     ARC_AnsEntryContext with .. -> None
     ExtActionRequiringConformation _dummyUnitField ->
