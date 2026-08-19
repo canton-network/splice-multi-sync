@@ -28,6 +28,12 @@ import scala.util.control.NonFatal
   * synchronizer, given by [[targetSynchronizerId]], and skips everything else; the operator of
   * another synchronizer grants those purchases on its own sequencer.
   *
+  * One instance reconciles against one sequencer, which is the MVP shape. A BFT synchronizer has
+  * several, and a traffic grant is aggregated across the sequencer group and only commits once its
+  * threshold is met, so its operator runs one instance of this trigger per sequencer, each with its
+  * own [[sequencerAdminConnection]]. Nothing here assumes the single-sequencer case beyond that
+  * hook returning one connection.
+  *
   * [[targetSynchronizerId]] is a stable value for the lifetime of the trigger, so a node that
   * changes the logical synchronizer it serves has to be restarted. Note that the sibling
   * `SvOnboardingUnlimitedTrafficTrigger` instead re-resolves the active synchronizer from
@@ -82,10 +88,14 @@ abstract class ReconcileSequencerLimitWithMemberTrafficTriggerBase(
       tc: TraceContext
   ): Future[Either[String, Long]]
 
-  /** Set while a target check is in flight or has produced a conclusive answer, so that
-    * [[warnOnceIfTargetNotServed]] logs at most once and runs at most one check at a time.
+  /** Set once the mismatch has been logged, so that it is reported once rather than per task. */
+  private val targetMismatchWarned = new AtomicBoolean(false)
+
+  /** Set once the sequencer has been seen serving [[targetSynchronizerId]], so that the skip path
+    * stops looking it up. Deliberately separate from [[targetMismatchWarned]]: confirming the
+    * wiring must not consume the one warning a later mismatch is entitled to.
     */
-  private val targetCheckSettled = new AtomicBoolean(false)
+  private val targetConfirmed = new AtomicBoolean(false)
 
   override def completeTask(
       memberTraffic: AssignedContract[
@@ -140,8 +150,9 @@ abstract class ReconcileSequencerLimitWithMemberTrafficTriggerBase(
           case (_, Some(served)) if served != targetSynchronizerId =>
             // Granting here would credit a sequencer of a different synchronizer. Reported as
             // retryable so that a connection that is still switching over recovers on its own
-            // instead of dropping the purchase. A target that is permanently wrong therefore
-            // retries rather than failing once, and is reported by warnOnceIfTargetNotServed.
+            // instead of dropping the purchase. A permanent miswiring therefore retries rather
+            // than failing once, so warn alongside it to give the retries a one-line diagnosis.
+            warnOnceTargetNotServed(served)
             Future.failed(
               Status.FAILED_PRECONDITION
                 .withDescription(
@@ -167,32 +178,39 @@ abstract class ReconcileSequencerLimitWithMemberTrafficTriggerBase(
       }
     }
 
-  /** Logs at most once if the sequencer we would grant on does not serve [[targetSynchronizerId]].
-    * Best-effort: an unreachable or uninitialized sequencer leaves the check for a later task and
-    * never fails the caller.
+  /** Logs at most once that the sequencer we would grant on serves `served` rather than
+    * [[targetSynchronizerId]].
+    */
+  private def warnOnceTargetNotServed(served: SynchronizerId)(implicit tc: TraceContext): Unit =
+    if (targetMismatchWarned.compareAndSet(false, true)) {
+      logger.warn(
+        s"This trigger reconciles $targetSynchronizerId, but its sequencer serves " +
+          s"$served, so no traffic is granted while that remains the case"
+      )
+    }
+
+  /** Looks the sequencer up to warn on a mismatch, for callers that do not already know what it
+    * serves. Best-effort: an unreachable or uninitialized sequencer leaves the check for a later
+    * task and never fails the caller.
     */
   private def warnOnceIfTargetNotServed()(implicit tc: TraceContext): Future[Unit] =
-    if (!targetCheckSettled.compareAndSet(false, true)) {
+    if (targetConfirmed.get() || targetMismatchWarned.get()) {
       Future.unit
     } else {
       // delegate so that a subclass throwing instead of failing its future is still caught below
       Future
         .delegate(servedSynchronizerId())
         .map {
-          case (_, Some(served)) =>
-            if (served != targetSynchronizerId) {
-              logger.warn(
-                s"This trigger reconciles $targetSynchronizerId, but its sequencer serves " +
-                  s"$served, so no traffic is granted while that remains the case"
-              )
-            }
+          case (_, Some(served)) if served != targetSynchronizerId =>
+            warnOnceTargetNotServed(served)
+          case (_, Some(_)) =>
+            targetConfirmed.set(true)
           case (_, None) =>
-            // Inconclusive, so allow a later task to check again.
-            targetCheckSettled.set(false)
+            // Inconclusive, so leave the check for a later task.
+            ()
         }
         .recover { case NonFatal(e) =>
           logger.debug(s"Could not check the sequencer of $targetSynchronizerId: $e")
-          targetCheckSettled.set(false)
         }
     }
 
