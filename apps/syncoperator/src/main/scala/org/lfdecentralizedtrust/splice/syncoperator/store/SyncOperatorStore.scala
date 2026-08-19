@@ -1,0 +1,125 @@
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package org.lfdecentralizedtrust.splice.syncoperator.store
+
+import com.digitalasset.canton.lifecycle.CloseContext
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.topology.{Member, ParticipantId, PartyId, SynchronizerId}
+import com.digitalasset.canton.tracing.TraceContext
+import org.lfdecentralizedtrust.splice.codegen.java.splice
+import org.lfdecentralizedtrust.splice.config.IngestionConfig
+import org.lfdecentralizedtrust.splice.environment.RetryProvider
+import org.lfdecentralizedtrust.splice.store.db.AcsInterfaceViewRowData
+import org.lfdecentralizedtrust.splice.store.{AppStore, Limit, MultiDomainAcsStore}
+import org.lfdecentralizedtrust.splice.syncoperator.store.db.DbSyncOperatorStore
+import org.lfdecentralizedtrust.splice.syncoperator.store.db.SyncOperatorTables.SyncOperatorAcsStoreRowData
+import org.lfdecentralizedtrust.splice.util.TemplateJsonDecoder
+
+import scala.concurrent.{ExecutionContext, Future}
+import scala.jdk.OptionConverters.*
+
+/** Store of a sync operator app.
+  *
+  * Ingests the `MemberTraffic` purchases made for this operator's synchronizer. The buy choice sets
+  * the registered operator as an observer on each of them, so they are picked up on-ledger rather
+  * than by polling Scan.
+  */
+trait SyncOperatorStore extends AppStore {
+
+  /** The parties and synchronizer this store is scoped to. */
+  val key: SyncOperatorStore.Key
+
+  override def multiDomainAcsStore: MultiDomainAcsStore
+
+  /** Total traffic purchased for `memberId` on this operator's synchronizer. */
+  def getTotalPurchasedMemberTraffic(memberId: Member)(implicit
+      tc: TraceContext
+  ): Future[Long]
+}
+
+object SyncOperatorStore {
+
+  def apply(
+      key: Key,
+      storage: DbStorage,
+      loggerFactory: NamedLoggerFactory,
+      retryProvider: RetryProvider,
+      migrationId: Long,
+      participantId: ParticipantId,
+      ingestionConfig: IngestionConfig,
+      defaultLimit: Limit,
+  )(implicit
+      ec: ExecutionContext,
+      templateJsonDecoder: TemplateJsonDecoder,
+      close: CloseContext,
+  ): SyncOperatorStore =
+    new DbSyncOperatorStore(
+      key,
+      storage,
+      loggerFactory,
+      retryProvider,
+      migrationId,
+      participantId,
+      ingestionConfig,
+      defaultLimit,
+    )
+
+  case class Key(
+      /** The party registered as the operator of [[synchronizerId]], and the observer the buy choice
+        * sets on every purchase made for it.
+        */
+      operatorParty: PartyId,
+      /** The DSO party, sole signatory of `MemberTraffic`. */
+      dsoParty: PartyId,
+      /** The dedicated synchronizer this operator serves. */
+      synchronizerId: SynchronizerId,
+  ) extends PrettyPrinting {
+    override def pretty: Pretty[Key] = prettyOfClass(
+      param("operatorParty", _.operatorParty),
+      param("dsoParty", _.dsoParty),
+      param("synchronizerId", _.synchronizerId),
+    )
+  }
+
+  def contractFilter(key: Key): MultiDomainAcsStore.ContractFilter[
+    SyncOperatorAcsStoreRowData,
+    AcsInterfaceViewRowData.NoInterfacesIngested,
+  ] = {
+    import MultiDomainAcsStore.mkFilter
+    val operator = key.operatorParty.toProtoPrimitive
+    val dso = key.dsoParty.toProtoPrimitive
+    val synchronizerId = key.synchronizerId.toProtoPrimitive
+
+    MultiDomainAcsStore.SimpleContractFilter(
+      key.operatorParty,
+      Map(
+        // Not filtered by this node's own migration id, unlike the SV store. A registered
+        // synchronizer is pinned to migration id 0 (upgrades go through LSU), so matching against
+        // the decentralized synchronizer's migration id would drop every purchase for this
+        // synchronizer the first time that synchronizer migrates.
+        mkFilter(splice.decentralizedsynchronizer.MemberTraffic.COMPANION)(co =>
+          co.payload.dso == dso &&
+            co.payload.operator.toScala.contains(operator) &&
+            co.payload.synchronizerId == synchronizerId &&
+            co.payload.migrationId == 0L
+        ) { contract =>
+          SyncOperatorAcsStoreRowData(
+            contract,
+            memberTrafficMember = Member
+              .fromProtoPrimitive_(contract.payload.memberId)
+              // we ignore cases where the member id is invalid instead of throwing an exception
+              // to avoid killing the entire ingestion pipeline as a result
+              .fold(_ => None, Some(_)),
+            // the filter above has already established that these agree, so we take the parsed
+            // id from the key rather than parsing the payload again per contract
+            memberTrafficDomain = Some(key.synchronizerId),
+            totalTrafficPurchased = Some(contract.payload.totalPurchased),
+          )
+        }
+      ),
+    )
+  }
+}

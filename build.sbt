@@ -85,6 +85,7 @@ lazy val root: Project = (project in file("."))
     `apps-validator`,
     `apps-scan`,
     `apps-splitwell`,
+    `apps-syncoperator`,
     `apps-sv`,
     `apps-app`,
     `apps-metrics-docs`,
@@ -1895,6 +1896,18 @@ lazy val `apps-splitwell` =
             modules = List("pekko-http-v1.0.0", "circe"),
           ),
         ),
+    )
+
+lazy val `apps-syncoperator` =
+  project
+    .in(file("apps/syncoperator"))
+    .dependsOn(
+      `apps-common` % "compile->compile;test->test",
+      `apps-scan` % "compile->compile;test->test",
+    )
+    .settings(
+      libraryDependencies ++= Seq(scalapb_runtime_grpc, scalapb_runtime),
+      BuildCommon.sharedAppSettings,
     )
 
 lazy val pulumi =
