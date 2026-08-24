@@ -29,7 +29,7 @@ class ReconcileSequencerLimitWithMemberTrafficTrigger(
     override protected val context: TriggerContext,
     store: SvDsoStore,
     synchronizerNodeService: SynchronizerNodeService[LocalSynchronizerNode],
-    override protected val targetSynchronizerId: SynchronizerId,
+    synchronizerId: SynchronizerId,
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
 )(implicit
     ec: ExecutionContext,
@@ -48,15 +48,13 @@ class ReconcileSequencerLimitWithMemberTrafficTrigger(
   override protected def getTotalPurchasedMemberTraffic(memberId: Member)(implicit
       tc: TraceContext
   ): Future[Long] =
-    store.getTotalPurchasedMemberTraffic(memberId, targetSynchronizerId)
+    store.getTotalPurchasedMemberTraffic(memberId, synchronizerId)
 
   override protected def trafficLimitOffset(memberId: Member)(implicit
       tc: TraceContext
   ): Future[Either[String, Long]] =
     store.getDsoRulesWithSvNodeStates().map { rulesAndStates =>
-      if (
-        rulesAndStates.activeSvParticipantAndMediatorIds(targetSynchronizerId).contains(memberId)
-      ) {
+      if (rulesAndStates.activeSvParticipantAndMediatorIds(synchronizerId).contains(memberId)) {
         // SVs are granted unlimited traffic and do not need to purchase it via MemberTraffic
         // contracts. While the top-up trigger for SV validators is disabled by default, we also
         // explicitly ignore SV related MemberTraffic contracts here as a safeguard for the case of
