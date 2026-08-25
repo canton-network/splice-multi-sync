@@ -93,15 +93,11 @@ object SyncOperatorStore {
     MultiDomainAcsStore.SimpleContractFilter(
       key.operatorParty,
       Map(
-        // Not filtered by this node's own migration id, unlike the SV store. A registered
-        // synchronizer is pinned to migration id 0 (upgrades go through LSU), so matching against
-        // the decentralized synchronizer's migration id would drop every purchase for this
-        // synchronizer the first time that synchronizer migrates.
         mkFilter(splice.decentralizedsynchronizer.MemberTraffic.COMPANION)(co =>
           co.payload.dso == dso &&
             co.payload.operator.toScala.contains(operator) &&
             co.payload.synchronizerId == synchronizerId &&
-            co.payload.migrationId == 0L
+            co.payload.migrationId == 0L // A registered synchronizer is pinned to migration id 0.
         ) { contract =>
           SyncOperatorAcsStoreRowData(
             contract,

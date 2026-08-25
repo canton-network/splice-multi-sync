@@ -19,6 +19,7 @@ create table sync_operator_acs_store(
     total_traffic_purchased       bigint
 );
 
-create index sync_operator_acs_store_sid_mid_tid_mtm_mtd
-    on sync_operator_acs_store (store_id, migration_id, template_id_qualified_name, member_traffic_member, member_traffic_domain)
+create index sync_operator_acs_store_sid_mid_pn_tid_mtm_mtd
+    on sync_operator_acs_store (store_id, migration_id, package_name, template_id_qualified_name,
+                                member_traffic_member, member_traffic_domain)
     where member_traffic_member is not null;

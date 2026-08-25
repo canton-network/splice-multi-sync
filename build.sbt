@@ -1906,7 +1906,6 @@ lazy val `apps-syncoperator` =
       `apps-scan` % "compile->compile;test->test",
     )
     .settings(
-      libraryDependencies ++= Seq(scalapb_runtime_grpc, scalapb_runtime),
       BuildCommon.sharedAppSettings,
     )
 
