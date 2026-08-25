@@ -24,11 +24,7 @@ import org.lfdecentralizedtrust.splice.syncoperator.store.SyncOperatorStore
 
 import scala.concurrent.ExecutionContextExecutor
 
-/** Manages background automation that runs on a sync operator app.
-  *
-  * The traffic reconciliation trigger, which turns the ingested purchases into sequencer traffic
-  * limits, is registered here.
-  */
+/** Manages background automation that runs on a sync operator app. */
 class SyncOperatorAutomationService(
     automationConfig: AutomationConfig,
     clock: Clock,
@@ -46,8 +42,7 @@ class SyncOperatorAutomationService(
 ) extends SpliceAppAutomationService(
       automationConfig,
       clock,
-      // Nothing registered here depends on domain time yet. The operator's participant is connected
-      // to the dedicated synchronizer, so it can be sourced from there when something does.
+      // Nothing registered here depends on domain time yet.
       DomainTimeSynchronization.Noop,
       store,
       ledgerClient,

@@ -8,7 +8,6 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.topology.{Member, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
-import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.MemberTraffic
 import org.lfdecentralizedtrust.splice.config.IngestionConfig
 import org.lfdecentralizedtrust.splice.environment.RetryProvider
 import org.lfdecentralizedtrust.splice.store.db.AcsQueries.AcsStoreId
@@ -17,13 +16,13 @@ import org.lfdecentralizedtrust.splice.store.db.{
   AcsQueries,
   AcsTables,
   DbAppStore,
+  MemberTrafficQueries,
   StoreDescriptor,
 }
 import org.lfdecentralizedtrust.splice.store.{Limit, LimitHelpers, MultiDomainAcsStore}
 import org.lfdecentralizedtrust.splice.syncoperator.store.SyncOperatorStore
 import org.lfdecentralizedtrust.splice.syncoperator.store.db.SyncOperatorTables.SyncOperatorAcsStoreRowData
-import org.lfdecentralizedtrust.splice.util.{QualifiedName, TemplateJsonDecoder}
-import slick.jdbc.canton.ActionBasedSQLInterpolation.Implicits.actionBasedSQLInterpolationCanton
+import org.lfdecentralizedtrust.splice.util.TemplateJsonDecoder
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -69,6 +68,7 @@ class DbSyncOperatorStore(
     with AcsTables
     with AcsQueries
     with LimitHelpers
+    with MemberTrafficQueries
     with SyncOperatorStore {
 
   override def dsoPartyId: PartyId = key.dsoParty
@@ -79,31 +79,19 @@ class DbSyncOperatorStore(
   ] = SyncOperatorStore.contractFilter(key)
 
   import multiDomainAcsStore.waitUntilAcsIngested
-  import org.lfdecentralizedtrust.splice.util.FutureUnlessShutdownUtil.futureUnlessShutdownToFuture
 
   private def acsStoreId: AcsStoreId = multiDomainAcsStore.acsStoreId
 
   override def getTotalPurchasedMemberTraffic(memberId: Member)(implicit
       tc: TraceContext
   ): Future[Long] = waitUntilAcsIngested {
-    for {
-      sum <- storage
-        .querySingle(
-          sql"""
-               select sum(total_traffic_purchased)
-               from #${SyncOperatorTables.acsTableName}
-               where store_id = $acsStoreId
-                and migration_id = $domainMigrationId
-                and package_name = ${MemberTraffic.PACKAGE_NAME}
-                and template_id_qualified_name = ${QualifiedName(
-              MemberTraffic.TEMPLATE_ID_WITH_PACKAGE_ID
-            )}
-                and member_traffic_member = ${lengthLimited(memberId.toProtoPrimitive)}
-                and member_traffic_domain = ${key.synchronizerId}
-             """.as[Long].headOption,
-          "getTotalPurchasedMemberTraffic",
-        )
-        .value
-    } yield sum.getOrElse(0L)
+    sumPurchasedMemberTraffic(
+      storage,
+      SyncOperatorTables.acsTableName,
+      acsStoreId,
+      domainMigrationId,
+      memberId,
+      key.synchronizerId,
+    )
   }
 }

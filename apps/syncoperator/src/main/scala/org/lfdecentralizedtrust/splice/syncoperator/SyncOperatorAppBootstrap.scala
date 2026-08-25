@@ -65,8 +65,7 @@ class SyncOperatorAppBootstrap(
     ) {
 
   override def initialize(adminRoutes: AdminRoutes): EitherT[Future, String, Unit] = {
-    // The node has no HTTP surface of its own yet: it is driven by on-ledger ingestion and the
-    // sequencer admin API. Operator-facing endpoints attach here when they land.
+    // No HTTP surface yet; operator-facing endpoints attach here.
     val _ = adminRoutes
     startInstanceUnlessClosing {
       new SyncOperatorApp(

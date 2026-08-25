@@ -38,9 +38,8 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
 
 /** Class representing a sync operator app instance.
   *
-  * The operator side of Amulet-funded traffic on a dedicated synchronizer. Its participant is
-  * connected both to the decentralized synchronizer, where purchases are burned and recorded, and
-  * to the synchronizer it operates, whose sequencer it grants the purchased traffic on.
+  * Ingests the traffic purchases made for the synchronizer it operates and grants them on that
+  * synchronizer's sequencer.
   *
   * Modelled after Canton's ParticipantNode class.
   */
@@ -81,14 +80,6 @@ class SyncOperatorApp(
       partyId: PartyId,
       preInitializeState: Unit,
   )(implicit traceContext: TraceContext): Future[SyncOperatorApp.State] = {
-    val synchronizerId = SynchronizerId.tryFromString(config.synchronizer.synchronizerId)
-    // MVP serves a single sequencer; see SyncOperatorSynchronizerConfig.
-    val sequencerConfig = config.synchronizer.sequencers.headOption.getOrElse(
-      throw Status.INVALID_ARGUMENT
-        .withDescription("No sequencer configured for the dedicated synchronizer")
-        .asRuntimeException()
-    )
-
     for {
       scanConnection <- appInitStep(s"Get scan connection") {
         ScanConnection.singleCached(
@@ -112,18 +103,17 @@ class SyncOperatorApp(
       }
       dsoParty <- appInitStep("Get DSO party id") { scanConnection.getDsoPartyId() }
       sequencerAdminConnection = new SequencerAdminConnection(
-        sequencerConfig.adminApi,
+        config.sequencer.adminApi,
         appParameters.loggingConfig.api,
         loggerFactory,
         metrics.grpcClientMetrics,
         retryProvider,
       )
-      _ <- appInitStep(s"Wait for the sequencer serving $synchronizerId") {
-        waitForSequencerServing(sequencerAdminConnection, synchronizerId)
+      synchronizerId <- appInitStep("Get the synchronizer id from the sequencer") {
+        servedSynchronizerId(sequencerAdminConnection)
       }
-        // Resolved only because the store partitions its ingestion offsets by it. Purchases for a
-      // registered synchronizer are pinned to migration id 0 and are ingested regardless of it,
-      // see SyncOperatorStore.contractFilter.
+      // Only used to partition the store's ingestion offsets; purchases are ingested regardless
+      // of it, see SyncOperatorStore.contractFilter.
       domainMigrationId <- appInitStep(s"Resolving domain migration id") {
         resolveDomainMigrationId(scanConnection)
       }
@@ -180,32 +170,23 @@ class SyncOperatorApp(
     }
   }
 
-  /** Fails initialization if the configured sequencer does not serve the configured synchronizer,
-    * rather than leaving a miswired node to discover that one purchase at a time.
-    */
-  private def waitForSequencerServing(
-      sequencerAdminConnection: SequencerAdminConnection,
-      synchronizerId: SynchronizerId,
-  )(implicit traceContext: TraceContext): Future[Unit] =
-    retryProvider.waitUntil(
+  /** The synchronizer the configured sequencer serves. Waits while it is still initializing. */
+  private def servedSynchronizerId(
+      sequencerAdminConnection: SequencerAdminConnection
+  )(implicit traceContext: TraceContext): Future[SynchronizerId] =
+    retryProvider.getValueWithRetries(
       RetryFor.WaitingOnInitDependency,
-      "sync_operator_sequencer_serves_synchronizer",
-      s"the configured sequencer serves $synchronizerId",
-      sequencerAdminConnection.getStatus.map { status =>
-        status.successOption.map(_.synchronizerId.logical) match {
-          case Some(`synchronizerId`) => ()
-          case Some(served) =>
-            throw Status.FAILED_PRECONDITION
-              .withDescription(
-                s"The configured sequencer serves $served, but this node is configured for $synchronizerId"
-              )
-              .asRuntimeException()
-          case None =>
+      "sync_operator_served_synchronizer_id",
+      "the sequencer reports the synchronizer it serves",
+      sequencerAdminConnection.getStatus.map(
+        _.successOption
+          .map(_.synchronizerId.logical)
+          .getOrElse(
             throw Status.UNAVAILABLE
               .withDescription("Sequencer is not yet initialized")
               .asRuntimeException()
-        }
-      },
+          )
+      ),
       logger,
     )
 

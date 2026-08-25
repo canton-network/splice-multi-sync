@@ -15,30 +15,20 @@ import org.lfdecentralizedtrust.splice.config.{
 }
 import org.lfdecentralizedtrust.splice.scan.config.ScanAppClientConfig
 
+// The sequencer this node grants traffic on.
 case class SyncOperatorSequencerConfig(
-    adminApi: ClientConfig
+    adminApi: FullClientConfig
 )
-
-// The sequencers of the synchronizer this node serves. A single entry is the expected
-// configuration; the field is a sequence so that a BFT synchronizer, which needs one reconciler
-// per sequencer, does not require a config migration.
-case class SyncOperatorSynchronizerConfig(
-    synchronizerId: String,
-    sequencers: Seq[SyncOperatorSequencerConfig],
-) {
-  require(sequencers.nonEmpty, "at least one sequencer must be configured")
-}
 
 case class SyncOperatorAppBackendConfig(
     override val adminApi: AdminServerConfig = AdminServerConfig(),
     override val storage: DbConfig,
     postgres: SplicePostgresConfig = SplicePostgresConfig(),
-    // Ledger API user of the operator party, on a participant connected to both the decentralized
-    // and the dedicated synchronizer.
+    // Ledger API user of the operator party.
     operatorUser: String,
     participantClient: ParticipantClientConfig,
     scanClient: ScanAppClientConfig,
-    synchronizer: SyncOperatorSynchronizerConfig,
+    sequencer: SyncOperatorSequencerConfig,
     override val automation: AutomationConfig = AutomationConfig(),
     parameters: SpliceParametersConfig = SpliceParametersConfig(batching = BatchingConfig()),
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration =

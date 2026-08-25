@@ -69,7 +69,9 @@ abstract class SyncOperatorStoreTest extends StoreTestBase with HasExecutionCont
       // the purchase is made and recorded on the decentralized synchronizer, not on the dedicated
       // one it names
       contracts.zipWithIndex.map { case (c, i) =>
-        toActiveContract(dummyDomain, c, i.toLong)
+        // mirrors `observer (optionalToList operator)` on the template
+        val observers = c.payload.operator.toScala.map(PartyId.tryFromProtoPrimitive).toList
+        toActiveContract(dummyDomain, c, i.toLong, observers)
       },
       Seq.empty,
       Seq.empty,
@@ -134,6 +136,8 @@ abstract class SyncOperatorStoreTest extends StoreTestBase with HasExecutionCont
     "report zero for a member that has never purchased" in {
       for {
         store <- mkStore()
+        // queries wait on ACS ingestion, so the empty ACS still has to be ingested
+        _ <- ingest(store, Seq.empty)
         total <- store.getTotalPurchasedMemberTraffic(alice)
       } yield total shouldBe 0L
     }

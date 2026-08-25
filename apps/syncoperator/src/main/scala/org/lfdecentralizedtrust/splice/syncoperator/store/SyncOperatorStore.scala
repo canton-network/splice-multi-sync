@@ -23,9 +23,8 @@ import scala.jdk.OptionConverters.*
 
 /** Store of a sync operator app.
   *
-  * Ingests the `MemberTraffic` purchases made for this operator's synchronizer. The buy choice sets
-  * the registered operator as an observer on each of them, so they are picked up on-ledger rather
-  * than by polling Scan.
+  * Ingests the `MemberTraffic` purchases made for this operator's synchronizer, which the buy choice
+  * makes it an observer of.
   */
 trait SyncOperatorStore extends AppStore {
 
@@ -68,9 +67,7 @@ object SyncOperatorStore {
     )
 
   case class Key(
-      /** The party registered as the operator of [[synchronizerId]], and the observer the buy choice
-        * sets on every purchase made for it.
-        */
+      /** The registered operator of [[synchronizerId]]. */
       operatorParty: PartyId,
       /** The DSO party, sole signatory of `MemberTraffic`. */
       dsoParty: PartyId,
@@ -113,8 +110,7 @@ object SyncOperatorStore {
               // we ignore cases where the member id is invalid instead of throwing an exception
               // to avoid killing the entire ingestion pipeline as a result
               .fold(_ => None, Some(_)),
-            // the filter above has already established that these agree, so we take the parsed
-            // id from the key rather than parsing the payload again per contract
+            // the filter has already established these agree, so avoid parsing per contract
             memberTrafficDomain = Some(key.synchronizerId),
             totalTrafficPurchased = Some(contract.payload.totalPurchased),
           )
