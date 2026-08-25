@@ -550,6 +550,15 @@ object ConfigTransforms {
           conf.focus(_.participantClient).modify(portTransform(bump, _))
         else conf
       ),
+      updateAllSyncOperatorAppConfigs((name, conf) =>
+        if (predicate(name))
+          conf
+            .focus(_.participantClient)
+            .modify(portTransform(bump, _))
+            .focus(_.sequencer.adminApi)
+            .modify(portTransform(bump, _))
+        else conf
+      ),
     )
 
     transforms.foldLeft((c: SpliceConfig) => c)((f, tf) =>
