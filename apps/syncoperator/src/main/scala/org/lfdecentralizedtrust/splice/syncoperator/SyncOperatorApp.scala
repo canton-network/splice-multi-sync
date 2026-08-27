@@ -132,7 +132,7 @@ class SyncOperatorApp(
         config.automation.ingestion,
         config.parameters.defaultLimit,
       )
-      globalSynchronizerId <- appInitStep("Get the decentralized synchronizer id") {
+      globalSynchronizerId <- appInitStep("Get the global synchronizer id") {
         scanConnection.getAmuletRulesDomain()(traceContext)
       }
       readOnlyLedgerConnection = ledgerClient
