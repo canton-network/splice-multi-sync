@@ -42,7 +42,7 @@ class SyncOperatorAutomationService(
 ) extends SpliceAppAutomationService(
       automationConfig,
       clock,
-      // Nothing registered here depends on domain time yet.
+      // Nothing registered here depends on domain time.
       DomainTimeSynchronization.Noop,
       store,
       ledgerClient,
