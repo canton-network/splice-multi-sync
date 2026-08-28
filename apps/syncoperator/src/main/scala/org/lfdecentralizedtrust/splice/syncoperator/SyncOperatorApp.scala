@@ -27,7 +27,6 @@ import org.lfdecentralizedtrust.splice.environment.{
   SpliceLedgerClient,
 }
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.ScanConnection
-import org.lfdecentralizedtrust.splice.store.db.DbAppStore
 import org.lfdecentralizedtrust.splice.syncoperator.automation.SyncOperatorAutomationService
 import org.lfdecentralizedtrust.splice.syncoperator.config.SyncOperatorAppBackendConfig
 import org.lfdecentralizedtrust.splice.syncoperator.metrics.SyncOperatorAppMetrics
@@ -112,11 +111,6 @@ class SyncOperatorApp(
       synchronizerId <- appInitStep("Get the synchronizer id from the sequencer") {
         servedSynchronizerId(sequencerAdminConnection)
       }
-      // Only used to partition the store's ingestion offsets; purchases are ingested regardless
-      // of it, see SyncOperatorStore.contractFilter.
-      domainMigrationId <- appInitStep(s"Resolving domain migration id") {
-        resolveDomainMigrationId(scanConnection)
-      }
       storeKey = SyncOperatorStore.Key(
         operatorParty = partyId,
         dsoParty = dsoParty,
@@ -127,12 +121,14 @@ class SyncOperatorApp(
         storage,
         loggerFactory,
         retryProvider,
-        domainMigrationId,
+        // MIGRATION_ID is frozen network-wide and logical synchronizer upgrades carry a serial id
+        // instead, so the store's partition never has to move.
+        0L,
         participantId,
         config.automation.ingestion,
         config.parameters.defaultLimit,
       )
-      globalSynchronizerId <- appInitStep("Get the decentralized synchronizer id") {
+      globalSynchronizerId <- appInitStep("Get the global synchronizer id") {
         scanConnection.getAmuletRulesDomain()(traceContext)
       }
       readOnlyLedgerConnection = ledgerClient
@@ -189,26 +185,6 @@ class SyncOperatorApp(
       ),
       logger,
     )
-
-  private def resolveDomainMigrationId(
-      scanConnection: ScanConnection
-  )(implicit traceContext: TraceContext): Future[Long] =
-    DbAppStore.getHighestKnownMigrationId(storage).flatMap {
-      case Some(migrationId) =>
-        logger.info(s"Resolved domain migration id $migrationId from the local store offsets")
-        Future.successful(migrationId)
-      case None =>
-        retryProvider.getValueWithRetries(
-          RetryFor.WaitingOnInitDependency,
-          "sync_operator_domain_migration_id",
-          s"Wait for domain migration id to be available",
-          scanConnection.getMigrationId().map { migrationId =>
-            logger.info(s"Resolved domain migration id $migrationId from scan")
-            migrationId
-          },
-          logger,
-        )
-    }
 
   protected[this] override def automationServices(st: SyncOperatorApp.State) =
     Seq(st.automation)
