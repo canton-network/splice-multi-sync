@@ -33,6 +33,7 @@ import org.lfdecentralizedtrust.splice.http.v0.definitions.{
   UpdateHistoryItemV2,
 }
 import org.lfdecentralizedtrust.splice.scan.{ScanApp, ScanAppBootstrap}
+import org.lfdecentralizedtrust.splice.store.VoteResultsFilters
 import org.lfdecentralizedtrust.splice.scan.automation.ScanAutomationService
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.commands.HttpScanAppClient
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.commands.HttpScanAppClient.TransferContextWithInstances
@@ -367,20 +368,6 @@ abstract class ScanAppReference(
       httpCommand(HttpScanAppClient.GetRewardAccountingBatch(roundNumber, batchHash))
     }
 
-  import org.lfdecentralizedtrust.splice.http.v0.definitions.TransactionHistoryResponseItem
-  import org.lfdecentralizedtrust.splice.http.v0.definitions.TransactionHistoryRequest.SortOrder
-
-  def listTransactions(
-      pageEndEventId: Option[String],
-      sortOrder: SortOrder,
-      pageSize: Int,
-  ): Seq[TransactionHistoryResponseItem] =
-    consoleEnvironment.run {
-      httpCommand(
-        HttpScanAppClient.ListTransactions(pageEndEventId, sortOrder, pageSize)
-      )
-    }
-
   def getAcsSnapshot(party: PartyId, recordTime: Option[Instant]): ByteString =
     consoleEnvironment.run {
       httpCommand(
@@ -454,6 +441,31 @@ abstract class ScanAppReference(
     consoleEnvironment.run {
       httpCommand(
         HttpScanAppClient.GetAcsSnapshotAtV1(
+          at.toInstant.atOffset(java.time.ZoneOffset.UTC),
+          migrationId,
+          recordTimeMatch,
+          after,
+          pageSize,
+          partyIds,
+          templates,
+        )
+      )
+    }
+
+  def getAcsSnapshotAtV2(
+      at: CantonTimestamp,
+      migrationId: Long,
+      recordTimeMatch: Option[definitions.AcsRequestV2.RecordTimeMatch] = Some(
+        definitions.AcsRequestV2.RecordTimeMatch.Exact
+      ),
+      after: Option[String] = None,
+      pageSize: Int = 100,
+      partyIds: Option[Vector[PartyId]] = None,
+      templates: Option[Vector[PackageQualifiedName]] = None,
+  ) =
+    consoleEnvironment.run {
+      httpCommand(
+        HttpScanAppClient.GetAcsSnapshotAtV2(
           at.toInstant.atOffset(java.time.ZoneOffset.UTC),
           migrationId,
           recordTimeMatch,
@@ -846,22 +858,14 @@ abstract class ScanAppReference(
 
   @Help.Summary("List vote results")
   def listVoteRequestResults(
-      actionName: Option[String],
-      accepted: Option[Boolean],
-      requester: Option[String],
-      effectiveFrom: Option[String],
-      effectiveTo: Option[String],
+      filters: VoteResultsFilters,
       limit: BigInt,
       pageToken: Option[BigInt] = None,
   ): (Seq[DsoRules_CloseVoteRequestResult], Option[BigInt]) = {
     consoleEnvironment.run {
       httpCommand(
         HttpScanAppClient.ListVoteRequestResults(
-          actionName,
-          accepted,
-          requester,
-          effectiveFrom,
-          effectiveTo,
+          filters,
           limit,
           pageToken,
         )
@@ -912,6 +916,18 @@ abstract class ScanAppReference(
           nextPageToken,
           limit,
         )
+      )
+    }
+
+  @Help.Summary(
+    "Get checksums for a list of bulk storage objects (using both staging and committed objects)"
+  )
+  def getBulkObjectChecksums(
+      objectKeys: Seq[String]
+  ): definitions.GetBulkObjectChecksumsResponse =
+    consoleEnvironment.run {
+      httpCommand(
+        HttpScanAppClient.GetBulkObjectChecksums(objectKeys)
       )
     }
 

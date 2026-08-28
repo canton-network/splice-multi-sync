@@ -76,7 +76,8 @@ export function configureCloudArmorPolicy(
 
   // Step 2: Add predefined WAF rules
   if (cac.predefinedWafRules && cac.predefinedWafRules.length > 0) {
-    addPredefinedWafRules(/*securityPolicy, args.predefinedWafRules, cac.allRulesPreviewOnly, ruleOpts*/);
+    addPredefinedWafRules();
+    /*securityPolicy, args.predefinedWafRules, cac.allRulesPreviewOnly, ruleOpts*/
   }
 
   // Step 3: Add IP whitelisting rules
@@ -147,9 +148,11 @@ function addThrottleAndBanRules(
       // this makes the pulumi update cleaner if toggling just one service
       if (throttleAcrossAllEndpointsAllIps.maxRequestsBeforeHttp429 > 0) {
         const ruleName = `throttle-all-endpoints-all-ips-${confEntryHead}`;
-
+        const hostnameRegex = hostname
+          ? _.escapeRegExp(hostname)
+          : `scan\\.[\\w-]+\\.${_.escapeRegExp(config.clusterHostname)}`;
         const pathExpr = allowedPathsCondition(scanExternalRateLimits, pathPrefix);
-        const hostExpr = `request.headers['host'].matches(R"^${_.escapeRegExp(hostname)}(?::[0-9]+)?$")`;
+        const hostExpr = `request.headers['host'].matches(R"^${hostnameRegex}(?::[0-9]+)?$")`;
         const matchExpr = `${pathExpr} && ${hostExpr}`;
 
         new PolicyRule(
@@ -227,15 +230,14 @@ function allowedPathsCondition(scanExternalRateLimits: PerEndpointLimits, pathPr
       .filter(p => !p.isBanned)
       .map(p => p.pathPrefix);
 
-    // Factor out /api/scan/ prefix (with trailing slash)
-    const scanPrefix = '/api/scan/';
-    const scanPathRxs = pathPrefixes
-      .filter(p => p.startsWith(scanPrefix))
-      .map(p => _.escapeRegExp(p.substring(scanPrefix.length))); // Remove prefix for factoring
+    const basePrefix = pathPrefix.endsWith('/') ? pathPrefix : `${pathPrefix}/`;
+    const dynamicPathRxs = pathPrefixes
+      .filter(p => p.startsWith(basePrefix))
+      .map(p => _.escapeRegExp(p.substring(basePrefix.length)));
 
     // Build regex pattern
-    if (scanPathRxs.length > 0) {
-      const regexPattern = `${scanPrefix}(${scanPathRxs.join('|')})`;
+    if (dynamicPathRxs.length > 0) {
+      const regexPattern = `${basePrefix}(?:${dynamicPathRxs.join('|')})`;
       const pathExpr = `request.path.matches(R"^${regexPattern}")`;
 
       // limit from https://docs.cloud.google.com/armor/quotas#limits
@@ -249,7 +251,7 @@ function allowedPathsCondition(scanExternalRateLimits: PerEndpointLimits, pathPr
 
       return pathExpr;
     } else {
-      // Fallback to simple prefix if no scan paths
+      // Fallback to simple prefix matching if no paths were resolved
       return `request.path.startsWith(R"${pathPrefix}")`;
     }
   } else {
