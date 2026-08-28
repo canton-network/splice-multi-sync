@@ -149,6 +149,8 @@ class SyncOperatorApp(
         ledgerClient,
         retryProvider,
         config.parameters,
+        sequencerAdminConnection,
+        config.trafficBalanceReconciliationDelay,
         loggerFactory,
         packageVersionSupport,
       )
