@@ -4,6 +4,7 @@
 package org.lfdecentralizedtrust.splice.scan.store.db
 
 import org.lfdecentralizedtrust.splice.scan.store.AppActivityStore
+import org.lfdecentralizedtrust.splice.scan.store.AppActivityStore.RoundIngestionStatus
 import org.lfdecentralizedtrust.splice.store.UpdateHistory
 import org.lfdecentralizedtrust.splice.util.FutureUnlessShutdownUtil.futureUnlessShutdownToFuture
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -171,7 +172,7 @@ class DbAppActivityRecordStore(
     * This round may not have all app activity records ingested.
     * Returns None if no app activity records have been ingested, ie meta row does not exist.
     */
-  def earliestIngestedRound()(implicit
+  private[store] def earliestIngestedRound()(implicit
       tc: TraceContext
   ): Future[Option[Long]] = {
     val codeVersion = ingestionVersions.code
@@ -186,6 +187,32 @@ class DbAppActivityRecordStore(
       "appActivity.earliestIngestedRound",
     )
   }
+
+  override def ingestionStatusForRound(roundNumber: Long)(implicit
+      tc: TraceContext
+  ): Future[RoundIngestionStatus] =
+    earliestIngestedRound().map {
+      case Some(earliestIngested) if roundNumber <= earliestIngested =>
+        // We should have data for this round but no root hash exists:
+        // a peer likely does, so delegate.
+        RoundIngestionStatus.CannotProvide
+
+      case Some(_) =>
+        // Meta row present but round is beyond our ingested boundary —
+        // ingestion is still catching up; retry.
+        RoundIngestionStatus.Undetermined
+
+      case None if !isFirstSv =>
+        // Late-joining Scan with no ingestion boundary of its own —
+        // it might seem Undetermined is right, but peers do have one,
+        // so we delegate.
+        RoundIngestionStatus.CannotProvide
+
+      case None =>
+        // firstSV during initial ingestion (brief startup window before
+        // the meta row is inserted) — retry.
+        RoundIngestionStatus.Undetermined
+    }
 
   /** Find the latest round with complete app activity.
     * A round is complete once the verdict ingestion has moved passed its archival.
@@ -293,20 +320,23 @@ class DbAppActivityRecordStore(
       (sql"""
         insert into #${Tables.appActivityRecords}(
           history_id, verdict_row_id, round_number, app_provider_parties, app_activity_weights
-        ) values """ ++ values).asUpdate
+        ) values """ ++ values ++ sql" ON CONFLICT DO NOTHING").asUpdate
     }
   }
 
   /** Insert activity records and ensure the meta row exists.
     * Creates the meta row when enough information is available to
     * determine which rounds have complete activity, even when no
-    * activity records exist (e.g., no featured app providers).
+    * activity records exist (e.g., no featured app providers),
+    * but only if traffic-summaries could be obtained for this batch.
     * On a fresh firstSV with no archived rounds, bootstraps round 0
     * as complete.
     */
   def insertAppActivityRecordsDBIO(
       items: Seq[AppActivityRecordT],
       firstRecordTimeMicros: Long,
+      hasTrafficSummaries: Boolean,
+      firstActiveRoundO: Option[Long] = None,
       lastArchivedRoundO: Option[Long] = None,
   )(implicit tc: TraceContext): DBIO[Unit] = {
     val insertRecords =
@@ -316,15 +346,9 @@ class DbAppActivityRecordStore(
           logger.info(s"Inserted ${items.size} app activity records.")
         }
 
-    // earliestRound: the lowest round covered by this ingestion batch.
-    //   - From activity records when present
-    //   - From lastArchivedRound when no featured apps produced records
-    //   - From bootstrap (-1) on a fresh firstSV with no archived rounds
-    val earliestRound = items
-      .map(_.roundNumber)
-      .minOption
-      .orElse(lastArchivedRoundO)
-      .orElse(if (isFirstSv) Some(-1L) else None)
+    // earliestRound: the oldest round open at the earliest record_time of this batch.
+    // or (-1) on firstSV, as it is expected to have complete data for the first round.
+    val earliestRound = if (isFirstSv) Some(-1L) else firstActiveRoundO
 
     // lastArchived: the highest round archived as of this verdict batch.
     //   - From the caller when available
@@ -337,10 +361,12 @@ class DbAppActivityRecordStore(
     for {
       _ <- insertRecords
       ensureResult <- earliestRound match {
-        case Some(earliest) =>
+        case Some(earliest) if hasTrafficSummaries =>
           ensureMetaDBIO((firstRecordTimeMicros, earliest), lastArchived)
-        case None =>
-          // No archived rounds and not firstSV — skip meta creation.
+        case _ =>
+          // Either we have no rounds info and this is not firstSV,
+          // or we have not started obtaining the traffic summaries yet
+          // — skip meta creation.
           // A later verdict batch will create it.
           DBIO.successful(Resume: MetaCheckResult)
       }
@@ -416,6 +442,7 @@ class DbAppActivityRecordStore(
              earliest_ingested_round, last_archived_round)
           values ($historyId, $codeVersion, $userVersion, $startedIngestingAt,
                   $earliestIngestedRound, $lastArchivedRound)
+          ON CONFLICT DO NOTHING
     """.asUpdate
 
   private def updateLastArchivedRoundDBIO(round: Long) =

@@ -76,6 +76,7 @@ paths:
     get:
       tags: [sv]
       x-jvm-package: sv_public
+      x-external-audience: none
       operationId: "getCometBftNodeStatus"
       responses:
         "200":
@@ -96,6 +97,7 @@ paths:
     post:
       tags: [sv]
       x-jvm-package: sv_public
+      x-external-audience: none
       operationId: "cometBftJsonRpcRequest"
       requestBody:
         required: true
@@ -176,7 +178,7 @@ paths:
   /v0/admin/synchronizer/lsu/cancel:
     post:
       tags: [sv]
-      x-jvm-package: sv_admin
+      x-jvm-package: sv_operator
       operationId: "cancelLogicalSynchronizerUpgrade"
       responses:
         "200":
@@ -229,6 +231,24 @@ paths:
             application/json:
               schema:
                 "$ref": "../../../../common/src/main/openapi/common-internal.yaml#/components/schemas/ListDsoRulesVoteResultsResponse"
+  /v0/admin/sv/voteresults/count:
+    post:
+      tags: [ sv ]
+      x-jvm-package: sv_operator
+      operationId: "countVoteRequestResults"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "../../../../common/src/main/openapi/common-internal.yaml#/components/schemas/CountVoteResultsRequest"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                "$ref": "../../../../common/src/main/openapi/common-internal.yaml#/components/schemas/CountVoteResultsResponse"
   /v0/admin/sv/previous-sv-reward-weight:
     post:
       tags: [ sv ]
@@ -375,6 +395,7 @@ paths:
     post:
       tags: [sv]
       x-jvm-package: sv_public
+      x-external-audience: validators
       operationId: "onboardValidator"
       requestBody:
         required: true
@@ -393,6 +414,7 @@ paths:
     post:
       tags: [sv]
       x-jvm-package: sv_public
+      x-external-audience: svs
       operationId: "startSvOnboarding"
       requestBody:
         required: true
@@ -411,6 +433,7 @@ paths:
     get:
       tags: [sv]
       x-jvm-package: sv_public
+      x-external-audience: svs
       operationId: "getSvOnboardingStatus"
       parameters:
         - name: "candidate_party_id_or_name"
@@ -433,6 +456,7 @@ paths:
     post:
       tags: [sv]
       x-jvm-package: sv_public
+      x-external-audience: svs
       operationId: "onboardSvPartyMigrationAuthorize"
       requestBody:
         required: true
@@ -459,6 +483,7 @@ paths:
     post:
       tags: [sv]
       x-jvm-package: sv_public
+      x-external-audience: svs
       operationId: "onboardSvSequencer"
       requestBody:
         required: true
@@ -479,6 +504,7 @@ paths:
     post:
       tags: [sv]
       x-jvm-package: sv_public
+      x-external-audience: validators
       description: "faucet for validator candidates self-service"
       operationId: "devNetOnboardValidatorPrepare"
       responses:
@@ -497,6 +523,7 @@ paths:
       tags: [sv]
       # TODO(DACH-NY/canton-network-internal#2106) Move to sv_operator
       x-jvm-package: sv_public
+      x-external-audience: validators
       operationId: "getDsoInfo"
       responses:
         "200":
@@ -510,6 +537,7 @@ paths:
     get:
       tags: [sv]
       x-jvm-package: sv_public
+      x-external-audience: svs
       operationId: "getMigrationId"
       description: |
         Returns the synchronizer migration id this SV is currently using.

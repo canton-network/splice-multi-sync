@@ -26,12 +26,14 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.round.{
 import org.lfdecentralizedtrust.splice.codegen.java.splice.ans.AnsRules
 import org.lfdecentralizedtrust.splice.config.UpgradesConfig
 import org.lfdecentralizedtrust.splice.environment.{
+  BaseAppConnection,
   HttpAppConnection,
   RetryProvider,
   SpliceLedgerClient,
 }
 import org.lfdecentralizedtrust.splice.http.HttpClient
 import org.lfdecentralizedtrust.splice.http.v0.definitions.{
+  GetBulkObjectChecksumsResponse,
   GetRewardAccountingActivityTotalsResponse,
   GetRewardAccountingBatchResponse,
   GetRewardAccountingRootHashResponse,
@@ -44,6 +46,7 @@ import org.lfdecentralizedtrust.splice.http.v0.definitions.{
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.commands.HttpScanAppClient
 import org.lfdecentralizedtrust.splice.scan.config.ScanAppClientConfig
 import org.lfdecentralizedtrust.splice.store.HistoryBackfilling.SourceMigrationInfo
+import org.lfdecentralizedtrust.splice.store.VoteResultsFilters
 import org.lfdecentralizedtrust.splice.store.UpdateHistory.UpdateHistoryResponse
 import org.lfdecentralizedtrust.splice.util.{
   ChoiceContextWithDisclosures,
@@ -78,7 +81,7 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.dsorules.{
 }
 import io.grpc.Status
 import org.apache.pekko.http.scaladsl.model.{HttpHeader, Uri}
-import org.lfdecentralizedtrust.splice.admin.api.client.commands.HttpCommand
+import org.lfdecentralizedtrust.splice.admin.api.client.commands.{HttpCommand, HttpCommandException}
 import org.lfdecentralizedtrust.splice.codegen.java.splice.api.token.transferinstructionv1
 import org.lfdecentralizedtrust.splice.codegen.java.splice.api.token.transferinstructionv2
 import org.lfdecentralizedtrust.splice.codegen.java.splice.api.token.allocationv1
@@ -95,7 +98,7 @@ import scala.util.{Failure, Success}
   * to query for the DSO party id.
   */
 class SingleScanConnection private[client] (
-    private[client] val config: ScanAppClientConfig,
+    val config: ScanAppClientConfig,
     upgradesConfig: UpgradesConfig,
     protected val clock: Clock,
     retryProvider: RetryProvider,
@@ -140,9 +143,11 @@ class SingleScanConnection private[client] (
             .runHttpCmd(url, command, headers)
             .andThen {
               case Failure(e) =>
-                MetricsContext.withMetricLabels(("outcome", e.getClass.getSimpleName)) {
-                  implicit ec2 =>
-                    metrics.callPerConnection.mark()(m.merge(ec2))
+                MetricsContext.withMetricLabels(
+                  ("outcome", e.getClass.getSimpleName),
+                  ("http_status", SingleScanConnection.httpStatusLabel(e)),
+                ) { implicit ec2 =>
+                  metrics.callPerConnection.mark()(m.merge(ec2))
                 }
                 timer.stop()(m)
               case Success(_) =>
@@ -567,11 +572,7 @@ class SingleScanConnection private[client] (
     )
 
   override def listVoteRequestResults(
-      actionName: Option[String],
-      accepted: Option[Boolean],
-      requester: Option[String],
-      effectiveFrom: Option[String],
-      effectiveTo: Option[String],
+      filters: VoteResultsFilters,
       limit: Int,
       pageToken: Option[BigInt] = None,
   )(implicit
@@ -580,14 +581,20 @@ class SingleScanConnection private[client] (
   ): Future[(Seq[DsoRules_CloseVoteRequestResult], Option[BigInt])] = runHttpCmd(
     config.adminApi.url,
     HttpScanAppClient.ListVoteRequestResults(
-      actionName,
-      accepted,
-      requester,
-      effectiveFrom,
-      effectiveTo,
+      filters,
       limit,
       pageToken,
     ),
+  )
+
+  override def countVoteRequestResults(
+      filters: VoteResultsFilters
+  )(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): Future[Long] = runHttpCmd(
+    config.adminApi.url,
+    HttpScanAppClient.CountVoteRequestResults(filters),
   )
 
   override def getPreviousSvRewardWeight(svParty: String, effectiveBefore: Option[String])(implicit
@@ -1024,9 +1031,29 @@ class SingleScanConnection private[client] (
       config.adminApi.url,
       HttpScanAppClient.GetRewardAccountingBatch(roundNumber, batchHash),
     )
+
+  override def getBulkObjectChecksums(
+      objectKeys: Seq[String]
+  )(implicit ec: ExecutionContext, tc: TraceContext): Future[GetBulkObjectChecksumsResponse] =
+    runHttpCmd(
+      config.adminApi.url,
+      HttpScanAppClient.GetBulkObjectChecksums(objectKeys),
+    )
 }
 
 object SingleScanConnection {
+
+  private[client] def httpStatusLabel(error: Throwable): String =
+    error match {
+      case e: BaseAppConnection.UnexpectedHttpJsonResponse => e.statusCode.intValue.toString
+      case e: BaseAppConnection.UnexpectedHttpMalformedJsonResponse =>
+        e.statusCode.intValue.toString
+      case e: BaseAppConnection.UnexpectedHttpTextResponse => e.statusCode.intValue.toString
+      case e: BaseAppConnection.UnexpectedHttpNonJsonResponse => e.statusCode.intValue.toString
+      case e: HttpCommandException => e.status.intValue.toString
+      case _ => "none"
+    }
+
   def withSingleScanConnection[T](
       scanConfig: ScanAppClientConfig,
       upgradesConfig: UpgradesConfig,
