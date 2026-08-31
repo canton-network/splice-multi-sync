@@ -49,6 +49,7 @@ import org.lfdecentralizedtrust.splice.environment.{
   PackageVettingLookupService,
 }
 import org.lfdecentralizedtrust.splice.lsu.LsuRollForwardTimestamp
+import org.lfdecentralizedtrust.splice.scan.config.ScanAppClientConfig
 import org.lfdecentralizedtrust.splice.sv.SvAppClientConfig
 import org.lfdecentralizedtrust.splice.sv.util.SvUtil
 import org.lfdecentralizedtrust.splice.util.SpliceUtil
@@ -128,6 +129,8 @@ object SvOnboardingConfig {
       svClient: SvAppClientConfig, // an SV that we'll contact to start our onboarding
       publicKey: String, // the key that identifies us together with our name
       privateKey: String, // the private key we use for authenticating ourselves
+      // A scan instance (typically the sponsor's) used to fetch DSO info during onboarding
+      scanClient: ScanAppClientConfig,
   ) extends SvOnboardingConfig
 
   object JoinWithKey
@@ -220,8 +223,8 @@ object SvOnboardingConfig {
   def hideConfidential(config: SvOnboardingConfig): SvOnboardingConfig = {
     val hidden = "****"
     config match {
-      case JoinWithKey(name, svClient, publicKey, _) =>
-        JoinWithKey(name, svClient, publicKey, hidden)
+      case JoinWithKey(name, svClient, publicKey, _, scanClient) =>
+        JoinWithKey(name, svClient, publicKey, hidden, scanClient)
       case other => other
     }
   }
@@ -454,6 +457,11 @@ case class SvAppBackendConfig(
     convertFeaturedAppActivityMarkerObservers: Boolean = true,
     // Whether to ensure that heuristic free confirmation responses get enabled on the synchronizer via the ReconcileDynamicSynchronizerConfigTrigger.
     enableFreeConfirmationResponses: Boolean = true,
+    // Target value for the setBalanceRequestSubmissionWindowSize traffic control parameter,
+    // applied to the synchronizer via the ReconcileDynamicSynchronizerParametersTrigger.
+    // The default matches Canton's current default as of 3.5.12
+    setBalanceRequestSubmissionWindowSize: PositiveFiniteDuration =
+      PositiveFiniteDuration.ofMinutes(2),
     packageVettingCache: PackageVettingLookupService.CacheConfig =
       PackageVettingLookupService.CacheConfig(),
     useInternalSequencerApi: Boolean = false,
@@ -461,9 +469,18 @@ case class SvAppBackendConfig(
     cantonBftSequencingParameters: Option[BftSequencingParameters] = Some(
       BftSequencingParameters(
         pbftViewChangeTimeout = PositiveFiniteDuration.ofSeconds(5),
-        segmentLength = SequencingParameters.DefaultSegmentLength.length,
+        // increased from default as epoch changes are synchronization points which can slow things down.
+        segmentLength =
+          PositiveLong.tryCreate(SequencingParameters.DefaultSegmentLength.length.value * 4),
         blacklistLeaderSelectionPolicyConfig =
-          SequencingParameters.DefaultLeaderSelectionPolicyConfig,
+          SequencingParameters.DefaultLeaderSelectionPolicyConfig.copy(
+            howLongToBlacklist =
+              BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Exponential(
+                initialValue = 1L,
+                // Reduced by 4 to compensate for increased segmentLength.
+                maximumEpochBlacklisted = Some(250L / 4L),
+              )
+          ),
       )
     ),
     // Set to false to disable the DB-level exclusive lock that prevents two SV instances

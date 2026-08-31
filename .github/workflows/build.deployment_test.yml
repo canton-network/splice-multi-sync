@@ -8,7 +8,7 @@ on:
 
 jobs:
   deployment_test:
-    runs-on: self-hosted-k8s-x-small
+    runs-on: self-hosted-k8s-small
 
     container:
       image: us-central1-docker.pkg.dev/da-cn-shared/ghcr/digital-asset/decentralized-canton-sync-dev/docker/splice-test-ci:0.3.12
@@ -25,10 +25,9 @@ jobs:
       - name: Setup
         uses: ./.github/actions/tests/common_test_setup
         with:
-          cache_version: 8
+          cache_version: 9
           test_name: deployment_test
           with_sbt: false
-          target: 'oss'
 
       - name: Helm tests
         uses: ./.github/actions/nix/run_bash_command_in_nix

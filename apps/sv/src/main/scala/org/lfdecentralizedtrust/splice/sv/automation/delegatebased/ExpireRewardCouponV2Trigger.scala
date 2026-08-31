@@ -6,24 +6,26 @@ package org.lfdecentralizedtrust.splice.sv.automation.delegatebased
 import org.lfdecentralizedtrust.splice.automation.*
 import org.lfdecentralizedtrust.splice.codegen.java.splice
 import org.lfdecentralizedtrust.splice.codegen.java.splice.amuletrules.AmuletRules_ClaimExpiredRewardsV2
-import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 
 import scala.concurrent.{ExecutionContext, Future}
-import ExpireRewardCouponV2Trigger.*
+import ExpireRewardCouponV2Trigger.{Coupon, CouponCid, Task, getStakeholders}
 import org.lfdecentralizedtrust.splice.environment.{DarResources, PackageIdResolver}
 import org.lfdecentralizedtrust.splice.store.AppStoreWithIngestion.SpliceLedgerConnectionPriority
+import org.lfdecentralizedtrust.splice.store.IgnoredPartiesStore
 import org.lfdecentralizedtrust.splice.sv.config.SvAppBackendConfig
+import org.lfdecentralizedtrust.splice.sv.util.ContractStakeholders
 
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
 class ExpireRewardCouponV2Trigger(
-    svConfig: SvAppBackendConfig,
+    override protected val svConfig: SvAppBackendConfig,
     override protected val context: TriggerContext,
     override protected val svTaskContext: SvTaskBasedTrigger.Context,
+    override protected val ignoredPartiesStore: IgnoredPartiesStore,
 )(implicit
     override val ec: ExecutionContext,
     mat: Materializer,
@@ -35,12 +37,22 @@ class ExpireRewardCouponV2Trigger(
       splice.amulet.RewardCouponV2.COMPANION,
       svTaskContext.vettingLookupService,
       PackageIdResolver.Package.SpliceAmulet,
-      payload => (payload.dso +: observerParties(payload)).map(PartyId.tryFromProtoPrimitive(_)),
+      getStakeholders,
     )
-    with SvTaskBasedTrigger[Task] {
+    with SvTaskBasedTrigger[Task]
+    with IgnoredUnavailablePartiesGuard {
   private val store = svTaskContext.dsoStore
 
   override def completeTaskAsDsoDelegate(task: Task, controller: String)(implicit
+      tc: TraceContext
+  ): Future[TaskOutcome] =
+    completeUnlessAmuletVersionIgnored(
+      task.work.vettedVersion.toString,
+      task.work.stakeholders,
+      ignoreUnresponsiveParties = true,
+    )(completeExpiryTaskAsDsoDelegate(task, controller))
+
+  private def completeExpiryTaskAsDsoDelegate(task: Task, controller: String)(implicit
       tc: TraceContext
   ): Future[TaskOutcome] = {
     val expiredCoupons = task.work.expiredContracts
@@ -54,8 +66,11 @@ class ExpireRewardCouponV2Trigger(
       )
     } else {
       val cids = expiredCoupons.map(_.contractId).asJava
-      val expiryObservers =
-        expiredCoupons.flatMap(c => observerParties(c.payload)).distinct.sorted
+      val expiryInformees = (task.work.stakeholders - store.key.dsoParty)
+        .map(_.toProtoPrimitive)
+        .toSeq
+        .distinct
+        .sorted
       for {
         dsoRules <- store.getDsoRules()
         amuletRules <- store.getAmuletRules()
@@ -64,7 +79,7 @@ class ExpireRewardCouponV2Trigger(
             amuletRules.contractId,
             new AmuletRules_ClaimExpiredRewardsV2(
               cids,
-              expiryObservers.asJava,
+              expiryInformees.asJava,
             ),
             controller,
           )
@@ -82,9 +97,10 @@ class ExpireRewardCouponV2Trigger(
       } yield TaskSuccess(s"archived ${expiredCoupons.size} expired reward coupons v2")
     }
   }
+
 }
 
-object ExpireRewardCouponV2Trigger {
+object ExpireRewardCouponV2Trigger extends ContractStakeholders[splice.amulet.RewardCouponV2] {
   private type CouponCid = splice.amulet.RewardCouponV2.ContractId
   private type Coupon = splice.amulet.RewardCouponV2
 
@@ -93,7 +109,10 @@ object ExpireRewardCouponV2Trigger {
       BatchedMultiDomainExpiredContractTrigger.Batch[CouponCid, Coupon]
     ]
 
-  private def observerParties(coupon: Coupon): Seq[String] =
-    if (coupon.providerIsObserver) coupon.provider +: coupon.beneficiary.toScala.toList
-    else Seq.empty
+  override def informees(payload: splice.amulet.RewardCouponV2): Seq[String] = if (
+    payload.providerIsObserver
+  ) payload.provider +: payload.beneficiary.toScala.toList
+  else Seq.empty
+
+  override def dso(payload: splice.amulet.RewardCouponV2): String = payload.dso
 }

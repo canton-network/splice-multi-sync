@@ -5,48 +5,28 @@
 
 .. NOTE: add your upcoming release notes below this line. They are included in the `release_notes.rst`.
 
-.. release-notes:: Upcoming
+release-notes:: Upcoming
 
-  .. note::
+    - Deployment
 
-    Next-release notes
+        - All Splice Helm charts now set ``automountServiceAccountToken: false`` on the pods they
+          deploy. Splice components do not use the Kubernetes API, so pods no longer receive an
+          API-server credential by default; this reduces the impact of a compromised pod in
+          clusters where permissions are bound to the namespace's ``default`` service account.
+          If your deployment relies on the mounted token, for example through a custom service
+          account set via ``serviceAccountName``, you can restore the previous behavior by setting
+          the new ``automountServiceAccountToken`` Helm value to ``true``.
 
-  - Deployment
+    - SV App
 
-    - Helm
+        - The public ``/v0/dso`` endpoint is deprecated and will be removed in 0.9.0
+          (see also the release notes for 0.5.5 for the original deprecation notice).
+          Use the public ``/v0/dso`` endpoint in the scan app if you need to fetch DSO info
+          without SV operator credentials.
+          A new ``/v1/dso`` endpoint has been added that returns the same response as ``/v0/dso``
+          but requires authorization as SV operator.
 
-      - Added security contexts for all Helm-based deployments intended for production.
-        This improves the security of Kubernetes based deployments.
-
-  - Scan
-
-    - Add a metric for the size of the most recent ACS snapshot
-
-  - Token Standard APIs
-
-    - Add the ``accountInputFieldsToShow`` property in the token metadata
-      API (``token-metadata-v1.yaml``).
-      This property allows instruments that support only account-ids or only
-      account providers to inform wallets of this fact.
-      This change is backwards compatible.
-
-  - Daml
-
-    - Adds support for specifying weight on the ``FeaturedAppRight`` contract as described in
-      `CIP-0104 amendment <https://github.com/canton-foundation/cips/pull/238>`__.
-    - Fix a bug in ``AmuletAllocation``, which prohibited settling V1 amulet allocations when
-      using them with the Token Standard V2 feature of setting multiple
-      executors via metadata.
-
-    - These changes require a Daml upgrade to the following versions:
-
-        ================== =======
-        name               version
-        ================== =======
-        amulet             0.1.22
-        amuletNameService  0.1.23
-        dsoGovernance      0.1.28
-        validatorLifecycle 0.1.8
-        wallet             0.1.23
-        walletPayments     0.1.22
-        ================== =======
+        - Joining SVs now fetch DSO info during onboarding from a scan instance
+          (typically the sponsor's) instead of the sponsor SV app's deprecated public
+          ``/v0/dso`` endpoint. The scan is configured via the new ``.joinWithKeyOnboarding.sponsorScanUrl`` Helm value.
+          SVs who set the ``.joinWithKeyOnboarding`` key config must set it before upgrading.
