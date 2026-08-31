@@ -1913,7 +1913,7 @@ lazy val `apps-syncoperator` =
       `apps-scan` % "compile->compile;test->test",
     )
     .settings(
-      BuildCommon.sharedAppSettings,
+      BuildCommon.sharedAppSettings
     )
 
 lazy val pulumi =
