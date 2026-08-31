@@ -17,10 +17,7 @@ import org.lfdecentralizedtrust.splice.syncoperator.store.SyncOperatorStore
 
 import scala.concurrent.{ExecutionContext, Future}
 
-/** Reconciles the traffic purchased for this operator's synchronizer with its sequencer. The store
-  * only holds purchases naming that synchronizer, so the base trigger's per-contract check is a
-  * safeguard rather than the filter.
-  */
+/** Reconciles the traffic purchased for this operator's synchronizer with its sequencer */
 class ReconcileDedicatedSequencerTrafficTrigger(
     override protected val context: TriggerContext,
     store: SyncOperatorStore,

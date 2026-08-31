@@ -5,8 +5,9 @@ package org.lfdecentralizedtrust.splice.integration.tests
 
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.topology.{Member, PartyId, SynchronizerId}
 import org.lfdecentralizedtrust.splice.codegen.java.splice
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.RegisteredSynchronizer
 import org.lfdecentralizedtrust.splice.codegen.java.splice.round.IssuingMiningRound
 import org.lfdecentralizedtrust.splice.codegen.java.splice.types.Round
 import org.lfdecentralizedtrust.splice.integration.EnvironmentDefinition
@@ -14,21 +15,25 @@ import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   IntegrationTest,
   SpliceTestConsoleEnvironment,
 }
-import org.lfdecentralizedtrust.splice.util.{DisclosedContracts, SynchronizerFeesTestUtil, WalletTestUtil}
+import org.lfdecentralizedtrust.splice.util.{
+  DisclosedContracts,
+  SynchronizerFeesTestUtil,
+  WalletTestUtil,
+}
 
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
-/** The buy path for a registered synchronizer is not exposed through the wallet yet
-  * (ChainSafe/canton-extending-mainnet#39), so this exercises `AmuletRules_BuyMemberTraffic`
-  * directly with the registration disclosed, which is what the wallet will eventually do.
+/** Buys traffic for a registered synchronizer via `AmuletRules_BuyMemberTraffic` with the
+  * registration disclosed, and checks the operator grants it on that synchronizer's sequencer.
   */
 class SyncOperatorTrafficIntegrationTest
     extends IntegrationTest
     with SynchronizerFeesTestUtil
     with WalletTestUtil {
 
-  private val trafficAmount = 1_000_000L
+  private val firstPurchase = 1_000_000L
+  private val secondPurchase = 2_000_000L
 
   override def environmentDefinition: SpliceEnvironmentDefinition =
     EnvironmentDefinition
@@ -65,59 +70,77 @@ class SyncOperatorTrafficIntegrationTest
         result.exerciseResult.registeredSynchronizerCid
       }
 
-      val limitBefore = extraTrafficLimit(member)
+      val aliceParty = onboardWalletUser(aliceWalletClient, aliceValidatorBackend)
+      aliceWalletClient.tap(walletUsdToAmulet(200.0))
 
-      clue("alice buys traffic for the registered synchronizer") {
-        val aliceParty = onboardWalletUser(aliceWalletClient, aliceValidatorBackend)
-        aliceWalletClient.tap(walletUsdToAmulet(100.0))
-        val transferContext =
-          sv1ScanBackend.getTransferContextWithInstances(CantonTimestamp.now())
-        val amulets = aliceWalletClient.list().amulets.map(_.contract.contractId.contractId)
-
-        aliceValidatorBackend.participantClientWithAdminToken.ledger_api_extensions.commands
-          .submitWithResult(
-            aliceValidatorBackend.config.ledgerApiUser,
-            actAs = Seq(aliceParty),
-            readAs = Seq(aliceParty),
-            update = transferContext.amuletRules.contract.contractId
-              .exerciseAmuletRules_BuyMemberTraffic(
-                amulets
-                  .map[splice.amuletrules.TransferInput](cid =>
-                    new splice.amuletrules.transferinput.InputAmulet(
-                      new splice.amulet.Amulet.ContractId(cid)
-                    )
-                  )
-                  .asJava,
-                new splice.amuletrules.TransferContext(
-                  transferContext.latestOpenMiningRound.contract.contractId,
-                  Map.empty[Round, IssuingMiningRound.ContractId].asJava,
-                  Map.empty[String, splice.amulet.ValidatorRight.ContractId].asJava,
-                  None.toJava,
-                ),
-                aliceParty.toProtoPrimitive,
-                member.toProtoPrimitive,
-                synchronizerId.toProtoPrimitive,
-                // a registered synchronizer is pinned to migration id 0
-                0L,
-                trafficAmount,
-                Some(dsoParty.toProtoPrimitive).toJava,
-                Some(registration).toJava,
-              ),
-            disclosedContracts = DisclosedContracts
-              .forTesting(
-                transferContext.amuletRules,
-                transferContext.latestOpenMiningRound,
-              )
-              .toLedgerApiDisclosedContracts,
-          )
+      clue("no traffic is granted before any purchase") {
+        extraTrafficLimit(member) shouldBe 0L
       }
 
-      clue("the operator grants it on the splitwell sequencer") {
+      clue("a purchase is granted on the splitwell sequencer") {
+        buyTraffic(aliceParty, member, synchronizerId, registration, dsoParty, firstPurchase)
         eventually() {
-          extraTrafficLimit(member) shouldBe (limitBefore + trafficAmount)
+          extraTrafficLimit(member) shouldBe firstPurchase
+        }
+      }
+
+      clue("a second purchase raises the limit by exactly its amount") {
+        buyTraffic(aliceParty, member, synchronizerId, registration, dsoParty, secondPurchase)
+        eventually() {
+          extraTrafficLimit(member) shouldBe (firstPurchase + secondPurchase)
         }
       }
     }
+  }
+
+  private def buyTraffic(
+      buyer: PartyId,
+      member: Member,
+      synchronizerId: SynchronizerId,
+      registration: RegisteredSynchronizer.ContractId,
+      dsoParty: PartyId,
+      trafficAmount: Long,
+  )(implicit env: SpliceTestConsoleEnvironment): Unit = {
+    val transferContext =
+      sv1ScanBackend.getTransferContextWithInstances(CantonTimestamp.now())
+    val amulets = aliceWalletClient.list().amulets.map(_.contract.contractId.contractId)
+
+    aliceValidatorBackend.participantClientWithAdminToken.ledger_api_extensions.commands
+      .submitWithResult(
+        aliceValidatorBackend.config.ledgerApiUser,
+        actAs = Seq(buyer),
+        readAs = Seq(buyer),
+        update = transferContext.amuletRules.contract.contractId
+          .exerciseAmuletRules_BuyMemberTraffic(
+            amulets
+              .map[splice.amuletrules.TransferInput](cid =>
+                new splice.amuletrules.transferinput.InputAmulet(
+                  new splice.amulet.Amulet.ContractId(cid)
+                )
+              )
+              .asJava,
+            new splice.amuletrules.TransferContext(
+              transferContext.latestOpenMiningRound.contract.contractId,
+              Map.empty[Round, IssuingMiningRound.ContractId].asJava,
+              Map.empty[String, splice.amulet.ValidatorRight.ContractId].asJava,
+              None.toJava,
+            ),
+            buyer.toProtoPrimitive,
+            member.toProtoPrimitive,
+            synchronizerId.toProtoPrimitive,
+            // a registered synchronizer is pinned to migration id 0
+            0L,
+            trafficAmount,
+            Some(dsoParty.toProtoPrimitive).toJava,
+            Some(registration).toJava,
+          ),
+        disclosedContracts = DisclosedContracts
+          .forTesting(
+            transferContext.amuletRules,
+            transferContext.latestOpenMiningRound,
+          )
+          .toLedgerApiDisclosedContracts,
+      )
   }
 
   private def extraTrafficLimit(
