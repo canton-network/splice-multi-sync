@@ -124,6 +124,36 @@ abstract class ScanStoreTest
         } yield result shouldBe (1 to 3).sum.toLong
       }
 
+      "ingest registered-synchronizer purchases regardless of the store's migration id" in {
+        val namespace = Namespace(Fingerprint.tryFromString(s"dummy"))
+        val member = ParticipantId(UniqueIdentifier.tryCreate("member", namespace))
+        val operatorParty = providerParty(99)
+        for {
+          // A store on a network whose decentralized synchronizer is past migration 0.
+          store <- mkStore(migrationId = nextDomainMigrationId)
+          // Current-generation purchase on the decentralized synchronizer: counted, as today.
+          _ <- dummyDomain.create(memberTraffic(member, nextDomainMigrationId, 10L))(
+            store.multiDomainAcsStore
+          )
+          // Previous-generation purchase, no operator: still dropped. The generation check
+          // exists to avoid re-granting lifetime purchases on a sequencer whose traffic state
+          // reset at a migration.
+          _ <- dummyDomain.create(memberTraffic(member, 0L, 100L))(store.multiDomainAcsStore)
+          // Purchase for a registered synchronizer: migrationId pinned to 0 by the buy choice
+          // (a registered synchronizer upgrades via LSU and never hard-migrates), operator set.
+          // A non-zero migrationId combined with an operator is not constructible on-ledger, so
+          // that case is not asserted on.
+          _ <- dummyDomain.create(
+            memberTraffic(member, 0L, 1000L, operator = Some(operatorParty)),
+            createdEventObservers = Seq(operatorParty),
+          )(store.multiDomainAcsStore)
+          result <- store.getTotalPurchasedMemberTraffic(member, dummyDomain)
+          // 10 => the registered-synchronizer purchase was dropped at ingestion;
+          // 1110 => the generation check was deleted rather than widened;
+          // 1000 => current-generation ingestion broke.
+        } yield result shouldBe 1010L
+      }
+
     }
 
     "lookupAmuletRules" should {
@@ -1255,6 +1285,7 @@ abstract class ScanStoreTest
       dsoParty: PartyId = dsoParty,
       acsStoreDescriptorUserVersion: Option[Long] = None,
       txLogStoreDescriptorUserVersion: Option[Long] = None,
+      migrationId: Long = domainMigrationId,
   ): Future[ScanStore]
 
   protected def mkUpdateHistory(
@@ -1639,7 +1670,12 @@ trait AmuletTransferUtil { self: StoreTestBase =>
     )
   }
 
-  def memberTraffic(member: Member, domainMigrationId: Long, totalPurchased: Long) = {
+  def memberTraffic(
+      member: Member,
+      domainMigrationId: Long,
+      totalPurchased: Long,
+      operator: Option[PartyId] = None,
+  ) = {
     val template = new MemberTraffic(
       dsoParty.toProtoPrimitive,
       member.toProtoPrimitive,
@@ -1649,7 +1685,7 @@ trait AmuletTransferUtil { self: StoreTestBase =>
       1,
       numeric(1.0),
       numeric(1.0),
-      Optional.empty(),
+      operator.fold(Optional.empty[String]())(p => Optional.of(p.toProtoPrimitive)),
     )
 
     contract(
@@ -1673,6 +1709,7 @@ class DbScanStoreTest
       dsoParty: PartyId,
       acsStoreDescriptorUserVersion: Option[Long] = None,
       txLogStoreDescriptorUserVersion: Option[Long] = None,
+      migrationId: Long = domainMigrationId,
   ): Future[ScanStore] = {
     val packageSignatures =
       ResourceTemplateDecoder.loadPackageSignaturesFromResources(
@@ -1688,7 +1725,7 @@ class DbScanStoreTest
       storage,
       loggerFactory,
       RetryProvider(loggerFactory, timeouts, FutureSupervisor.Noop, NoOpMetricsFactory),
-      domainMigrationId,
+      migrationId,
       participantId = mkParticipantId("ScanStoreTest"),
       IngestionConfig(),
       new DbScanStoreMetrics(new NoOpMetricsFactory(), loggerFactory, timeouts),

@@ -369,8 +369,19 @@ object ScanStore {
             contractExpiresAt = Some(Timestamp.assertFromInstant(contract.payload.expiresAt)),
           )
         },
+        // Traffic purchased for a registered synchronizer is not reconciled here; its operator's
+        // own node grants it. Scan ingests these records to serve per-synchronizer purchase
+        // totals.
+        //
+        // The generation check stops a member's lifetime purchases being re-granted on a sequencer
+        // whose traffic state reset at a migration. A registered synchronizer upgrades via LSU and
+        // never hard-migrates, so it has nothing to re-grant, and its purchases pin migrationId = 0
+        // (AmuletRules.validateBuyMemberTrafficInputs) which would otherwise drop them on any
+        // network past migration 0. The operator is set only from a registration, so it identifies
+        // exactly those records.
         mkFilter(splice.decentralizedsynchronizer.MemberTraffic.COMPANION)(vt =>
-          vt.payload.dso == dso && vt.payload.migrationId == domainMigrationId
+          vt.payload.dso == dso &&
+            (vt.payload.migrationId == domainMigrationId || vt.payload.operator.isPresent)
         ) { contract =>
           ScanAcsStoreRowData(
             contract,
