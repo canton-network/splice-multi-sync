@@ -2404,6 +2404,7 @@ lazy val `apps-app`: Project =
     .dependsOn(
       `apps-common`,
       `apps-splitwell`,
+      `apps-syncoperator`,
       `apps-validator`,
       `apps-sv` % "compile->compile;test->test",
       `apps-scan`,
