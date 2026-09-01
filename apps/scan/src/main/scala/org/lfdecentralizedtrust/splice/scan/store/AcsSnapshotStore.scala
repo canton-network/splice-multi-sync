@@ -8,16 +8,21 @@ import com.daml.ledger.javaapi.data.CreatedEvent
 import org.lfdecentralizedtrust.splice.codegen.java.splice.amulet.{Amulet, LockedAmulet}
 import org.lfdecentralizedtrust.splice.scan.store.AcsSnapshotStore.{
   AcsSnapshot,
-  FailedToAcquireLockException,
   IncrementalAcsSnapshot,
   IncrementalAcsSnapshotTable,
+  QueryAcsSnapshotPaginationToken,
   QueryAcsSnapshotResult,
   amuletQualifiedName,
   lockedAmuletQualifiedName,
 }
 import org.lfdecentralizedtrust.splice.store.UpdateHistory.SelectFromCreateEvents
 import org.lfdecentralizedtrust.splice.store.{HardLimit, Limit, LimitHelpers, UpdateHistory}
-import org.lfdecentralizedtrust.splice.store.db.{AcsJdbcTypes, AcsQueries, AdvisoryLockIds}
+import org.lfdecentralizedtrust.splice.store.db.{
+  AcsJdbcTypes,
+  AcsQueries,
+  AdvisoryLockIds,
+  AdvisoryLocks,
+}
 import org.lfdecentralizedtrust.splice.util.{Contract, HoldingsSummary, PackageQualifiedName}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
@@ -34,6 +39,7 @@ import slick.jdbc.canton.ActionBasedSQLInterpolation.Implicits.actionBasedSQLInt
 import slick.jdbc.canton.SQLActionBuilder
 import slick.jdbc.{GetResult, JdbcProfile}
 
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.Semaphore
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -220,22 +226,7 @@ class AcsSnapshotStore(
   private def withExclusiveSnapshotDataLock[T, E <: Effect](
       action: DBIOAction[T, NoStream, E]
   ): DBIOAction[T, NoStream, Effect.Read & Effect.Transactional & E] =
-    (for {
-      lockResult <- sql"SELECT pg_try_advisory_xact_lock(${AdvisoryLockIds.acsSnapshotDataInsert})"
-        .as[Boolean]
-        .head
-      result <- lockResult match {
-        case true => action
-        // Lock conflicts can happen:
-        // - In production, if the application crashes while writing a snapshot and then restarts
-        //   and tries to write another snapshot before the database has closed the connection and released the lock.
-        // - In production, if two triggers (ingesting and backfilling) happen to write a snapshot at the same time.
-        // - In testing, where multiple scan instances write to the same app database.
-        // In all cases, we want to fail immediately, and rely on the caller's infrastructure to retry.
-        case false =>
-          DBIOAction.failed(FailedToAcquireLockException())
-      }
-    } yield result).transactionally
+    AdvisoryLocks.withTransactionalLock(profile, AdvisoryLockIds.acsSnapshotDataInsert, action)
 
   def deleteSnapshot(
       snapshot: AcsSnapshot
@@ -252,7 +243,7 @@ class AcsSnapshotStore(
   def queryAcsSnapshot(
       migrationId: Long,
       snapshot: CantonTimestamp,
-      after: Option[Long],
+      after: Option[QueryAcsSnapshotPaginationToken],
       limit: Limit,
       partyIds: Seq[PartyId],
       templates: Seq[PackageQualifiedName],
@@ -278,7 +269,11 @@ class AcsSnapshotStore(
           )
         )
       begin <- after match {
-        case Some(value) if value < snapshot.firstRowId || value > snapshot.lastRowId =>
+        case Some(
+              AcsSnapshotStore.QueryAcsSnapshotPaginationToken.RowIdQueryAcsSnapshotPaginationToken(
+                value
+              )
+            ) if value < snapshot.firstRowId || value > snapshot.lastRowId =>
           Future.failed(
             io.grpc.Status.INVALID_ARGUMENT
               .withDescription(
@@ -286,7 +281,12 @@ class AcsSnapshotStore(
               )
               .asRuntimeException()
           )
-        case Some(value) => Future.successful(value + 1)
+        case Some(
+              AcsSnapshotStore.QueryAcsSnapshotPaginationToken.RowIdQueryAcsSnapshotPaginationToken(
+                value
+              )
+            ) =>
+          Future.successful(value + 1)
         case None => Future.successful(snapshot.firstRowId)
       }
       end = snapshot.lastRowId
@@ -356,7 +356,9 @@ class AcsSnapshotStore(
         migrationId = migrationId,
         snapshotRecordTime = snapshot.snapshotRecordTime,
         createdEventsInPage = eventsInPage,
-        afterToken = afterToken,
+        afterToken = afterToken.map(
+          AcsSnapshotStore.QueryAcsSnapshotPaginationToken.RowIdQueryAcsSnapshotPaginationToken(_)
+        ),
       )
     }
   }
@@ -364,7 +366,7 @@ class AcsSnapshotStore(
   def getHoldingsState(
       migrationId: Long,
       snapshot: CantonTimestamp,
-      after: Option[Long],
+      after: Option[QueryAcsSnapshotPaginationToken],
       limit: Limit,
       partyIds: NonEmptyVector[PartyId],
   )(implicit tc: TraceContext): Future[QueryAcsSnapshotResult] = {
@@ -799,11 +801,6 @@ class AcsSnapshotStore(
 
 object AcsSnapshotStore {
 
-  case class FailedToAcquireLockException()
-      extends RuntimeException(
-        "Failed to acquire advisory lock for writing to the acs snapshot table."
-      )
-
   sealed trait IncrementalAcsSnapshotTable { def tableName: String }
   object IncrementalAcsSnapshotTable {
     case object Next extends IncrementalAcsSnapshotTable {
@@ -922,11 +919,50 @@ object AcsSnapshotStore {
     )
   }
 
+  sealed trait QueryAcsSnapshotPaginationToken {
+    def encodeToBase64: String = {
+      val jsonString = QueryAcsSnapshotPaginationToken.codec(this).noSpaces
+      java.util.Base64.getEncoder.encodeToString(jsonString.getBytes(StandardCharsets.UTF_8))
+    }
+  }
+  object QueryAcsSnapshotPaginationToken {
+    case class RowIdQueryAcsSnapshotPaginationToken(after: Long)
+        extends QueryAcsSnapshotPaginationToken
+
+    private val codec: io.circe.Codec[QueryAcsSnapshotPaginationToken] =
+      io.circe.Codec
+        .from(io.circe.Decoder[Long], io.circe.Encoder[Long])
+        .iemap[QueryAcsSnapshotPaginationToken]((token: Long) =>
+          Right(RowIdQueryAcsSnapshotPaginationToken(token))
+        ) { case RowIdQueryAcsSnapshotPaginationToken(after) => after }
+
+    def tryDecodeFromBase64(token: String): QueryAcsSnapshotPaginationToken = {
+      import cats.implicits.*
+
+      (for {
+        decodedString <- scala.util
+          .Try {
+            val decodedBytes = java.util.Base64.getDecoder.decode(token)
+            new String(decodedBytes, StandardCharsets.UTF_8)
+          }
+          .toEither
+          .leftMap(_ => "Failed to decode base64 token")
+        decoded <- io.circe.parser.decode(decodedString)(codec).leftMap(_.getMessage)
+      } yield decoded).fold(
+        msg =>
+          throw io.grpc.Status.INVALID_ARGUMENT
+            .withDescription(msg)
+            .asRuntimeException(),
+        identity,
+      )
+    }
+  }
+
   case class QueryAcsSnapshotResult(
       migrationId: Long,
       snapshotRecordTime: CantonTimestamp,
       createdEventsInPage: Vector[SpliceCreatedEvent],
-      afterToken: Option[Long],
+      afterToken: Option[QueryAcsSnapshotPaginationToken],
   )
 
   private val amuletQualifiedName =

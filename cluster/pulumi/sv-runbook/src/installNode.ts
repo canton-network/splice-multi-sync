@@ -50,6 +50,7 @@ import {
   externalIpRangesFile,
   clusterNetwork,
   CnChartVersion,
+  envoyClientIpHeaderEnvVar,
 } from '@canton-network/splice-pulumi-common';
 import {
   approvedSvIdentities,
@@ -102,7 +103,7 @@ export async function installNode(
   console.error(
     activeVersion.type === 'local'
       ? 'Using locally built charts by default'
-      : `Using charts from the artifactory by default, version ${activeVersion.version}`
+      : `Using charts from the ghcr by default, version ${activeVersion.version}`
   );
   console.error(`CLUSTER_BASENAME: ${CLUSTER_BASENAME}`);
   console.error(`Installing SV node in namespace: ${svNamespaceStr}`);
@@ -419,6 +420,9 @@ async function installSvAndValidator(
       enable: true,
     },
     ...synchronizerValues,
+    additionalEnvVars: (defaultScanValues.additionalEnvVars || []).concat([
+      envoyClientIpHeaderEnvVar('canton.scan-apps.scan-app'),
+    ]),
     resources: svConfig.scanApp?.resources,
     pvc: persistentHeapDumpsPvc(),
   };

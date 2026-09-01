@@ -11,6 +11,7 @@ import com.digitalasset.daml.lf.data.Numeric
 import com.digitalasset.daml.lf.data.{assertRight as damlRight}
 import org.lfdecentralizedtrust.splice.scan.store.ScanRewardsReferenceStore
 import org.lfdecentralizedtrust.splice.scan.store.db.{DbAppActivityRecordStore, DbScanVerdictStore}
+import org.lfdecentralizedtrust.splice.store.TimestampWithMigrationId
 
 import java.math.RoundingMode
 import scala.collection.immutable.SortedMap
@@ -48,6 +49,14 @@ class AppActivityComputation(
       asOf: CantonTimestamp
   )(implicit tc: TraceContext): Future[Option[Long]] =
     rewardsReferenceStore.lookupLatestArchivedOpenMiningRound(asOf)
+
+  /** The OpenMiningRound round number active at asOf, if the round data has been ingested. */
+  def lookupActiveOpenMiningRound(
+      asOf: CantonTimestamp
+  )(implicit tc: TraceContext): Future[Option[Long]] =
+    rewardsReferenceStore
+      .lookupActiveOpenMiningRounds(Seq(asOf))
+      .map(_.get(asOf).map { case TimestampWithMigrationId(_, roundNumber) => roundNumber })
 
   /** Compute app activity records for a batch of verdicts.
     *
@@ -96,7 +105,7 @@ class AppActivityComputation(
             Future.successful((summary, verdict, None))
           case (summary, verdict, true) =>
             roundInfoByTime.get(summary.sequencingTime) match {
-              case Some((roundNumber, roundOpensAt)) =>
+              case Some(TimestampWithMigrationId(roundOpensAt, roundNumber)) =>
                 for {
                   featuredAppWeights <- rewardsReferenceStore.lookupFeaturedAppPartiesAsOf(
                     roundOpensAt
@@ -125,8 +134,12 @@ class AppActivityComputation(
                 }
               case None =>
                 // Skip activity record computation as we don't have the necessary round data ingested.
-                // This can happen for freshly onboarded SVs, but is not
-                // expected to happen once the first activity record has been computed.
+                // This can happen for freshly onboarded SVs if the reward
+                // reference store does not have the data for any of the
+                // sequencingTime(s) in this batch.
+                // OTOH this cannot happen after ingestion starts because
+                // lookupActiveOpenMiningRounds blocks until the reference store
+                // has caught up to all the sequencingTime(s) in this batch.
                 logger.debug(
                   s"No round data found for sequencingTime=${summary.sequencingTime}, skipping activity record computation"
                 )

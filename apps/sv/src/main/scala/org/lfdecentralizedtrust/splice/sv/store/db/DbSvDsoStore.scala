@@ -42,21 +42,18 @@ import org.lfdecentralizedtrust.splice.store.db.{
   AcsQueries,
   AcsTables,
   DbAppStore,
+  MemberTrafficQueries,
   StoreDescriptor,
 }
 import org.lfdecentralizedtrust.splice.store.{
   DbVotesAcsStoreQueryBuilder,
+  IgnoredPartiesStore,
   IngestionSummary,
   Limit,
   LimitHelpers,
   MultiDomainAcsStore,
 }
-import org.lfdecentralizedtrust.splice.sv.store.{
-  AppRewardCouponsSum,
-  IgnoredPartiesStore,
-  SvDsoStore,
-  SvStore,
-}
+import org.lfdecentralizedtrust.splice.sv.store.{AppRewardCouponsSum, SvDsoStore, SvStore}
 import SvDsoStore.RoundBatch
 import com.digitalasset.canton.config.CantonRequireTypes.String2066
 import org.lfdecentralizedtrust.splice.util.*
@@ -121,6 +118,7 @@ class DbSvDsoStore(
     with SvDsoStore
     with AcsTables
     with AcsQueries
+    with MemberTrafficQueries
     with AcsJdbcTypes
     with DbVotesAcsStoreQueryBuilder
     with LimitHelpers {
@@ -146,11 +144,22 @@ class DbSvDsoStore(
   override def listExpiredAnsSubscriptions(
       now: CantonTimestamp,
       limit: Limit = defaultLimit,
+      ignoredPartiesStore: Option[IgnoredPartiesStore] = None,
   )(implicit tc: TraceContext): Future[Seq[SvDsoStore.IdleAnsSubscription]] = waitUntilAcsIngested {
+    val ignoredParties = ignoredPartiesStore.fold(Set.empty[PartyId])(_.getAll)
+    val ignoredPartiesFilter: SQLActionBuilder =
+      if (ignoredParties.nonEmpty) {
+        (sql" and " ++ notInClause(
+          "idle.create_arguments->'subscriptionData'->>'sender'",
+          ignoredParties,
+        )).toActionBuilder
+      } else {
+        sql""
+      }
     for {
       joinedRows <- storage
         .query(
-          sql"""
+          (sql"""
               select
                        idle.store_id,
                        idle.migration_id,
@@ -188,9 +197,10 @@ class DbSvDsoStore(
               AnsEntryContext.TEMPLATE_ID_WITH_PACKAGE_ID
             )}
                 and      idle.subscription_next_payment_due_at < $now
+                 """ ++ ignoredPartiesFilter ++ sql"""
               order by idle.subscription_next_payment_due_at
               limit    ${sqlLimit(limit)}
-          """.as[(SelectFromAcsTableResult, SelectFromAcsTableResult)],
+          """).toActionBuilder.as[(SelectFromAcsTableResult, SelectFromAcsTableResult)],
           "listExpiredAnsSubscriptions",
         )
     } yield applyLimit("listExpiredAnsSubscriptions", limit, joinedRows).map {
@@ -1649,25 +1659,14 @@ class DbSvDsoStore(
   override def getTotalPurchasedMemberTraffic(memberId: Member, synchronizerId: SynchronizerId)(
       implicit tc: TraceContext
   ): Future[Long] = waitUntilAcsIngested {
-    for {
-      sum <- storage
-        .querySingle(
-          sql"""
-               select sum(total_traffic_purchased)
-               from #${DsoTables.acsTableName}
-               where store_id = $acsStoreId
-                and migration_id = $domainMigrationId
-                and package_name = ${MemberTraffic.PACKAGE_NAME}
-                and template_id_qualified_name = ${QualifiedName(
-              MemberTraffic.TEMPLATE_ID_WITH_PACKAGE_ID
-            )}
-                and member_traffic_member = ${lengthLimited(memberId.toProtoPrimitive)}
-                and member_traffic_domain = $synchronizerId
-             """.as[Long].headOption,
-          "getTotalPurchasedMemberTraffic",
-        )
-        .value
-    } yield sum.getOrElse(0L)
+    sumPurchasedMemberTraffic(
+      storage,
+      DsoTables.acsTableName,
+      acsStoreId,
+      domainMigrationId,
+      memberId,
+      synchronizerId,
+    )
   }
 
   override def lookupVoteRequest(
