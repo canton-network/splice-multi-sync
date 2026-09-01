@@ -75,6 +75,8 @@ class ExternalPartySetupProposalIntegrationTest
   override def environmentDefinition: EnvironmentDefinition = {
     EnvironmentDefinition
       .simpleTopology1Sv(this.getClass.getSimpleName)
+      // Uses FeaturedAppMarkers: test asserts on AppRewardCoupon which TBAR replaces with RewardCouponV2
+      .addConfigTransform((_, config) => ConfigTransforms.withFeaturedAppMarkers(config))
       .addConfigTransforms(
         // set renewal duration to be same as pre-approval lifetime to ensure renewal
         // gets triggered immediately
@@ -103,6 +105,7 @@ class ExternalPartySetupProposalIntegrationTest
             NonNegativeFiniteDuration.ofMillis(500)
           )(config),
       )
+      .withTransferCommandSupport
 
   }
 

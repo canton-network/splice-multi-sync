@@ -4,21 +4,17 @@ import {
   Auth0Client,
   config,
   DecentralizedSynchronizerUpgradeConfig,
-  ExpectedValidatorOnboarding,
+  exactNamespace,
   isDevNet,
-  svOnboardingPollingInterval,
-  svValidatorTopupConfig,
+  spliceConfig,
 } from '@canton-network/splice-pulumi-common';
-import { readBackupConfig } from '@canton-network/splice-pulumi-common-validator/src/backup';
+import { configForSv, coreSvsToDeploy } from '@canton-network/splice-pulumi-common-sv';
 import {
-  mustInstallSplitwell,
-  mustInstallValidator1,
-  splitwellOnboarding,
-  standaloneValidatorOnboarding,
-  validator1Onboarding,
-} from '@canton-network/splice-pulumi-common-validator/src/validators';
-import { SplitPostgresInstances } from '@canton-network/splice-pulumi-common/src/config/configs';
-import { Resource } from '@pulumi/pulumi';
+  configureScanBigQuery,
+  ScanBigQueryArgs,
+} from '@canton-network/splice-pulumi-common-sv/src/bigQuery';
+import { InstalledSv } from '@canton-network/splice-pulumi-common-sv/src/sv';
+import { CloudPostgres } from '@canton-network/splice-pulumi-common/src/postgres';
 
 import { activeVersion } from '../../common';
 import { installChaosMesh } from './chaosMesh';
@@ -31,47 +27,40 @@ console.error(`Launching with isDevNet: ${isDevNet}`);
 
 const enableChaosMesh = config.envFlag('ENABLE_CHAOS_MESH');
 
-const disableOnboardingParticipantPromotionDelay = config.envFlag(
-  'DISABLE_ONBOARDING_PARTICIPANT_PROMOTION_DELAY',
-  false
-);
-
-export async function installCluster(
-  auth0Client: Auth0Client
-): Promise<{ dso: Dso; validator1?: Resource }> {
+export async function installCluster(auth0Client: Auth0Client): Promise<Dso | undefined> {
   console.error(
     activeVersion.type === 'local'
       ? 'Using locally built charts by default'
       : `Using charts from the container registry by default, version ${activeVersion.version}`
   );
 
-  const backupConfig = await readBackupConfig();
-  const expectedValidatorOnboardings: ExpectedValidatorOnboarding[] = [];
-  if (mustInstallSplitwell) {
-    expectedValidatorOnboardings.push(splitwellOnboarding);
+  // TODO(#6719) once all clusters have been migrated this can be removed.
+  const dso = spliceConfig.configuration.synchronizerMigration.splitSvDeploymentEnabled
+    ? undefined
+    : new Dso('dso', {
+        auth0Client,
+        decentralizedSynchronizerUpgradeConfig: DecentralizedSynchronizerUpgradeConfig,
+        exportSvResources:
+          spliceConfig.configuration.synchronizerMigration.migrateToSplitSvDeployment,
+      });
+
+  const locallyInstalledSvs = await dso?.allSvs;
+  const bigQueryArgs = [...iterateBigQueryArgs(locallyInstalledSvs)];
+  if (bigQueryArgs.length > 1) {
+    throw new Error(
+      `Multiple SVs with BigQuery configuration found: ${bigQueryArgs.map(arg => arg.namespace.logicalName).join(', ')}`
+    );
   }
-  if (mustInstallValidator1) {
-    expectedValidatorOnboardings.push(validator1Onboarding);
-  }
-  if (standaloneValidatorOnboarding) {
-    expectedValidatorOnboardings.push(standaloneValidatorOnboarding);
+  for (const args of bigQueryArgs) {
+    await configureScanBigQuery(args);
   }
 
-  const dso = new Dso('dso', {
-    auth0Client,
-    expectedValidatorOnboardings,
-    isDevNet,
-    ...backupConfig,
-    topupConfig: svValidatorTopupConfig,
-    splitPostgresInstances: SplitPostgresInstances,
-    decentralizedSynchronizerUpgradeConfig: DecentralizedSynchronizerUpgradeConfig,
-    onboardingPollingInterval: svOnboardingPollingInterval,
-    disableOnboardingParticipantPromotionDelay,
-  });
-
-  const allSvs = await dso.allSvs;
-
-  const svDependencies = allSvs.flatMap(sv => [sv.scan, sv.svApp, sv.validatorApp, sv.ingress]);
+  const svDependencies = (locallyInstalledSvs ?? []).flatMap(sv => [
+    sv.scan,
+    sv.svApp,
+    sv.validatorApp,
+    sv.ingress,
+  ]);
 
   installDocs();
 
@@ -79,7 +68,46 @@ export async function installCluster(
     installChaosMesh({ dependsOn: svDependencies });
   }
 
-  return {
-    dso,
-  };
+  return dso;
+}
+
+function* iterateBigQueryArgs(
+  locallyInstalledSvs?: Array<InstalledSv>
+): Generator<ScanBigQueryArgs> {
+  if (locallyInstalledSvs === undefined) {
+    for (const sv of coreSvsToDeploy) {
+      const config = configForSv(sv.nodeName);
+      const bigQueryConfig = config?.scanApp?.bigQuery;
+      const cloudSqlEnabled = (config.appsPg?.cloudSql ?? spliceConfig.pulumiProjectConfig.cloudSql)
+        .enabled;
+      if (bigQueryConfig !== undefined && cloudSqlEnabled) {
+        const namespace = exactNamespace(sv.nodeName, true, true);
+        yield {
+          namespace,
+          bigQueryConfig: bigQueryConfig,
+          scanReference: {
+            type: 'external',
+            databaseInstanceNamePrefix: `${namespace.logicalName}-cn-apps-pg`,
+          },
+        };
+      }
+    }
+  } else {
+    // TODO(#6719) once all clusters have been migrated this can be removed.
+    for (const sv of locallyInstalledSvs) {
+      const config = configForSv(sv.nodeName);
+      const bigQueryConfig = config?.scanApp?.bigQuery;
+      if (bigQueryConfig !== undefined && sv.appsPostgres instanceof CloudPostgres) {
+        yield {
+          namespace: sv.namespace,
+          bigQueryConfig: bigQueryConfig,
+          scanReference: {
+            type: 'local',
+            databaseInstance: sv.appsPostgres.databaseInstance,
+            chart: sv.scan,
+          },
+        };
+      }
+    }
+  }
 }
