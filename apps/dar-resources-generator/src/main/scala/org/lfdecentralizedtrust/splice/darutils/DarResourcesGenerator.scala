@@ -18,12 +18,12 @@ object DarResourcesGenerator {
 
   // TODO(tech-debt): consider moving this to a dedicated config file if it bugs us here
   private val minimumInitializations: Map[String, String] = Map(
-    "splice-amulet" -> "0.1.15",
-    "splice-amulet-name-service" -> "0.1.16",
-    "splice-dso-governance" -> "0.1.21",
-    "splice-wallet" -> "0.1.15",
-    "splice-wallet-payments" -> "0.1.15",
-    "splitwell" -> "0.1.15",
+    "splice-amulet" -> "0.1.19",
+    "splice-amulet-name-service" -> "0.1.20",
+    "splice-dso-governance" -> "0.1.25",
+    "splice-wallet" -> "0.1.20",
+    "splice-wallet-payments" -> "0.1.19",
+    "splitwell" -> "0.1.20",
     "splice-validator-lifecycle" -> "0.1.5",
     "splice-util-batched-markers" -> "1.0.0",
     "splice-api-token-metadata-v1" -> "1.0.0",
@@ -56,6 +56,16 @@ object DarResourcesGenerator {
     "splice-amulet-name-service",
     "splice-wallet-payments",
     "splitwell",
+    "splice-validator-lifecycle",
+    "splice-api-reward-assignment-v1",
+  )
+  private val topLevelPackageOrderWithoutSplitwell: Seq[String] = Seq(
+    "splice-amulet",
+    "splice-dso-governance",
+    "splice-util-batched-markers",
+    "splice-wallet",
+    "splice-amulet-name-service",
+    "splice-wallet-payments",
     "splice-validator-lifecycle",
     "splice-api-reward-assignment-v1",
   )
@@ -147,14 +157,15 @@ object DarResourcesGenerator {
         indent(2, renderPackage(name, dars, grouped))
       } ++
       renderPackageResources() ++
+      renderCorePackageResources() ++
       Seq(
         """|  lazy val pkgIdToDarResource: Map[String, DarResource] =
-           |    packageResources.view.flatMap(_.all).map(resource => resource.packageId -> resource).toMap
+           |    corePackageResources.view.flatMap(_.all).map(resource => resource.packageId -> resource).toMap
            |
            |  // We don't index the map by PackageMetadata because that type contains some additional
            |  // fields that don't matter.
            |  lazy val pkgMetadataToDarResource: Map[(PackageName, PackageVersion), DarResource] =
-           |    packageResources.view
+           |    corePackageResources.view
            |      .flatMap(_.all)
            |      .map(resource => (resource.metadata.name, resource.metadata.version) -> resource)
            |      .toMap
@@ -172,6 +183,19 @@ object DarResourcesGenerator {
       "  TokenStandard.allPackageResources ++ Seq(",
     ) ++
       packageResourcesRenderOrder.map(name => s"    DarResources.${camel(name)},") ++
+      Seq(
+        "  )",
+        "",
+      )
+
+  private def renderCorePackageResources(): Seq[String] =
+    Seq(
+      "  lazy val corePackageResources: Seq[PackageResource] =",
+      "  TokenStandard.allPackageResources ++ Seq(",
+    ) ++
+      topLevelPackageOrderWithoutSplitwell.sorted.map(name =>
+        s"    DarResources.${camel(name)},"
+      ) ++
       Seq(
         "  )",
         "",
