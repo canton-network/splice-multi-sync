@@ -1973,6 +1973,57 @@ abstract class SvDsoStoreTest extends StoreTestBase with HasExecutionContext {
         } yield result shouldBe (1 to 3).sum.toLong
       }
 
+      "ingest registered-synchronizer purchases regardless of the store's migration id" in {
+        val namespace = Namespace(Fingerprint.tryFromString(s"dummy"))
+        val member = ParticipantId("member", namespace)
+        val operatorParty = providerParty(99)
+        // A purchase for a registered synchronizer: recorded on the decentralized synchronizer
+        // but naming the registered synchronizer's id, with migrationId pinned to 0 by the buy
+        // choice (a registered synchronizer upgrades via LSU and never hard-migrates) and the
+        // operator set. A non-zero migrationId combined with an operator is not constructible
+        // on-ledger, so that case is not asserted on.
+        val dedicated =
+          memberTraffic(
+            member,
+            dummy2Domain,
+            1000L,
+            migrationId = 0L,
+            operator = Some(operatorParty),
+          )
+        for {
+          // A store on a network whose decentralized synchronizer is past migration 0.
+          store <- mkStore(migrationId = nextDomainMigrationId)
+          // Current-generation purchase on the decentralized synchronizer: counted, as today.
+          _ <- dummyDomain.create(
+            memberTraffic(member, dummyDomain, 10L, migrationId = nextDomainMigrationId)
+          )(store.multiDomainAcsStore)
+          // Previous-generation purchase, no operator: still dropped. The generation check
+          // exists to avoid re-granting lifetime purchases on a sequencer whose traffic state
+          // reset at a migration.
+          _ <- dummyDomain.create(memberTraffic(member, dummyDomain, 100L, migrationId = 0L))(
+            store.multiDomainAcsStore
+          )
+          _ <- dummyDomain.create(dedicated, createdEventObservers = Seq(operatorParty))(
+            store.multiDomainAcsStore
+          )
+          decentralizedTotal <- store.getTotalPurchasedMemberTraffic(member, dummyDomain)
+          dedicatedTotal <- store.getTotalPurchasedMemberTraffic(member, dummy2Domain)
+          dedicatedContracts <- store.listMemberTrafficContracts(
+            member,
+            dummy2Domain,
+            PageLimit.tryCreate(100),
+          )
+        } yield {
+          // 0 here means the registered-synchronizer purchase was dropped at ingestion.
+          dedicatedTotal shouldBe 1000L
+          // 110 here means the generation check was deleted rather than widened: the
+          // previous-generation purchase must stay excluded.
+          decentralizedTotal shouldBe 10L
+          // The merge automation's read path sees the registered-synchronizer purchase too.
+          dedicatedContracts should contain theSameElementsAs Seq(dedicated)
+        }
+      }
+
     }
 
     "listSvRewardState" should {
@@ -2180,17 +2231,19 @@ abstract class SvDsoStoreTest extends StoreTestBase with HasExecutionContext {
       member: Member,
       synchronizerId: SynchronizerId,
       totalPurchased: Long,
+      migrationId: Long = domainMigrationId,
+      operator: Option[PartyId] = None,
   ) = {
     val template = new MemberTraffic(
       dsoParty.toProtoPrimitive,
       member.toProtoPrimitive,
       synchronizerId.toProtoPrimitive,
-      domainMigrationId,
+      migrationId,
       totalPurchased,
       1,
       numeric(1.0),
       numeric(1.0),
-      Optional.empty(),
+      operator.fold(Optional.empty[String]())(p => Optional.of(p.toProtoPrimitive)),
     )
 
     contract(
@@ -2315,7 +2368,7 @@ abstract class SvDsoStoreTest extends StoreTestBase with HasExecutionContext {
     )
   }
 
-  protected def mkStore(): Future[SvDsoStore]
+  protected def mkStore(migrationId: Long = domainMigrationId): Future[SvDsoStore]
 
   lazy val acsOffset = nextOffset()
   lazy val domain = dummyDomain.toProtoPrimitive
@@ -2329,7 +2382,9 @@ class DbSvDsoStoreTest
     with AcsJdbcTypes
     with AcsTables {
 
-  override protected def mkStore(): Future[DbSvDsoStore] = {
+  override protected def mkStore(
+      migrationId: Long = domainMigrationId
+  ): Future[DbSvDsoStore] = {
     val packageSignatures =
       ResourceTemplateDecoder.loadPackageSignaturesFromResources(
         DarResources.amulet.all ++
@@ -2344,7 +2399,7 @@ class DbSvDsoStoreTest
       storage,
       loggerFactory,
       RetryProvider(loggerFactory, timeouts, FutureSupervisor.Noop, NoOpMetricsFactory),
-      domainMigrationId,
+      migrationId,
       participantId = mkParticipantId("SvDsoStoreTest"),
       IngestionConfig(),
       defaultLimit = HardLimit.tryCreate(Limit.DefaultMaxPageSize),
