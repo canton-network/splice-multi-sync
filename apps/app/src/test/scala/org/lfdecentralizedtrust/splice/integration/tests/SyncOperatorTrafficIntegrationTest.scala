@@ -3,6 +3,7 @@
 
 package org.lfdecentralizedtrust.splice.integration.tests
 
+import com.daml.ledger.javaapi.data.CreatedEvent
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.{Member, PartyId, SynchronizerId}
@@ -15,7 +16,10 @@ import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   IntegrationTest,
   SpliceTestConsoleEnvironment,
 }
+import org.lfdecentralizedtrust.splice.store.MultiDomainAcsStore.ContractState
 import org.lfdecentralizedtrust.splice.util.{
+  Contract,
+  ContractWithState,
   DisclosedContracts,
   SynchronizerFeesTestUtil,
   WalletTestUtil,
@@ -57,17 +61,31 @@ class SyncOperatorTrafficIntegrationTest
       val member = aliceValidatorBackend.participantClient.id
 
       val registration = clue("the DSO registers the synchronizer to this operator") {
-        val result = sv1Backend.participantClientWithAdminToken.ledger_api_extensions.commands
-          .submitWithResult(
-            sv1Backend.config.ledgerApiUser,
+        // The purchase is submitted from alice's participant, which hosts neither the DSO nor
+        // the operator, so the registration must be disclosed with its created-event blob.
+        val tx = sv1Backend.participantClientWithAdminToken.ledger_api_extensions.commands
+          .submitJava(
             actAs = Seq(dsoParty),
             readAs = Seq(dsoParty),
-            update = dsoRules.contractId.exerciseDsoRules_RegisterSynchronizer(
-              synchronizerId.toProtoPrimitive,
-              operatorParty.toProtoPrimitive,
-            ),
+            commands = dsoRules.contractId
+              .exerciseDsoRules_RegisterSynchronizer(
+                synchronizerId.toProtoPrimitive,
+                operatorParty.toProtoPrimitive,
+              )
+              .commands
+              .asScala
+              .toSeq,
+            userId = sv1Backend.config.ledgerApiUser,
+            includeCreatedEventBlob = true,
           )
-        result.exerciseResult.registeredSynchronizerCid
+        val contract = tx.getEventsById.values.asScala
+          .collect { case ev: CreatedEvent => ev }
+          .flatMap(Contract.fromCreatedEvent(RegisteredSynchronizer.COMPANION)(_))
+          .loneElement
+        ContractWithState(
+          contract,
+          ContractState.Assigned(SynchronizerId.tryFromString(tx.getSynchronizerId)),
+        )
       }
 
       val aliceParty = onboardWalletUser(aliceWalletClient, aliceValidatorBackend)
@@ -77,19 +95,21 @@ class SyncOperatorTrafficIntegrationTest
         extraTrafficLimit(member) shouldBe 0L
       }
 
-      clue("a purchase is granted on the splitwell sequencer") {
-        buyTraffic(aliceParty, member, synchronizerId, registration, dsoParty, firstPurchase)
-        eventually() {
-          extraTrafficLimit(member) shouldBe firstPurchase
-        }
-      }
+      actAndCheck(
+        "alice buys traffic for the splitwell synchronizer",
+        buyTraffic(aliceParty, member, synchronizerId, registration, dsoParty, firstPurchase),
+      )(
+        "the purchase is granted on the splitwell sequencer",
+        _ => extraTrafficLimit(member) shouldBe firstPurchase,
+      )
 
-      clue("a second purchase raises the limit by exactly its amount") {
-        buyTraffic(aliceParty, member, synchronizerId, registration, dsoParty, secondPurchase)
-        eventually() {
-          extraTrafficLimit(member) shouldBe (firstPurchase + secondPurchase)
-        }
-      }
+      actAndCheck(
+        "alice buys a second traffic amount",
+        buyTraffic(aliceParty, member, synchronizerId, registration, dsoParty, secondPurchase),
+      )(
+        "the limit rises by exactly the second amount",
+        _ => extraTrafficLimit(member) shouldBe (firstPurchase + secondPurchase),
+      )
     }
   }
 
@@ -97,7 +117,7 @@ class SyncOperatorTrafficIntegrationTest
       buyer: PartyId,
       member: Member,
       synchronizerId: SynchronizerId,
-      registration: RegisteredSynchronizer.ContractId,
+      registration: ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer],
       dsoParty: PartyId,
       trafficAmount: Long,
   )(implicit env: SpliceTestConsoleEnvironment): Unit = {
@@ -132,12 +152,13 @@ class SyncOperatorTrafficIntegrationTest
             0L,
             trafficAmount,
             Some(dsoParty.toProtoPrimitive).toJava,
-            Some(registration).toJava,
+            Some(registration.contractId).toJava,
           ),
         disclosedContracts = DisclosedContracts
           .forTesting(
             transferContext.amuletRules,
             transferContext.latestOpenMiningRound,
+            registration,
           )
           .toLedgerApiDisclosedContracts,
       )
