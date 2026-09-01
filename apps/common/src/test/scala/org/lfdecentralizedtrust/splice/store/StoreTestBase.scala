@@ -899,10 +899,11 @@ abstract class StoreTestBase
       domain: SynchronizerId,
       contract: Contract[TCid, T],
       counter: Long,
+      observers: Seq[PartyId] = Seq.empty,
   ): ActiveContract =
     ActiveContract(
       domain,
-      toCreatedEvent(contract, Seq(dsoParty)),
+      toCreatedEvent(contract, Seq(dsoParty), observers),
       counter,
     )
 

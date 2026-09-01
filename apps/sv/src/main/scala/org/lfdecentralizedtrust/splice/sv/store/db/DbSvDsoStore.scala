@@ -42,6 +42,7 @@ import org.lfdecentralizedtrust.splice.store.db.{
   AcsQueries,
   AcsTables,
   DbAppStore,
+  MemberTrafficQueries,
   StoreDescriptor,
 }
 import org.lfdecentralizedtrust.splice.store.{
@@ -117,6 +118,7 @@ class DbSvDsoStore(
     with SvDsoStore
     with AcsTables
     with AcsQueries
+    with MemberTrafficQueries
     with AcsJdbcTypes
     with DbVotesAcsStoreQueryBuilder
     with LimitHelpers {
@@ -1657,25 +1659,14 @@ class DbSvDsoStore(
   override def getTotalPurchasedMemberTraffic(memberId: Member, synchronizerId: SynchronizerId)(
       implicit tc: TraceContext
   ): Future[Long] = waitUntilAcsIngested {
-    for {
-      sum <- storage
-        .querySingle(
-          sql"""
-               select sum(total_traffic_purchased)
-               from #${DsoTables.acsTableName}
-               where store_id = $acsStoreId
-                and migration_id = $domainMigrationId
-                and package_name = ${MemberTraffic.PACKAGE_NAME}
-                and template_id_qualified_name = ${QualifiedName(
-              MemberTraffic.TEMPLATE_ID_WITH_PACKAGE_ID
-            )}
-                and member_traffic_member = ${lengthLimited(memberId.toProtoPrimitive)}
-                and member_traffic_domain = $synchronizerId
-             """.as[Long].headOption,
-          "getTotalPurchasedMemberTraffic",
-        )
-        .value
-    } yield sum.getOrElse(0L)
+    sumPurchasedMemberTraffic(
+      storage,
+      DsoTables.acsTableName,
+      acsStoreId,
+      domainMigrationId,
+      memberId,
+      synchronizerId,
+    )
   }
 
   override def lookupVoteRequest(

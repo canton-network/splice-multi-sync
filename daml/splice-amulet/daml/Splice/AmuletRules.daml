@@ -109,6 +109,8 @@ data AmuletRules_ClaimExpiredRewardsV2Result = AmuletRules_ClaimExpiredRewardsV2
 
 data AmuletRules_StartProcessingRewardsV2Result = AmuletRules_StartProcessingRewardsV2Result {}
 
+data AmuletRules_StartProcessingExtensionRewardsV2Result = AmuletRules_StartProcessingExtensionRewardsV2Result {}
+
 data AmuletRules_UnhideRewardCouponsV2Result = AmuletRules_UnhideRewardCouponsV2Result {}
 
 data AmuletRules_ArchiveDryRunRewardAccountingV2Result = AmuletRules_ArchiveDryRunRewardAccountingV2Result {}
@@ -276,14 +278,27 @@ template AmuletRules
         -- Party that the sender expects to represent the DSO party of the AmuletRules contract they are calling.
         -- Must always be set to protect from malicious delegees swapping the AmuletRules contract out for
         -- one under their control.
+        optRegisteredSynchronizer : Optional (ContractId RegisteredSynchronizer)
+        -- For traffic on a governance-registered synchronizer (see `RegisteredSynchronizer`): the
+        -- registration authorizing it, supplied via explicit disclosure. It replaces the
+        -- `requiredSynchronizers` gate for the given synchronizer id, and its `operator` becomes an
+        -- observer of the created `MemberTraffic`. `None` buys traffic on the decentralized
+        -- synchronizer.
       controller provider
       do
         checkExpectedDso dso expectedDso
+        -- For a governance-registered synchronizer, the disclosed registration both authorizes the
+        -- synchronizer id and names the operator that observes the purchase record.
+        -- `RegisteredSynchronizer_Fetch` lets `provider` read a contract it is not a stakeholder of,
+        -- mirroring how `computeSynchronizerFees` reads the OpenMiningRound.
+        optRegistered <- forA optRegisteredSynchronizer $ \registeredCid ->
+          fetchPublicReferenceData (ForDso dso) registeredCid (RegisteredSynchronizer_Fetch provider)
         -- validate choice parameters
         configUsd <- getValueAsOfLedgerTime configSchedule
-        case validateBuyMemberTrafficInputs configUsd synchronizerId trafficAmount of
+        case validateBuyMemberTrafficInputs configUsd optRegistered synchronizerId migrationId trafficAmount of
           Left failureStatus -> failWithStatus failureStatus
           Right _ -> pure ()
+        let optOperator = fmap (\registered -> registered.operator) optRegistered
         (trafficCostAmulet, trafficCostUsd) <- computeSynchronizerFees dso provider trafficAmount this context
         (transferResult, meta) <- splitAndBurn (toInterfaceContractId self) provider trafficCostAmulet inputs context dso "traffic purchase"
         -- create a new MemberTraffic contract for the purchased traffic
@@ -296,6 +311,7 @@ template AmuletRules
           numPurchases = 1
           amuletSpent = trafficCostAmulet
           usdSpent =  trafficCostUsd
+          operator = optOperator
         -- return result
         return AmuletRules_BuyMemberTrafficResult with
           round = transferResult.round
@@ -304,7 +320,6 @@ template AmuletRules
           purchasedTraffic
           senderChangeAmulet = transferResult.senderChangeAmulet
           meta = Some meta
-
 
     nonconsuming choice AmuletRules_MergeMemberTrafficContracts : AmuletRules_MergeMemberTrafficContractsResult
       with
@@ -322,6 +337,11 @@ template AmuletRules
                 migrationId = first.migrationId
           fetchAndArchive expectedTrafficContract trafficCid
         let traffics = first::rest
+        -- defence in depth: contracts for the same synchronizer always name the same operator, so
+        -- this never triggers unless duplicate registrations exist; refusing the merge keeps a
+        -- mixed-operator set visible instead of silently blending it
+        require "Operator matches across all merged member traffic contracts"
+          (all (\traffic -> traffic.operator == first.operator) traffics)
 
         -- create a new aggregated member traffic contract.
         let mergedTraffic = foldl (\acc traffic -> MemberTraffic with
@@ -333,7 +353,8 @@ template AmuletRules
                 numPurchases = acc.numPurchases + traffic.numPurchases
                 usdSpent = acc.usdSpent + traffic.usdSpent
                 amuletSpent = acc.amuletSpent + traffic.amuletSpent
-              ) (initialMemberTraffic dso first.memberId first.synchronizerId first.migrationId) traffics
+                operator = acc.operator
+              ) (initialMemberTraffic dso first.memberId first.synchronizerId first.migrationId first.operator) traffics
         mergedTrafficCid <- create mergedTraffic
         return AmuletRules_MergeMemberTrafficContractsResult with ..
 
@@ -721,8 +742,19 @@ template AmuletRules
       with
         calculateRewardsCid : ContractId CalculateRewardsV2
         batchHash : CryptoHash.Hash
+        issuancePerActivityUnit : Optional Decimal
+          -- ^ when set, the round's committed tree is weighted (`BatchOfWeightedBatches`): batch
+          -- amounts are activity weights and coupons mint at weight * rate. `None` is a round
+          -- committed in the plain format. Appended as Optional because released vote requests
+          -- carry the old shape of this action.
+        weightBudget : Optional Decimal
+          -- ^ the round's total activity, the root's exact-sum budget; set together with the rate
       controller dso
       do
+        require "issuance rate and weight budget are set together"
+          (isSome issuancePerActivityUnit == isSome weightBudget)
+        forA_ issuancePerActivityUnit $ \rate ->
+          require "issuance rate is positive" (rate > 0.0)
         calculateRewards <- fetchAndArchive (ForDso with dso) calculateRewardsCid
         create ProcessRewardsV2 with
           dso
@@ -731,8 +763,56 @@ template AmuletRules
           dryRun = calculateRewards.dryRun
           rewardCouponTimeToLive = calculateRewards.rewardCouponTimeToLive
           batchHash
+          expander = None
+          issuancePerActivityUnit
+          weightBudget
 
         return AmuletRules_StartProcessingRewardsV2Result {}
+
+    nonconsuming choice AmuletRules_StartProcessingExtensionRewardsV2 : AmuletRules_StartProcessingExtensionRewardsV2Result
+      -- ^ PoC (extension reward reporting): start reward processing for a registered synchronizer's
+      -- reported activity. Consumes the operator's report and creates the root ProcessRewardsV2
+      -- with the operator as expander and the issuance rate computed by DSO automation; the
+      -- operator then expands its committed batches into RewardCouponV2 contracts. The rate
+      -- computation (app-reward tranche split by burn share, the voted per-synchronizer weight,
+      -- and the reported-vs-purchased cap) happens off-ledger in the SV apps before this action
+      -- is confirmed.
+      with
+        reportCid : ContractId ExtensionActivityReport
+        registeredSynchronizerCid : ContractId RegisteredSynchronizer
+          -- ^ the live registration the report was filed under; processing requires it to match
+          -- the report's synchronizer id and operator, so offboarding (archiving the
+          -- registration) closes the reward path the same way it closes the buy path
+        issuancePerActivityUnit : Decimal -- ^ Amulet minted per unit of reported activity weight
+        purchasedTotal : Int
+          -- ^ total traffic ever purchased for the synchronizer (bytes), computed off-ledger
+          -- by DSO automation and attested by the confirming vote; bounds the synchronizer's
+          -- total reported activity
+        rewardCouponTimeToLive : RelTime
+        dryRun : Bool
+      controller dso
+      do
+        require "issuance rate is positive" (issuancePerActivityUnit > 0.0)
+        report <- fetchAndArchive (ForDso with dso) reportCid
+        registration <- fetchChecked (ForDso with dso) registeredSynchronizerCid
+        require "report is for the registered synchronizer and its operator"
+          (registration.synchronizerId == report.synchronizerId
+            && registration.operator == report.operator)
+        require "total reported activity does not exceed purchased traffic"
+          (report.totalActivityReported <= intToDecimal purchasedTotal)
+        now <- getTime
+        create ProcessRewardsV2 with
+          dso
+          round = report.round
+          roundClosedAt = now
+          dryRun
+          rewardCouponTimeToLive
+          batchHash = report.activityRootHash
+          expander = Some report.operator
+          issuancePerActivityUnit = Some issuancePerActivityUnit
+          weightBudget = Some report.totalActivity
+
+        return AmuletRules_StartProcessingExtensionRewardsV2Result {}
 
     -- batch conversion of coupons not yet observable by their providers
     nonconsuming choice AmuletRules_UnhideRewardCouponsV2 : AmuletRules_UnhideRewardCouponsV2Result
@@ -1066,6 +1146,24 @@ mkInsufficientTopupAmountFailure requestedAmount minAmount =
       [ ("requestedTopupAmount", show requestedAmount)
       , ("minTopupAmount", show minAmount)
       ])
+
+mkRegisteredSynchronizerMismatchFailure : Text -> Text -> FailureStatus
+mkRegisteredSynchronizerMismatchFailure registeredId requestedId =
+  mkFailureStatus
+    (spliceErrorId "registered-synchronizer-mismatch")
+    InvalidIndependentOfSystemState
+    ("The disclosed registration is for synchronizer " <> registeredId
+      <> " but the purchase names synchronizer " <> requestedId)
+    (TextMap.fromList [("registeredSynchronizerId", registeredId), ("synchronizerId", requestedId)])
+
+mkNonZeroMigrationIdFailure : Int -> FailureStatus
+mkNonZeroMigrationIdFailure migrationId =
+  mkFailureStatus
+    (spliceErrorId "non-zero-migration-id")
+    InvalidIndependentOfSystemState
+    ("Traffic for a registered synchronizer must be bought with migrationId 0, got "
+      <> show migrationId)
+    (TextMap.fromList [("migrationId", show migrationId)])
 
 mkMaximumInputsExceededFailure : FailureStatus
 mkMaximumInputsExceededFailure =
@@ -1715,13 +1813,35 @@ transferConfigAmuletFromExternalPartyConfigState : ExternalPartyConfigState -> T
 transferConfigAmuletFromExternalPartyConfigState externalPartyConfigState =
   scaleFees2 (1.0 / externalPartyConfigState.amuletPrice) externalPartyConfigState.transferConfig
 
-validateBuyMemberTrafficInputs : AmuletConfig Unit.USD -> Text -> Int -> Either FailureStatus ()
-validateBuyMemberTrafficInputs configUsd synchronizerId trafficAmount
-  | not (synchronizerId `Set.member` configUsd.decentralizedSynchronizer.requiredSynchronizers) =
-      Left $ mkUnknownSynchronizerFailure synchronizerId
-  | trafficAmount < configUsd.decentralizedSynchronizer.fees.minTopupAmount =
-      Left $ mkInsufficientTopupAmountFailure trafficAmount configUsd.decentralizedSynchronizer.fees.minTopupAmount
-  | otherwise = Right ()
+-- All validation for buying member traffic, for both the decentralized synchronizer and
+-- governance-registered synchronizers. The synchronizer authorization is checked first (matching
+-- the failure precedence callers observed before registrations existed), then the `minTopupAmount`
+-- floor, which applies in all cases:
+--   * without a registration, the synchronizer id must be in `requiredSynchronizers`;
+--   * with a registration, the synchronizer id must match the registration's, and `migrationId`
+--     must be 0 (migration ids exist for the decentralized synchronizer's history of migrations
+--     with downtime; registered synchronizers always use 0).
+validateBuyMemberTrafficInputs : AmuletConfig Unit.USD -> Optional RegisteredSynchronizer -> Text -> Int -> Int -> Either FailureStatus ()
+validateBuyMemberTrafficInputs configUsd optRegistered synchronizerId migrationId trafficAmount =
+  validateSynchronizerAuthorization *> validateTopupAmount
+  where
+    -- authorization is checked first, matching the failure precedence callers observed before
+    -- registrations existed
+    validateSynchronizerAuthorization = case optRegistered of
+      None
+        | not (synchronizerId `Set.member` configUsd.decentralizedSynchronizer.requiredSynchronizers) ->
+            Left $ mkUnknownSynchronizerFailure synchronizerId
+        | otherwise -> Right ()
+      Some registered
+        | registered.synchronizerId /= synchronizerId ->
+            Left $ mkRegisteredSynchronizerMismatchFailure registered.synchronizerId synchronizerId
+        | migrationId /= 0 ->
+            Left $ mkNonZeroMigrationIdFailure migrationId
+        | otherwise -> Right ()
+    validateTopupAmount
+      | trafficAmount < configUsd.decentralizedSynchronizer.fees.minTopupAmount =
+          Left $ mkInsufficientTopupAmountFailure trafficAmount configUsd.decentralizedSynchronizer.fees.minTopupAmount
+      | otherwise = Right ()
 
 -- | Computing synchronizer fees
 computeSynchronizerFees : Party -> Party -> Int -> AmuletRules -> TransferContext -> Update (Decimal, Decimal)

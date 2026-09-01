@@ -2190,6 +2190,7 @@ abstract class SvDsoStoreTest extends StoreTestBase with HasExecutionContext {
       1,
       numeric(1.0),
       numeric(1.0),
+      Optional.empty(),
     )
 
     contract(

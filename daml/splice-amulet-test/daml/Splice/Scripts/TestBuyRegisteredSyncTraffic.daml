@@ -1,0 +1,309 @@
+-- Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- | PoC (registered-synchronizer traffic), rung 2: buy extra traffic for a governance-registered
+--   synchronizer through the existing `AmuletRules_BuyMemberTraffic` choice, authorized by a
+--   disclosed `RegisteredSynchronizer` instead of the `requiredSynchronizers` gate, and assert the
+--   resulting `MemberTraffic` record is observed by the synchronizer's operator.
+--
+--   Rung 1 (`TestRegisterSynchronizer`, in the DSO governance test package) proves the registration
+--   is created by a vote. Here we create the `RegisteredSynchronizer` directly as the DSO party to
+--   isolate the buy path.
+module Splice.Scripts.TestBuyRegisteredSyncTraffic where
+
+import DA.Assert
+
+import Daml.Script
+
+-- The extended buy choice, the merge choice, and `TransferInput`/`InputAmulet`/`TransferContext`.
+import Splice.AmuletRules
+-- The registry contract (rung 1) and the purchase record the buy choice creates.
+import Splice.DecentralizedSynchronizer (RegisteredSynchronizer(..), MemberTraffic(..))
+
+-- App + user + round + funding helpers (setupDefaultAppWithUsers, tap, getTransferContext, ...).
+import Splice.Scripts.Util
+
+-- | The synchronizer id that `setupDefaultAppWithUsers` puts into `requiredSynchronizers`
+--   (see `defaultAmuletConfig` in `Splice.Testing.Registries.AmuletRegistry.Parameters`).
+decentralizedSyncId : Text
+decentralizedSyncId = "decentralized-synchronizer-id-0"
+
+-- | Happy path: a registered (non-required) synchronizer can have traffic bought for it through
+--   the plain member-traffic buy; the burn is unchanged and the created `MemberTraffic` carries
+--   the registration's operator as an observer.
+test_BuyRegisteredSyncTraffic : Script ()
+test_BuyRegisteredSyncTraffic = do
+  d <- setupDefaultAppWithUsers
+  let app = d.app
+  let provider = d.provider1
+  -- Ensure an open mining round exists to price the traffic against.
+  runNextIssuance app
+
+  -- The registered synchronizer's operator, plus a synchronizer id that is deliberately NOT in
+  -- `requiredSynchronizers` (which today holds only the decentralized sync) - authorization comes
+  -- from the registration instead.
+  operator <- allocateParty "registeredSyncOperator"
+  let registeredSyncId = "registered-sync::1220dededededededededededededededededededededededededededededede"
+
+  -- Rung 1 creates this via a DSO governance vote; here we create it directly as the DSO party to isolate rung 2.
+  registeredCid <- submit app.dso $ createCmd RegisteredSynchronizer with
+    dso = app.dso
+    synchronizerId = registeredSyncId
+    operator
+
+  -- Fund the buyer with Amulet to burn, and build a standard transfer context.
+  amuletCid <- tap app provider 1_000_000.0
+  context <- getTransferContext app provider None
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+
+  let memberId = "PAR::participant::1220abababababababababababababababababababababababababababababab"
+  -- Buy traffic for the registered synchronizer. `readAs app.dso` gives the buyer visibility of
+  -- the AmuletRules / OpenMiningRound / RegisteredSynchronizer (all signed by the DSO party)
+  -- in-script; on a live ledger these are supplied via explicit disclosure.
+  result <- submit (actAs provider.primaryParty <> readAs app.dso) $
+    exerciseCmd amuletRulesCid AmuletRules_BuyMemberTraffic with
+      inputs = [InputAmulet amuletCid]
+      context
+      provider = provider.primaryParty
+      memberId
+      synchronizerId = registeredSyncId
+      migrationId = 0
+      trafficAmount = 1_000_000
+      expectedDso = Some app.dso
+      optRegisteredSynchronizer = Some registeredCid
+
+  -- The purchase burned Amulet...
+  assertMsg "expected a non-zero Amulet burn" (result.amuletPaid > 0.0)
+  -- ...and recorded a MemberTraffic whose operator observer is drawn from the registration.
+  Some mt <- queryContractId app.dso result.purchasedTraffic
+  mt.dso === app.dso
+  mt.operator === Some operator
+  mt.synchronizerId === registeredSyncId
+  mt.memberId === memberId
+  mt.totalPurchased === 1_000_000
+
+  -- The operator is an observer, so its node can pick up the purchase on-ledger.
+  operatorView <- query @MemberTraffic operator
+  length operatorView === 1
+
+-- | Regression: without a registration, the choice behaves exactly as before - buying for the
+--   decentralized synchronizer succeeds (with no operator observer), buying for an unknown
+--   synchronizer id fails on the `requiredSynchronizers` gate.
+test_BuyMemberTraffic_withoutRegistrationUnchanged : Script ()
+test_BuyMemberTraffic_withoutRegistrationUnchanged = do
+  d <- setupDefaultAppWithUsers
+  let app = d.app
+  let provider = d.provider1
+  runNextIssuance app
+
+  amuletCid <- tap app provider 1_000_000.0
+  context <- getTransferContext app provider None
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+
+  let memberId = "PAR::participant::1220abababababababababababababababababababababababababababababab"
+  result <- submit (actAs provider.primaryParty <> readAs app.dso) $
+    exerciseCmd amuletRulesCid AmuletRules_BuyMemberTraffic with
+      inputs = [InputAmulet amuletCid]
+      context
+      provider = provider.primaryParty
+      memberId
+      synchronizerId = decentralizedSyncId
+      migrationId = 0
+      trafficAmount = 1_000_000
+      expectedDso = Some app.dso
+      optRegisteredSynchronizer = None
+  Some mt <- queryContractId app.dso result.purchasedTraffic
+  mt.operator === None
+
+  -- An id that is neither required nor registered is still rejected.
+  amuletCid2 <- tap app provider 1_000_000.0
+  context2 <- getTransferContext app provider None
+  submitMustFail (actAs provider.primaryParty <> readAs app.dso) $
+    exerciseCmd amuletRulesCid AmuletRules_BuyMemberTraffic with
+      inputs = [InputAmulet amuletCid2]
+      context = context2
+      provider = provider.primaryParty
+      memberId
+      synchronizerId = "unregistered-sync::1220bebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebebe"
+      migrationId = 0
+      trafficAmount = 1_000_000
+      expectedDso = Some app.dso
+      optRegisteredSynchronizer = None
+
+-- | Negative: a registration only authorizes its own synchronizer id - passing it together with a
+--   different synchronizer id is rejected.
+test_BuyRegisteredSyncTraffic_synchronizerIdMismatch : Script ()
+test_BuyRegisteredSyncTraffic_synchronizerIdMismatch = do
+  d <- setupDefaultAppWithUsers
+  let app = d.app
+  let provider = d.provider1
+  runNextIssuance app
+
+  operator <- allocateParty "registeredSyncOperator"
+  registeredCid <- submit app.dso $ createCmd RegisteredSynchronizer with
+    dso = app.dso
+    synchronizerId = "registered-sync::1220cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    operator
+
+  amuletCid <- tap app provider 1_000_000.0
+  context <- getTransferContext app provider None
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+
+  submitMustFail (actAs provider.primaryParty <> readAs app.dso) $
+    exerciseCmd amuletRulesCid AmuletRules_BuyMemberTraffic with
+      inputs = [InputAmulet amuletCid]
+      context
+      provider = provider.primaryParty
+      memberId = "PAR::participant::1220efefefefefefefefefefefefefefefefefefefefefefefefefefefefefef"
+      synchronizerId = "registered-sync::1220differentdifferentdifferentdifferentdifferentdifferentdiffe"
+      migrationId = 0
+      trafficAmount = 1_000_000
+      expectedDso = Some app.dso
+      optRegisteredSynchronizer = Some registeredCid
+
+-- | Negative: the `minTopupAmount` floor still applies even though the `requiredSynchronizers`
+--   gate is replaced for registered synchronizers - a tiny purchase is rejected.
+test_BuyRegisteredSyncTraffic_belowMinTopup : Script ()
+test_BuyRegisteredSyncTraffic_belowMinTopup = do
+  d <- setupDefaultAppWithUsers
+  let app = d.app
+  let provider = d.provider1
+  runNextIssuance app
+
+  operator <- allocateParty "registeredSyncOperator"
+  let registeredSyncId = "registered-sync::1220cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+  registeredCid <- submit app.dso $ createCmd RegisteredSynchronizer with
+    dso = app.dso
+    synchronizerId = registeredSyncId
+    operator
+
+  amuletCid <- tap app provider 1_000_000.0
+  context <- getTransferContext app provider None
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+
+  submitMustFail (actAs provider.primaryParty <> readAs app.dso) $
+    exerciseCmd amuletRulesCid AmuletRules_BuyMemberTraffic with
+      inputs = [InputAmulet amuletCid]
+      context
+      provider = provider.primaryParty
+      memberId = "PAR::participant::1220efefefefefefefefefefefefefefefefefefefefefefefefefefefefefef"
+      synchronizerId = registeredSyncId
+      migrationId = 0
+      trafficAmount = 1 -- below any sane minTopupAmount
+      expectedDso = Some app.dso
+      optRegisteredSynchronizer = Some registeredCid
+
+-- | Negative: a registered synchronizer has no migration history — its purchases must carry
+--   `migrationId = 0`. A non-zero id is rejected (it would create a record the operator's
+--   reconciler never counts).
+test_BuyRegisteredSyncTraffic_nonZeroMigrationId : Script ()
+test_BuyRegisteredSyncTraffic_nonZeroMigrationId = do
+  d <- setupDefaultAppWithUsers
+  let app = d.app
+  let provider = d.provider1
+  runNextIssuance app
+
+  operator <- allocateParty "registeredSyncOperator"
+  let registeredSyncId = "registered-sync::1220adadadadadadadadadadadadadadadadadadadadadadadadadadadadadad"
+  registeredCid <- submit app.dso $ createCmd RegisteredSynchronizer with
+    dso = app.dso
+    synchronizerId = registeredSyncId
+    operator
+
+  amuletCid <- tap app provider 1_000_000.0
+  context <- getTransferContext app provider None
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+
+  submitMustFail (actAs provider.primaryParty <> readAs app.dso) $
+    exerciseCmd amuletRulesCid AmuletRules_BuyMemberTraffic with
+      inputs = [InputAmulet amuletCid]
+      context
+      provider = provider.primaryParty
+      memberId = "PAR::participant::1220efefefefefefefefefefefefefefefefefefefefefefefefefefefefefef"
+      synchronizerId = registeredSyncId
+      migrationId = 1 -- registered synchronizers must use migrationId 0
+      trafficAmount = 1_000_000
+      expectedDso = Some app.dso
+      optRegisteredSynchronizer = Some registeredCid
+
+-- | Negative: the expected DSO party argument guards against a swapped-out AmuletRules. A
+--   mismatched expected DSO party (here, a party that is not the DSO party) is rejected before
+--   any Amulet burn.
+test_BuyRegisteredSyncTraffic_wrongExpectedDso : Script ()
+test_BuyRegisteredSyncTraffic_wrongExpectedDso = do
+  d <- setupDefaultAppWithUsers
+  let app = d.app
+  let provider = d.provider1
+  runNextIssuance app
+
+  operator <- allocateParty "registeredSyncOperator"
+  let registeredSyncId = "registered-sync::1220bcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbc"
+  registeredCid <- submit app.dso $ createCmd RegisteredSynchronizer with
+    dso = app.dso
+    synchronizerId = registeredSyncId
+    operator
+
+  amuletCid <- tap app provider 1_000_000.0
+  context <- getTransferContext app provider None
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+
+  submitMustFail (actAs provider.primaryParty <> readAs app.dso) $
+    exerciseCmd amuletRulesCid AmuletRules_BuyMemberTraffic with
+      inputs = [InputAmulet amuletCid]
+      context
+      provider = provider.primaryParty
+      memberId = "PAR::participant::1220ababababababababababababababababababababababababababababab"
+      synchronizerId = registeredSyncId
+      migrationId = 0
+      trafficAmount = 1_000_000
+      expectedDso = Some provider.primaryParty -- not the DSO party
+      optRegisteredSynchronizer = Some registeredCid
+
+-- | Negative: `RegisteredSynchronizer` requires a non-empty synchronizer id (template `ensure`).
+test_RegisteredSynchronizer_ensureNonEmpty : Script ()
+test_RegisteredSynchronizer_ensureNonEmpty = do
+  d <- setupDefaultAppWithUsers
+  let app = d.app
+  operator <- allocateParty "registeredSyncOperator"
+  submitMustFail app.dso $ createCmd RegisteredSynchronizer with
+    dso = app.dso
+    synchronizerId = ""
+    operator
+
+-- | Merging member traffic preserves the operator observer, and refuses to merge contracts whose
+--   operators disagree.
+test_MergeMemberTraffic_operatorPreserved : Script ()
+test_MergeMemberTraffic_operatorPreserved = do
+  d <- setupDefaultAppWithUsers
+  let app = d.app
+  operator <- allocateParty "registeredSyncOperator"
+  let registeredSyncId = "registered-sync::1220dededededededededededededededededededededededededededededede"
+  let memberId = "PAR::participant::1220abababababababababababababababababababababababababababababab"
+  let mkTraffic op purchased = MemberTraffic with
+        dso = app.dso
+        memberId
+        synchronizerId = registeredSyncId
+        migrationId = 0
+        totalPurchased = purchased
+        numPurchases = 1
+        amuletSpent = 1.0
+        usdSpent = 1.0
+        operator = op
+
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+
+  -- Same operator on both: the merge succeeds and the merged record keeps the operator.
+  cid1 <- submit app.dso $ createCmd (mkTraffic (Some operator) 1_000_000)
+  cid2 <- submit app.dso $ createCmd (mkTraffic (Some operator) 2_000_000)
+  result <- submit app.dso $ exerciseCmd amuletRulesCid AmuletRules_MergeMemberTrafficContracts with
+    trafficCids = [cid1, cid2]
+  Some merged <- queryContractId app.dso result.mergedTrafficCid
+  merged.operator === Some operator
+  merged.totalPurchased === 3_000_000
+  merged.numPurchases === 2
+
+  -- Disagreeing operators: the merge is rejected.
+  cid3 <- submit app.dso $ createCmd (mkTraffic (Some operator) 1_000_000)
+  cid4 <- submit app.dso $ createCmd (mkTraffic None 1_000_000)
+  submitMustFail app.dso $ exerciseCmd amuletRulesCid AmuletRules_MergeMemberTrafficContracts with
+    trafficCids = [cid3, cid4]

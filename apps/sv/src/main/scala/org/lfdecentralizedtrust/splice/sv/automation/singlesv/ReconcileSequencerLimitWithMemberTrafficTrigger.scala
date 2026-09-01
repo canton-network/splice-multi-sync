@@ -4,172 +4,69 @@
 package org.lfdecentralizedtrust.splice.sv.automation.singlesv
 
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 import org.lfdecentralizedtrust.splice.automation.{
-  OnAssignedContractTrigger,
-  TaskOutcome,
-  TaskSuccess,
+  ReconcileSequencerLimitWithMemberTrafficTriggerBase,
   TriggerContext,
 }
-import org.lfdecentralizedtrust.splice.codegen.java.splice
 import org.lfdecentralizedtrust.splice.environment.{
   SequencerAdminConnection,
   SynchronizerNodeService,
 }
-import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
 import org.lfdecentralizedtrust.splice.sv.store.SvDsoStore
 import org.lfdecentralizedtrust.splice.sv.LocalSynchronizerNode
-import org.lfdecentralizedtrust.splice.util.AssignedContract
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
-/** This trigger currently relies on enough SVs working on the same set traffic balance request around the same time.
-  * It also depends on the sorting of tasks done in OnAssignedContractTrigger to make this more likely to succeed.
-  *
-  * TODO(tech-debt): remove this constraint by ensuring that we regularly submit set-traffic-balance requests for ALL members.
+/** Reconciles the traffic purchased on the decentralized synchronizer with this SV's sequencer.
+  * Purchases for other synchronizers are granted by their own operators, so they are skipped here.
   */
 class ReconcileSequencerLimitWithMemberTrafficTrigger(
     override protected val context: TriggerContext,
     store: SvDsoStore,
     synchronizerNodeService: SynchronizerNodeService[LocalSynchronizerNode],
+    synchronizerId: SynchronizerId,
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
 )(implicit
     ec: ExecutionContext,
     mat: Materializer,
     tracer: Tracer,
-) extends OnAssignedContractTrigger.Template[
-      splice.decentralizedsynchronizer.MemberTraffic.ContractId,
-      splice.decentralizedsynchronizer.MemberTraffic,
-    ](
+) extends ReconcileSequencerLimitWithMemberTrafficTriggerBase(
       store,
-      splice.decentralizedsynchronizer.MemberTraffic.COMPANION,
+      trafficBalanceReconciliationDelay,
     ) {
 
-  override def completeTask(
-      memberTraffic: AssignedContract[
-        splice.decentralizedsynchronizer.MemberTraffic.ContractId,
-        splice.decentralizedsynchronizer.MemberTraffic,
-      ]
-  )(implicit tc: TraceContext): Future[TaskOutcome] = {
-    Member
-      .fromProtoPrimitive_(memberTraffic.payload.memberId)
-      .fold(
-        err => {
-          // Skip contracts with invalid member ids
-          Future.successful(TaskSuccess(s"Skipping MemberTraffic with invalid memberId: ${err}"))
-        },
-        memberId => {
-          val synchronizerId = SynchronizerId.tryFromString(memberTraffic.payload.synchronizerId)
-          synchronizerNodeService.sequencerAdminConnection().flatMap { sequencerAdminConnection =>
-            sequencerAdminConnection.getStatus
-              .map(_.successOption.map(_.synchronizerId))
-              .flatMap {
-                case None =>
-                  Future.failed(
-                    Status.FAILED_PRECONDITION
-                      .withDescription("Sequencer is not yet initialized")
-                      .asRuntimeException()
-                  )
-                case Some(sequencerSynchronizerId)
-                    if sequencerSynchronizerId.logical != synchronizerId =>
-                  Future.failed(
-                    Status.INTERNAL
-                      .withDescription(
-                        s"The MemberTraffic contract synchronizerId must match the connected domain ${sequencerSynchronizerId}"
-                      )
-                      .asRuntimeException()
-                  )
-                case _ =>
-                  store
-                    .getDsoRulesWithSvNodeStates()
-                    .flatMap(rulesAndStates => {
-                      if (
-                        rulesAndStates
-                          .activeSvParticipantAndMediatorIds(synchronizerId)
-                          .contains(memberId)
-                      ) {
-                        // SVs are granted unlimited traffic and do not need to purchase it via MemberTraffic contracts.
-                        // While the top-up trigger for SV validators is disabled by default, we also explicitly ignore
-                        // SV related MemberTraffic contracts here as a safeguard for the case of 3rd party top-ups
-                        // of SV nodes or an SV validator misconfiguration that changes the defaults.
-                        Future
-                          .successful(
-                            TaskSuccess(s"Skipping MemberTraffic contract for SV node $memberId")
-                          )
-                      } else {
-                        val trafficLimitOffset =
-                          rulesAndStates.dsoRules.payload.initialTrafficState.asScala
-                            .get(memberId.toProtoPrimitive)
-                            .fold(0L)(_.consumedTraffic)
-                        reconcileExtraTrafficLimitForMember(
-                          memberId,
-                          synchronizerId,
-                          trafficLimitOffset,
-                          sequencerAdminConnection,
-                        )
-                      }
-                    })
-              }
-          }
-        },
-      )
-  }
+  override protected def sequencerAdminConnection()(implicit
+      tc: TraceContext
+  ): Future[SequencerAdminConnection] =
+    synchronizerNodeService.sequencerAdminConnection()
 
-  private def reconcileExtraTrafficLimitForMember(
-      memberId: Member,
-      synchronizerId: SynchronizerId,
-      trafficLimitOffset: Long,
-      sequencerAdminConnection: SequencerAdminConnection,
-  )(implicit tc: TraceContext): Future[TaskSuccess] = {
-    sequencerAdminConnection.lookupSequencerTrafficControlState(memberId).flatMap {
-      case None =>
-        Future.successful(
-          TaskSuccess(
-            s"No traffic state found for member $memberId. It is likely that the member has been disabled as it was lagging behind and prevented sequencer pruning."
-          )
+  override protected def getTotalPurchasedMemberTraffic(memberId: Member)(implicit
+      tc: TraceContext
+  ): Future[Long] =
+    store.getTotalPurchasedMemberTraffic(memberId, synchronizerId)
+
+  override protected def trafficLimitOffset(memberId: Member)(implicit
+      tc: TraceContext
+  ): Future[Either[String, Long]] =
+    store.getDsoRulesWithSvNodeStates().map { rulesAndStates =>
+      if (rulesAndStates.activeSvParticipantAndMediatorIds(synchronizerId).contains(memberId)) {
+        // SVs are granted unlimited traffic and do not need to purchase it via MemberTraffic
+        // contracts. While the top-up trigger for SV validators is disabled by default, we also
+        // explicitly ignore SV related MemberTraffic contracts here as a safeguard for the case of
+        // 3rd party top-ups of SV nodes or an SV validator misconfiguration that changes the
+        // defaults.
+        Left("it is an SV node, which is granted unlimited traffic")
+      } else {
+        Right(
+          rulesAndStates.dsoRules.payload.initialTrafficState.asScala
+            .get(memberId.toProtoPrimitive)
+            .fold(0L)(_.consumedTraffic)
         )
-      case Some(trafficState) =>
-        for {
-          // Compute new extra traffic limit
-          totalPurchasedTraffic <- store.getTotalPurchasedMemberTraffic(memberId, synchronizerId)
-          newExtraTrafficLimit = NonNegativeLong
-            .tryCreate(trafficLimitOffset + totalPurchasedTraffic)
-
-          // Get current effective sequencer domain state
-          sequencerSynchronizerState <- sequencerAdminConnection
-            .getSequencerSynchronizerState(topologySnapshot = TopologySnapshot.Effective)
-          currentExtraTrafficLimit = trafficState.extraTrafficLimit
-
-          // Compare and reconcile old and new limits
-          taskOutcome <-
-            if (currentExtraTrafficLimit < newExtraTrafficLimit) {
-              sequencerAdminConnection
-                .setSequencerTrafficControlState(
-                  trafficState,
-                  sequencerSynchronizerState,
-                  newExtraTrafficLimit,
-                  context.pollingClock,
-                  trafficBalanceReconciliationDelay,
-                )
-                .map(_ =>
-                  TaskSuccess(
-                    s"Updated extra traffic limit for member ${memberId} from ${currentExtraTrafficLimit} to ${newExtraTrafficLimit}"
-                  )
-                )
-            } else {
-              Future(
-                TaskSuccess(
-                  s"Skipping since traffic limit is already up to date (previous limit = ${currentExtraTrafficLimit}, new limit = ${newExtraTrafficLimit})."
-                )
-              )
-            }
-        } yield taskOutcome
+      }
     }
-  }
 }

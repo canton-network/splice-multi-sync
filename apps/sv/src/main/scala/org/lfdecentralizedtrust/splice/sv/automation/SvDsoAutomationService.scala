@@ -484,6 +484,7 @@ class SvDsoAutomationService(
         triggerContext,
         dsoStore,
         synchronizerNodeService,
+        synchronizerId,
         config.trafficBalanceReconciliationDelay,
       )
     )
