@@ -31,6 +31,8 @@ case class SyncOperatorAppBackendConfig(
     sequencer: SyncOperatorSequencerConfig,
     override val automation: AutomationConfig = AutomationConfig(),
     parameters: SpliceParametersConfig = SpliceParametersConfig(batching = BatchingConfig()),
+    trafficBalanceReconciliationDelay: NonNegativeFiniteDuration =
+      NonNegativeFiniteDuration.ofSeconds(10),
     // Set to false to disable the DB-level exclusive lock that prevents two sync operator instances
     // from running concurrently against the same database.  Only disable for migration scenarios
     // where intentional overlap is required.

@@ -3,6 +3,7 @@
 
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.time.Clock
@@ -17,6 +18,7 @@ import org.lfdecentralizedtrust.splice.config.{AutomationConfig, SpliceParameter
 import org.lfdecentralizedtrust.splice.environment.{
   PackageVersionSupport,
   RetryProvider,
+  SequencerAdminConnection,
   SpliceLedgerClient,
 }
 import org.lfdecentralizedtrust.splice.store.DomainTimeSynchronization
@@ -33,6 +35,8 @@ class SyncOperatorAutomationService(
     ledgerClient: SpliceLedgerClient,
     retryProvider: RetryProvider,
     params: SpliceParametersConfig,
+    sequencerConnection: SequencerAdminConnection,
+    trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
     protected val loggerFactory: NamedLoggerFactory,
     packageVersionSupport: PackageVersionSupport,
 )(implicit
@@ -57,6 +61,15 @@ class SyncOperatorAutomationService(
     SqlIndexInitializationTrigger(
       storage,
       triggerContext,
+    )
+  )
+
+  registerTrigger(
+    new ReconcileDedicatedSequencerTrafficTrigger(
+      triggerContext,
+      store,
+      sequencerConnection,
+      trafficBalanceReconciliationDelay,
     )
   )
 }

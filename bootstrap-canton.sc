@@ -13,6 +13,9 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.synchronizer.config.SynchronizerParametersConfig
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
+import com.digitalasset.canton.admin.api.client.data.TrafficControlParameters
+import com.digitalasset.canton.config.PositiveFiniteDuration
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.digitalasset.canton.version.ProtocolVersion
@@ -36,10 +39,25 @@ def staticParameters(sequencer: LocalInstanceReference) =
     .map(StaticSynchronizerParameters(_))
     .getOrElse(sys.error("whatever"))
 
+// Canton's own defaults. A member only gets a traffic state, and so can only be granted extra
+// traffic, on a synchronizer that has traffic control enabled.
+val defaultTrafficControlParameters = TrafficControlParameters(
+  maxBaseTrafficAmount = NonNegativeLong.tryCreate(10 * 20 * 1024),
+  readVsWriteScalingFactor = PositiveInt.tryCreate(200),
+  maxBaseTrafficAccumulationDuration = PositiveFiniteDuration.ofMinutes(10),
+  setBalanceRequestSubmissionWindowSize = PositiveFiniteDuration.ofMinutes(5),
+  enforceRateLimiting = true,
+  baseEventCost = NonNegativeLong.zero,
+  freeConfirmationResponses = false,
+)
+
 def bootstrapOtherDomain(
     name: String,
     sequencer: LocalSequencerReference,
     mediator: LocalMediatorReference,
+    // Traffic control is off by default here: only synchronizers that stand in for a dedicated one
+    // need it, and enabling it everywhere would change what every other test sequences against.
+    enableTrafficControl: Boolean = false,
 ) = {
   bootstrap.synchronizer(
     name,
@@ -67,6 +85,8 @@ def bootstrapOtherDomain(
         ),
         preparationTimeRecordTimeTolerance = NonNegativeFiniteDuration.ofHours(24),
         mediatorDeduplicationTimeout = NonNegativeFiniteDuration.ofHours(48),
+        trafficControl =
+          if (enableTrafficControl) Some(defaultTrafficControlParameters) else parameters.trafficControl,
       ),
     signedBy = Some(sequencer.id.uid.namespace.fingerprint),
     // This is test code so just force the change.
@@ -74,10 +94,10 @@ def bootstrapOtherDomain(
   )
 }
 
-Seq(
-  ("splitwell", splitwellSequencer, splitwellMediator),
-  ("splitwellUpgrade", splitwellUpgradeSequencer, splitwellUpgradeMediator),
-).foreach((bootstrapOtherDomain _).tupled)
+// splitwell is the only non-global synchronizer a sync operator can be pointed at today, so it
+// carries traffic control; see apps/app/src/test/resources/sync-operator-topology.conf.
+bootstrapOtherDomain("splitwell", splitwellSequencer, splitwellMediator, enableTrafficControl = true)
+bootstrapOtherDomain("splitwellUpgrade", splitwellUpgradeSequencer, splitwellUpgradeMediator)
 
 // These user allocations are only there
 // for local testing. Our tests allocate their own users.
