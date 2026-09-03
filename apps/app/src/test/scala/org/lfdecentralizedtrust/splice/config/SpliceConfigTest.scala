@@ -32,6 +32,21 @@ class SpliceConfigTest extends AsyncWordSpec with BaseTest {
       "topup interval 1 second must not be smaller than the polling interval 30 seconds"
     )
   }
+  "Validator config is rejected when an extra synchronizer topup interval < pollingInterval" in {
+    val overwrite = ConfigFactory.parseString(
+      """
+      |canton.validator-apps.aliceValidator.domains.extra = [{
+      |  alias = "dedicated"
+      |  url = "http://localhost:5108"
+      |  topup { target-throughput = 500000, min-topup-interval = 1s }
+      |}]
+     """.stripMargin
+    )
+    val buggyConfig = CantonConfig.mergeConfigs(config, Seq(overwrite))
+    SpliceConfig.loadAndValidate(buggyConfig).left.value.toString should include(
+      "topup interval 1 second must not be smaller than the polling interval 30 seconds on synchronizer dedicated"
+    )
+  }
   "disableSvValidatorBftSequencerConnection" should {
     "be rejected if svValidator is not true" in {
       val overwrite = ConfigFactory.parseString(
