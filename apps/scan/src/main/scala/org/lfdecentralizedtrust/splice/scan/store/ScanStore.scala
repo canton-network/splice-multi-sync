@@ -398,6 +398,19 @@ object ScanStore {
             totalTrafficPurchased = Some(contract.payload.totalPurchased),
           )
         },
+        // Ingested for its created event blob: a buyer of traffic for a registered synchronizer is
+        // neither its signatory nor its observer, so it can only reach the registration through
+        // explicit disclosure, and update history drops the blob by design.
+        mkFilter(splice.decentralizedsynchronizer.RegisteredSynchronizer.COMPANION)(
+          co => co.payload.dso == dso,
+          versionGuard = { case (pkgVersionSupport, now) =>
+            (tc) =>
+              pkgVersionSupport
+                .supportsDedicatedSynchronizers(Seq(key.dsoParty), now)(tc)
+          },
+        )(
+          ScanAcsStoreRowData(_)
+        ),
         mkFilter(splice.validatorlicense.ValidatorLicense.COMPANION)(co => co.payload.dso == dso) {
           contract =>
             val roundsCollected = contract.payload.faucetState.map { faucetState =>
