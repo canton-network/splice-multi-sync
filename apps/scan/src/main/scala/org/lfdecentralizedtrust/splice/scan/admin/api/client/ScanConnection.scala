@@ -20,6 +20,7 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.round.{
   OpenMiningRound,
 }
 import org.lfdecentralizedtrust.splice.codegen.java.splice.types.Round
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.RegisteredSynchronizer
 import org.lfdecentralizedtrust.splice.config.UpgradesConfig
 import org.lfdecentralizedtrust.splice.environment.*
 import org.lfdecentralizedtrust.splice.http.HttpClient
@@ -307,6 +308,11 @@ trait ScanConnection
       ec: ExecutionContext,
       tc: TraceContext,
   ): Future[Option[ContractWithState[TransferPreapproval.ContractId, TransferPreapproval]]]
+
+  def lookupSynchronizerRegistration(synchronizerId: String)(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): Future[Option[ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]]]
 
   def listVoteRequestResults(
       filters: VoteResultsFilters,

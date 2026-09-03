@@ -22,7 +22,10 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.amuletrules.{
   TransferPreapproval,
 }
 import org.lfdecentralizedtrust.splice.codegen.java.splice.ans.{AnsEntry, AnsRules}
-import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.MemberTraffic
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.{
+  MemberTraffic,
+  RegisteredSynchronizer,
+}
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dso.svstate.SvNodeState
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dsorules.{
   DsoRules_CloseVoteRequestResult,
@@ -363,6 +366,37 @@ class DbScanStore(
           "lookupTransferPreapprovalReceiver",
         )
     } yield contractWithStateFromRow(TransferPreapproval.COMPANION)(row)).value
+  }
+
+  override def lookupSynchronizerRegistration(
+      synchronizerId: String
+  )(implicit tc: TraceContext): Future[
+    Option[ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]]
+  ] = waitUntilAcsIngested {
+    (for {
+      row <- storage
+        .querySingle(
+          selectFromAcsTableWithState(
+            ScanTables.acsTableName,
+            acsStoreId,
+            domainMigrationId,
+            RegisteredSynchronizer.COMPANION,
+            additionalWhere = sql"""
+                and acs.create_arguments->>'synchronizerId' = ${lengthLimited(synchronizerId)}
+            """,
+            // Governance can create more than one registration for a synchronizer id: the template
+            // has no key, DsoRules_RegisterSynchronizer creates unconditionally, and archiving the
+            // old one is a separate vote, so both are live during an operator change. Serve the
+            // newest, since a stale pick would silently credit the superseded operator as observer
+            // on the resulting MemberTraffic. contract_id breaks ties so every Scan agrees, which
+            // BftScanConnection requires because it compares responses structurally.
+            orderLimit = sql"""
+                order by acs.created_at desc, acs.contract_id limit 1
+            """,
+          ).headOption,
+          "lookupSynchronizerRegistration",
+        )
+    } yield contractWithStateFromRow(RegisteredSynchronizer.COMPANION)(row)).value
   }
 
   override def lookupTransferCommandCounterByParty(

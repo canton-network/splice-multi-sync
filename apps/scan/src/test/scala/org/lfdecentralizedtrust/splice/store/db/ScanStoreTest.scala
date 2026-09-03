@@ -53,6 +53,8 @@ import org.lfdecentralizedtrust.splice.store.*
 import org.lfdecentralizedtrust.splice.util.SpliceUtil.damlDecimal
 import org.lfdecentralizedtrust.splice.util.*
 
+import com.google.protobuf.ByteString
+
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.{Collections, Optional}
@@ -236,6 +238,65 @@ abstract class ScanStoreTest
           store
             .lookupFeaturedAppRight(userParty(1))
             .futureValue should be(expectedResult)
+        }
+      }
+    }
+
+    "lookupSynchronizerRegistration" should {
+      "return the registration for the requested synchronizer id" in {
+        val wanted = registeredSynchronizer(userParty(1), "dedicated::1220aa")
+        val other = registeredSynchronizer(userParty(2), "dedicated::1220bb")
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(wanted)(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(other)(store.multiDomainAcsStore)
+        } yield {
+          store.lookupSynchronizerRegistration("dedicated::1220aa").futureValue should be(
+            Some(ContractWithState(wanted, Assigned(dummyDomain)))
+          )
+          store.lookupSynchronizerRegistration("dedicated::1220zz").futureValue should be(None)
+        }
+      }
+
+      // An operator change registers the new synchronizer before archiving the old one, so both
+      // are live in between. Serving the superseded one would credit the wrong operator as observer
+      // on the resulting MemberTraffic.
+      "return the newest registration when a synchronizer id has more than one" in {
+        // The newer row also has the LARGER contract id, so ordering by contract_id alone would
+        // return the older one and this fails.
+        val older = registeredSynchronizer(userParty(1), "dedicated::1220aa", Instant.EPOCH)
+        val newer =
+          registeredSynchronizer(userParty(2), "dedicated::1220aa", Instant.EPOCH.plusSeconds(1))
+        older.contractId.contractId should be < newer.contractId.contractId
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(older)(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(newer)(store.multiDomainAcsStore)
+        } yield {
+          store.lookupSynchronizerRegistration("dedicated::1220aa").futureValue should be(
+            Some(ContractWithState(newer, Assigned(dummyDomain)))
+          )
+        }
+      }
+
+      // Governance can create two registrations for one synchronizer id: the template has no key
+      // and DsoRules_RegisterSynchronizer creates unconditionally. Every Scan must pick the same
+      // one, because BftScanConnection compares responses structurally.
+      "pick deterministically when a synchronizer id has more than one registration" in {
+        // nextCid() is monotonic, so `lower` has the smaller contract id. Ingest it SECOND, so
+        // insertion order and contract-id order disagree: without an explicit `order by
+        // contract_id` the query returns `higher` and this fails.
+        val lower = registeredSynchronizer(userParty(1), "dedicated::1220aa")
+        val higher = registeredSynchronizer(userParty(2), "dedicated::1220aa")
+        lower.contractId.contractId should be < higher.contractId.contractId
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(higher)(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(lower)(store.multiDomainAcsStore)
+        } yield {
+          store.lookupSynchronizerRegistration("dedicated::1220aa").futureValue should be(
+            Some(ContractWithState(lower, Assigned(dummyDomain)))
+          )
         }
       }
     }
@@ -1714,15 +1775,23 @@ trait AmuletTransferUtil { self: StoreTestBase =>
     )
   }
 
-  def registeredSynchronizer(operator: PartyId) =
-    contract(
+  // Built directly rather than through `contract(...)` so `createdAt` can vary, which the
+  // newest-wins ordering test needs. The blob stays EMPTY: it is not what these tests assert.
+  def registeredSynchronizer(
+      operator: PartyId,
+      synchronizerId: String = dummyDomain.toProtoPrimitive,
+      createdAt: Instant = Instant.EPOCH,
+  ) =
+    Contract(
       RegisteredSynchronizer.TEMPLATE_ID_WITH_PACKAGE_ID,
       new RegisteredSynchronizer.ContractId(nextCid()),
       new RegisteredSynchronizer(
         dsoParty.toProtoPrimitive,
-        dummyDomain.toProtoPrimitive,
+        synchronizerId,
         operator.toProtoPrimitive,
       ),
+      ByteString.EMPTY,
+      createdAt,
     )
 
   lazy val domain = dummyDomain.toProtoPrimitive

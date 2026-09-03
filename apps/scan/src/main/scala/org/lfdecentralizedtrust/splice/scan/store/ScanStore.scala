@@ -204,6 +204,23 @@ trait ScanStore
     ]]
   ]
 
+  /** The registration authorizing Amulet-funded traffic for `synchronizerId`, if any.
+    *
+    * Served from the ACS store so the result carries the created event blob a buyer needs to
+    * disclose it. `synchronizerId` is a raw string because the Daml field is `Text` and the
+    * on-ledger check is a string compare (`AmuletRules.daml`, validateBuyMemberTrafficInputs).
+    *
+    * Returns the newest registration if governance created more than one for this synchronizer.
+    */
+  def lookupSynchronizerRegistration(
+      synchronizerId: String
+  )(implicit tc: TraceContext): Future[
+    Option[ContractWithState[
+      splice.decentralizedsynchronizer.RegisteredSynchronizer.ContractId,
+      splice.decentralizedsynchronizer.RegisteredSynchronizer,
+    ]]
+  ]
+
   def lookupTransferCommandCounterByParty(
       partyId: PartyId
   )(implicit tc: TraceContext): Future[
