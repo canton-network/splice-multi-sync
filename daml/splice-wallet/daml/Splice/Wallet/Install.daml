@@ -60,8 +60,8 @@ executeAmuletOperationRec executionContext inputs prevResults (operation::remain
     CO_SubscriptionMakePayment cid -> do
       result <- exercise cid (SubscriptionIdleState_MakePayment inputs executionContext.paymentContext executionContext.validator)
       handleResultSubscriptionMakePayment result
-    CO_BuyMemberTraffic trafficAmount memberId synchronizerId migrationId minTopupInterval topupStateCid -> do
-      result <- handleBuyMemberTraffic trafficAmount memberId synchronizerId migrationId minTopupInterval topupStateCid
+    CO_BuyMemberTraffic trafficAmount memberId synchronizerId migrationId minTopupInterval topupStateCid optRegisteredSynchronizer -> do
+      result <- handleBuyMemberTraffic trafficAmount memberId synchronizerId migrationId minTopupInterval topupStateCid optRegisteredSynchronizer
       handleResult COO_BuyMemberTraffic result
     CO_CompleteBuyTrafficRequest cid -> do
       result <- exercise cid (BuyTrafficRequest_Complete inputs executionContext.paymentContext executionContext.validator)
@@ -158,8 +158,8 @@ executeAmuletOperationRec executionContext inputs prevResults (operation::remain
       let inputAmulets = optional [] (\amulet -> [InputAmulet amulet]) senderChange
       executeAmuletOperationRec executionContext inputAmulets (COO_TransferPreapprovalSend senderChange :: prevResults) remainingOperations
 
-    handleBuyMemberTraffic: Int -> Text -> Text -> Int -> RelTime -> Optional (ContractId ValidatorTopUpState) -> Update (ContractId MemberTraffic, Optional (ContractId Amulet))
-    handleBuyMemberTraffic trafficAmount memberId synchronizerId migrationId minTopupInterval topupStateCidO = do
+    handleBuyMemberTraffic: Int -> Text -> Text -> Int -> RelTime -> Optional (ContractId ValidatorTopUpState) -> Optional (ContractId RegisteredSynchronizer) -> Update (ContractId MemberTraffic, Optional (ContractId Amulet))
+    handleBuyMemberTraffic trafficAmount memberId synchronizerId migrationId minTopupInterval topupStateCidO optRegisteredSynchronizer = do
       now <- getTime
       -- validate and update topupState if provided
       forA_ topupStateCidO $ \topupStateCid -> do
@@ -195,7 +195,7 @@ executeAmuletOperationRec executionContext inputs prevResults (operation::remain
         migrationId
         trafficAmount
         expectedDso = Some executionContext.dso
-        optRegisteredSynchronizer = None
+        optRegisteredSynchronizer
       pure (result.purchasedTraffic, result.senderChangeAmulet)
 
     handleCreateExternalPartySetupProposal : ExecutionContext -> Party -> Time -> Update (ContractId ExternalPartySetupProposal, [TransferInput])
@@ -263,6 +263,10 @@ data AmuletOperation
       migrationId : Int
       minTopupInterval: RelTime
       topupStateCid : Optional (ContractId ValidatorTopUpState)
+      optRegisteredSynchronizer : Optional (ContractId RegisteredSynchronizer)
+        -- ^ For traffic on a governance-registered synchronizer: the registration authorizing it,
+        -- forwarded unchanged to `AmuletRules_BuyMemberTraffic`. Supplied via explicit disclosure
+        -- on a live ledger. `None` buys traffic on the decentralized synchronizer.
   | CO_CompleteBuyTrafficRequest with
       trafficRequestCid: ContractId BuyTrafficRequest
   | CO_Tap with
