@@ -800,6 +800,8 @@ object SpliceConfig {
           ),
         )
       })
+    implicit val extraSynchronizerTopupConfigReader: ConfigReader[ExtraSynchronizerTopupConfig] =
+      deriveReader[ExtraSynchronizerTopupConfig]
     implicit val validatorExtraSynchronizerConfigReader
         : ConfigReader[ValidatorExtraSynchronizerConfig] =
       deriveReader[ValidatorExtraSynchronizerConfig]
@@ -1251,6 +1253,8 @@ object SpliceConfig {
     implicit val validatorDecentralizedSynchronizerConfigWriter
         : ConfigWriter[ValidatorDecentralizedSynchronizerConfig] =
       deriveWriter[ValidatorDecentralizedSynchronizerConfig]
+    implicit val extraSynchronizerTopupConfigWriter: ConfigWriter[ExtraSynchronizerTopupConfig] =
+      deriveWriter[ExtraSynchronizerTopupConfig]
     implicit val validatorExtraSynchronizerConfigWriter
         : ConfigWriter[ValidatorExtraSynchronizerConfig] =
       deriveWriter[ValidatorExtraSynchronizerConfig]

@@ -123,16 +123,45 @@ case class ValidatorTrustedSynchronizerConfig(
     threshold: Int,
 )
 
+/** Extra traffic purchase settings for a single synchronizer.
+  *
+  * Deliberately narrower than [[BuyExtraTrafficConfig]]: `grpcDeadline` is read once app-wide from
+  * `domains.global` and has no per-synchronizer plumbing, so it is not representable here.
+  */
+final case class ExtraSynchronizerTopupConfig(
+    /** target throughput in bytes per second; 0 disables top-ups for this synchronizer */
+    targetThroughput: NonNegativeNumeric[BigDecimal] = NonNegativeNumeric.tryCreate(BigDecimal(0)),
+    minTopupInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMinutes(10),
+)
+
 // Validators are responsible for establishing connections to domains and so need more information than just a `SynchronizerConfig`
 case class ValidatorExtraSynchronizerConfig(
     alias: SynchronizerAlias,
     url: String,
+    topup: ExtraSynchronizerTopupConfig = ExtraSynchronizerTopupConfig(),
 )
 
 case class ValidatorSynchronizerConfig(
     global: ValidatorDecentralizedSynchronizerConfig,
     extra: Seq[ValidatorExtraSynchronizerConfig] = Seq(),
-)
+) {
+
+  /** Synchronizers with a non-zero top-up target, global first.
+    *
+    * The per-synchronizer half of [[ValidatorTopupConfig]]; its third field,
+    * `topupTriggerPollingInterval`, is app-wide. Consumed by the top-up trigger fan-out, which maps
+    * this over the `ValidatorTopupConfig` construction in `ValidatorApp`.
+    */
+  lazy val topupTargets: Seq[(SynchronizerAlias, ExtraSynchronizerTopupConfig)] =
+    ((
+      global.alias,
+      ExtraSynchronizerTopupConfig(
+        global.buyExtraTraffic.targetThroughput,
+        global.buyExtraTraffic.minTopupInterval,
+      ),
+    ) +: extra.map(e => (e.alias, e.topup)))
+      .filter(_._2.targetThroughput.value > 0)
+}
 
 final case class MigrateValidatorPartyConfig(
     // The scan instance the ACS snapshot should be fetched from.
