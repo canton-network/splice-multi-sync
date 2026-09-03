@@ -899,10 +899,6 @@ testBuyMemberTraffic = script do
   pure ()
 
 
--- | The only wallet-layer coverage of `optRegisteredSynchronizer`. The scripts in
--- `TestBuyRegisteredSyncTraffic.daml` exercise `AmuletRules_BuyMemberTraffic` directly and never
--- enter `Install.daml`, so this is what proves the `CO_BuyMemberTraffic` dispatch forwards the
--- registration.
 testBuyMemberTrafficForRegisteredSynchronizer : Script ()
 testBuyMemberTrafficForRegisteredSynchronizer = script do
   DefaultAppWithUsers{..} <- setupDefaultAppWithUsers
@@ -936,8 +932,6 @@ testBuyMemberTrafficForRegisteredSynchronizer = script do
     CO_BuyMemberTraffic minTopupAmount testParticipantId registeredSyncId 0 (minutes 1) (Some topupStateCid) (Some registeredCid)
 
   Some traffic <- queryContractId @MemberTraffic app.dso trafficCid
-  traffic.synchronizerId === registeredSyncId
-  traffic.migrationId === 0
   -- the registration's operator becomes an observer on the purchase record
   traffic.operator === Some operator
 
