@@ -800,6 +800,8 @@ object SpliceConfig {
           ),
         )
       })
+    implicit val extraSynchronizerTopupConfigReader: ConfigReader[ExtraSynchronizerTopupConfig] =
+      deriveReader[ExtraSynchronizerTopupConfig]
     implicit val validatorExtraSynchronizerConfigReader
         : ConfigReader[ValidatorExtraSynchronizerConfig] =
       deriveReader[ValidatorExtraSynchronizerConfig]
@@ -874,16 +876,16 @@ object SpliceConfig {
               s"Pruning retention period ${conf.participantPruningSchedule.map(_.retention)} must be bigger than the deduplication duration ${conf.deduplicationDuration}"
             ),
           )
-          _ <- Either.cond(
-            {
-              val traffic = conf.domains.global.buyExtraTraffic
-              traffic.targetThroughput.value <= 0 || traffic.minTopupInterval.duration >= conf.automation.pollingInterval.duration
-            },
-            (),
-            ConfigValidationFailed(
-              s"topup interval ${conf.domains.global.buyExtraTraffic.minTopupInterval} must not be smaller than the polling interval ${conf.automation.pollingInterval}"
-            ),
-          )
+          // Every synchronizer we top up, not just global. topupTargets already filters out
+          // zero-throughput entries.
+          _ <- conf.domains.topupTargets
+            .find(_._2.minTopupInterval.duration < conf.automation.pollingInterval.duration)
+            .toLeft(())
+            .leftMap { case (alias, topup) =>
+              ConfigValidationFailed(
+                s"topup interval ${topup.minTopupInterval} must not be smaller than the polling interval ${conf.automation.pollingInterval} on synchronizer ${alias.unwrap}"
+              )
+            }
 
           _ <- Either.cond(
             !conf.disableSvValidatorBftSequencerConnection || conf.svValidator,
@@ -1251,6 +1253,8 @@ object SpliceConfig {
     implicit val validatorDecentralizedSynchronizerConfigWriter
         : ConfigWriter[ValidatorDecentralizedSynchronizerConfig] =
       deriveWriter[ValidatorDecentralizedSynchronizerConfig]
+    implicit val extraSynchronizerTopupConfigWriter: ConfigWriter[ExtraSynchronizerTopupConfig] =
+      deriveWriter[ExtraSynchronizerTopupConfig]
     implicit val validatorExtraSynchronizerConfigWriter
         : ConfigWriter[ValidatorExtraSynchronizerConfig] =
       deriveWriter[ValidatorExtraSynchronizerConfig]

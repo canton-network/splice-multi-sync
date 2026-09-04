@@ -496,6 +496,20 @@
               },
               "url": {
                 "type": "string"
+              },
+              "topup": {
+                "type": "object",
+                "properties": {
+                  "targetThroughput": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "minTopupInterval": {
+                    "type": "string",
+                    "pattern": "^[0-9]+[smh]$"
+                  }
+                },
+                "required": ["targetThroughput"]
               }
             }
           }

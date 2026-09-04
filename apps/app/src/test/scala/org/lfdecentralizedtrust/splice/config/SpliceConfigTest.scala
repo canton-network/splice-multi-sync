@@ -9,6 +9,7 @@ import org.lfdecentralizedtrust.splice.wallet.config.{
   AppRewardBeneficiaryConfig,
   RewardSharingConfig,
 }
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.PartyId
 
@@ -29,6 +30,21 @@ class SpliceConfigTest extends AsyncWordSpec with BaseTest {
     val buggyConfig = CantonConfig.mergeConfigs(config, Seq(overwrite))
     SpliceConfig.loadAndValidate(buggyConfig).left.value.toString should include(
       "topup interval 1 second must not be smaller than the polling interval 30 seconds"
+    )
+  }
+  "Validator config is rejected when an extra synchronizer topup interval < pollingInterval" in {
+    val overwrite = ConfigFactory.parseString(
+      """
+      |canton.validator-apps.aliceValidator.domains.extra = [{
+      |  alias = "dedicated"
+      |  url = "http://localhost:5108"
+      |  topup { target-throughput = 500000, min-topup-interval = 1s }
+      |}]
+     """.stripMargin
+    )
+    val buggyConfig = CantonConfig.mergeConfigs(config, Seq(overwrite))
+    SpliceConfig.loadAndValidate(buggyConfig).left.value.toString should include(
+      "topup interval 1 second must not be smaller than the polling interval 30 seconds on synchronizer dedicated"
     )
   }
   "disableSvValidatorBftSequencerConnection" should {
@@ -83,6 +99,70 @@ class SpliceConfigTest extends AsyncWordSpec with BaseTest {
       )
       val buggyConfig = CantonConfig.mergeConfigs(config, Seq(overwrite))
       SpliceConfig.loadAndValidate(buggyConfig) shouldBe a[Right[?, ?]]
+    }
+  }
+
+  "domains.extra topup" should {
+    "default to a zero target, leaving existing entries unchanged" in {
+      val overwrite = ConfigFactory.parseString(
+        """
+      |canton.validator-apps.aliceValidator.domains.extra = [
+      |  { alias = "dedicated-1", url = "http://dedicated-1.example.com" }
+      |]
+     """.stripMargin
+      )
+      val extended = CantonConfig.mergeConfigs(config, Seq(overwrite))
+      val validator =
+        SpliceConfig
+          .loadAndValidate(extended)
+          .value
+          .validatorApps(InstanceName.tryCreate("aliceValidator"))
+      val extra = validator.domains.extra.loneElement
+      extra.alias.unwrap shouldBe "dedicated-1"
+      extra.topup.targetThroughput.value shouldBe BigDecimal(0)
+      validator.domains.topupTargets shouldBe empty
+    }
+
+    "be parsed when set, and surface through topupTargets" in {
+      val overwrite = ConfigFactory.parseString(
+        """
+      |canton.validator-apps.aliceValidator.domains.extra = [
+      |  { alias = "dedicated-1", url = "http://dedicated-1.example.com",
+      |    topup { target-throughput = 5000, min-topup-interval = 1m } }
+      |]
+     """.stripMargin
+      )
+      val extended = CantonConfig.mergeConfigs(config, Seq(overwrite))
+      val validator =
+        SpliceConfig
+          .loadAndValidate(extended)
+          .value
+          .validatorApps(InstanceName.tryCreate("aliceValidator"))
+      validator.domains.extra.loneElement.topup.targetThroughput.value shouldBe BigDecimal(5000)
+      // the global target is 0 in the base topology, so only the dedicated synchronizer appears
+      validator.domains.topupTargets.map(_._1.unwrap) shouldBe Seq("dedicated-1")
+    }
+
+    "list the global synchronizer first when both have non-zero targets" in {
+      val overwrite = ConfigFactory.parseString(
+        """
+      |canton.validator-apps.aliceValidator.domains.global.buy-extra-traffic.target-throughput = 20000
+      |canton.validator-apps.aliceValidator.domains.extra = [
+      |  { alias = "dedicated-1", url = "http://dedicated-1.example.com",
+      |    topup { target-throughput = 5000 } }
+      |]
+     """.stripMargin
+      )
+      val extended = CantonConfig.mergeConfigs(config, Seq(overwrite))
+      val validator =
+        SpliceConfig
+          .loadAndValidate(extended)
+          .value
+          .validatorApps(InstanceName.tryCreate("aliceValidator"))
+      validator.domains.topupTargets.map(_._2.targetThroughput.value) shouldBe Seq(
+        BigDecimal(20000),
+        BigDecimal(5000),
+      )
     }
   }
 
