@@ -1124,6 +1124,33 @@ paths:
         "404":
           $ref: "../../../../common/src/main/openapi/common-external.yaml#/components/responses/404"
 
+  /v0/domains/{domain_id}/registration:
+    get:
+      tags: [internal, scan]
+      x-jvm-package: scan
+      operationId: "lookupSynchronizerRegistration"
+      description: |
+        Get the RegisteredSynchronizer authorizing Amulet-funded traffic for a dedicated
+        synchronizer. Served from the ACS store, so the response carries the created event blob
+        a buyer needs in order to disclose it.
+      parameters:
+        - name: "domain_id"
+          description: |
+            The synchronizer ID whose registration to look up.
+          in: "path"
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/LookupSynchronizerRegistrationResponse"
+        "404":
+          $ref: "../../../../common/src/main/openapi/common-external.yaml#/components/responses/404"
+
   /v0/transfer-command-counter/{party}:
     get:
       tags: [internal, scan]
@@ -3531,6 +3558,14 @@ components:
       properties:
         transfer_preapproval:
           "$ref": "../../../../common/src/main/openapi/common-internal.yaml#/components/schemas/ContractWithState"
+    LookupSynchronizerRegistrationResponse:
+      description: A Daml contract of template `Splice.DecentralizedSynchronizer:RegisteredSynchronizer`.
+      type: object
+      required: ["registration"]
+      properties:
+        registration:
+          "$ref": "../../../../common/src/main/openapi/common-internal.yaml#/components/schemas/ContractWithState"
+
     LookupTransferCommandCounterByPartyResponse:
       description: A Daml contract of template `Splice.ExternalPartyAmuletRules:TransferCommandCounter`.
       type: object

@@ -87,6 +87,7 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.api.token.allocationv
 import org.lfdecentralizedtrust.splice.codegen.java.splice.api.token.allocationv2
 import org.lfdecentralizedtrust.splice.codegen.java.splice.api.token.allocationinstructionv1
 import org.lfdecentralizedtrust.splice.codegen.java.splice.api.token.allocationinstructionv2
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.RegisteredSynchronizer
 import org.lfdecentralizedtrust.splice.http.v0.definitions.HoldingsSummaryRequest.RecordTimeMatch
 import org.lfdecentralizedtrust.splice.metrics.ScanConnectionMetrics
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.commands.HttpScanAppClient.BftSequencer
@@ -488,6 +489,15 @@ class SingleScanConnection private[client] (
     runHttpCmd(
       config.adminApi.url,
       HttpScanAppClient.GetMigrationId(),
+    )
+
+  override def lookupSynchronizerRegistration(synchronizerId: String)(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): Future[Option[ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]]] =
+    runHttpCmd(
+      config.adminApi.url,
+      HttpScanAppClient.LookupSynchronizerRegistration(synchronizerId),
     )
 
   override def lookupTransferPreapprovalByParty(receiver: PartyId)(implicit

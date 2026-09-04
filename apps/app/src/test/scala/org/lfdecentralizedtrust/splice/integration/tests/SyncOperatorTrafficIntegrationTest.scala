@@ -3,7 +3,6 @@
 
 package org.lfdecentralizedtrust.splice.integration.tests
 
-import com.daml.ledger.javaapi.data.CreatedEvent
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.{Member, PartyId, SynchronizerId}
@@ -16,9 +15,7 @@ import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   IntegrationTest,
   SpliceTestConsoleEnvironment,
 }
-import org.lfdecentralizedtrust.splice.store.MultiDomainAcsStore.ContractState
 import org.lfdecentralizedtrust.splice.util.{
-  Contract,
   ContractWithState,
   DisclosedContracts,
   SynchronizerFeesTestUtil,
@@ -60,10 +57,8 @@ class SyncOperatorTrafficIntegrationTest
         .logical
       val member = aliceValidatorBackend.participantClient.id
 
-      val registration = clue("the DSO registers the synchronizer to this operator") {
-        // The purchase is submitted from alice's participant, which hosts neither the DSO nor
-        // the operator, so the registration must be disclosed with its created-event blob.
-        val tx = sv1Backend.participantClientWithAdminToken.ledger_api_extensions.commands
+      clue("the DSO registers the synchronizer to this operator") {
+        sv1Backend.participantClientWithAdminToken.ledger_api_extensions.commands
           .submitJava(
             actAs = Seq(dsoParty),
             readAs = Seq(dsoParty),
@@ -76,16 +71,14 @@ class SyncOperatorTrafficIntegrationTest
               .asScala
               .toSeq,
             userId = sv1Backend.config.ledgerApiUser,
-            includeCreatedEventBlob = true,
           )
-        val contract = tx.getEventsById.values.asScala
-          .collect { case ev: CreatedEvent => ev }
-          .flatMap(Contract.fromCreatedEvent(RegisteredSynchronizer.COMPANION)(_))
-          .loneElement
-        ContractWithState(
-          contract,
-          ContractState.Assigned(SynchronizerId.tryFromString(tx.getSynchronizerId)),
-        )
+      }
+
+      // Alice's participant hosts neither the DSO nor the operator, so the registration has to
+      // be disclosed, and Scan is the only source of its created-event blob.
+      sv1ScanBackend.lookupSynchronizerRegistration("dedicated::does-not-exist") shouldBe None
+      val registration = eventually() {
+        sv1ScanBackend.lookupSynchronizerRegistration(synchronizerId.toProtoPrimitive).value
       }
 
       val aliceParty = onboardWalletUser(aliceWalletClient, aliceValidatorBackend)

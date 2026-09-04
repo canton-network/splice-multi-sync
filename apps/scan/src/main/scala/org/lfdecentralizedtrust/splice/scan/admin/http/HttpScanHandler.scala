@@ -1185,6 +1185,32 @@ class HttpScanHandler(
     }
   }
 
+  override def lookupSynchronizerRegistration(
+      respond: ScanResource.LookupSynchronizerRegistrationResponse.type
+  )(
+      synchronizerId: String
+  )(extracted: TraceContext): Future[ScanResource.LookupSynchronizerRegistrationResponse] = {
+    implicit val tc = extracted
+    withSpan(s"$workflowId.lookupSynchronizerRegistration") { _ => _ =>
+      store
+        .lookupSynchronizerRegistration(synchronizerId)
+        .map {
+          case Some(c) =>
+            v0.ScanResource.LookupSynchronizerRegistrationResponse.OK(
+              definitions.LookupSynchronizerRegistrationResponse(
+                c.toHttp
+              )
+            )
+          case None =>
+            v0.ScanResource.LookupSynchronizerRegistrationResponse.NotFound(
+              definitions.ErrorResponse(
+                s"No RegisteredSynchronizer found for synchronizer id: $synchronizerId"
+              )
+            )
+        }
+    }
+  }
+
   override def lookupTransferCommandCounterByParty(
       respond: ScanResource.LookupTransferCommandCounterByPartyResponse.type
   )(

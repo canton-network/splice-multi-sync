@@ -204,6 +204,20 @@ trait ScanStore
     ]]
   ]
 
+  /** The registration authorizing Amulet-funded traffic for `synchronizerId`, if any.
+    *
+    * Comes from the ACS store, so the result carries the created event blob the buyer needs to
+    * disclose it. Returns the newest if more than one is live.
+    */
+  def lookupSynchronizerRegistration(
+      synchronizerId: String
+  )(implicit tc: TraceContext): Future[
+    Option[ContractWithState[
+      splice.decentralizedsynchronizer.RegisteredSynchronizer.ContractId,
+      splice.decentralizedsynchronizer.RegisteredSynchronizer,
+    ]]
+  ]
+
   def lookupTransferCommandCounterByParty(
       partyId: PartyId
   )(implicit tc: TraceContext): Future[
