@@ -504,6 +504,27 @@ case class EnvironmentDefinition(
       )
   }
 
+  /** Drops the splitwell apps and leaves alice's validator as the only one connected to the
+    * splitwell synchronizer. The sync-operator suites use splitwell as a stand-in dedicated
+    * synchronizer, where nothing may transact without purchased traffic.
+    */
+  def withOnlyAliceValidatorConnectingToSplitwell: EnvironmentDefinition = {
+    this
+      .addConfigTransform((_, conf) =>
+        conf.copy(
+          splitwellApps = Map.empty,
+          validatorApps =
+            Seq("bobValidator", "splitwellValidator").foldLeft(conf.validatorApps) { (apps, name) =>
+              apps.updatedWith(InstanceName.tryCreate(name)) {
+                _.map { validatorConfig =>
+                  validatorConfig.copy(domains = validatorConfig.domains.copy(extra = Seq.empty))
+                }
+              }
+            },
+        )
+      )
+  }
+
   def withTransferCommandSupport: EnvironmentDefinition =
     this.addConfigTransform((_, conf) =>
       ConfigTransforms.updateAllValidatorAppConfigs_(

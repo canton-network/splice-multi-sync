@@ -5,12 +5,15 @@ package org.lfdecentralizedtrust.splice.integration.tests
 
 import com.daml.ledger.javaapi.data.CreatedEvent
 import com.digitalasset.canton.SynchronizerAlias
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.{Member, PartyId, SynchronizerId}
 import org.lfdecentralizedtrust.splice.codegen.java.splice
 import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.RegisteredSynchronizer
 import org.lfdecentralizedtrust.splice.codegen.java.splice.round.IssuingMiningRound
 import org.lfdecentralizedtrust.splice.codegen.java.splice.types.Round
+import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
+import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
 import org.lfdecentralizedtrust.splice.integration.EnvironmentDefinition
 import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   IntegrationTest,
@@ -45,6 +48,7 @@ class SyncOperatorTrafficIntegrationTest
         Seq("simple-topology-1sv.conf", "sync-operator-topology.conf"),
         this.getClass.getSimpleName,
       )
+      .withOnlyAliceValidatorConnectingToSplitwell
       .withStandardSetup
 
   "sync operator" should {
@@ -59,6 +63,10 @@ class SyncOperatorTrafficIntegrationTest
         .id_of(SynchronizerAlias.tryCreate("splitwell"))
         .logical
       val member = aliceValidatorBackend.participantClient.id
+
+      clue("the synchronizer runs traffic control with a zero base rate") {
+        synchronizerParameters.trafficControl.map(_.maxBaseTrafficAmount.value) shouldBe Some(0L)
+      }
 
       val registration = clue("the DSO registers the synchronizer to this operator") {
         // The purchase is submitted from alice's participant, which hosts neither the DSO nor
@@ -93,6 +101,9 @@ class SyncOperatorTrafficIntegrationTest
 
       clue("no traffic is granted before any purchase") {
         extraTrafficLimit(member) shouldBe 0L
+        // With a zero base rate the member has no allowance at all, so it cannot transact
+        // until a purchase is granted.
+        trafficState(member).map(_.state.baseTrafficRemainder.value) shouldBe Some(0L)
       }
 
       actAndCheck(
@@ -103,6 +114,14 @@ class SyncOperatorTrafficIntegrationTest
         _ => extraTrafficLimit(member) shouldBe firstPurchase,
       )
 
+      // Alice's topology broadcasts were bounced by the zero base rate; once granted they go
+      // through and consume the purchased traffic.
+      clue("the granted traffic is drawn down") {
+        eventually() {
+          trafficState(member).map(_.extraTrafficConsumed.value).getOrElse(0L) should be > 0L
+        }
+      }
+
       actAndCheck(
         "alice buys a second traffic amount",
         buyTraffic(aliceParty, member, synchronizerId, registration, dsoParty, secondPurchase),
@@ -110,6 +129,22 @@ class SyncOperatorTrafficIntegrationTest
         "the limit rises by exactly the second amount",
         _ => extraTrafficLimit(member) shouldBe (firstPurchase + secondPurchase),
       )
+    }
+
+    "grant unlimited traffic to its mediator" in { implicit env =>
+      val mediator = syncOperatorBackend.appState.sequencerAdminConnection
+        .getMediatorSynchronizerState(
+          syncOperatorBackend.appState.store.key.synchronizerId,
+          TopologySnapshot.Effective,
+        )
+        .futureValue
+        .mapping
+        .active
+        .forgetNE
+        .loneElement
+      eventually() {
+        extraTrafficLimit(mediator) shouldBe NonNegativeLong.maxValue.value
+      }
     }
   }
 
@@ -164,11 +199,24 @@ class SyncOperatorTrafficIntegrationTest
       )
   }
 
-  private def extraTrafficLimit(
+  // The sync-operator CI job bootstraps splitwell with traffic control and a zero base rate;
+  // see start-canton.sh -t.
+  private def synchronizerParameters(implicit env: SpliceTestConsoleEnvironment) =
+    syncOperatorBackend.appState.sequencerAdminConnection
+      .getSynchronizerParametersState(syncOperatorBackend.appState.store.key.synchronizerId)
+      .futureValue
+      .mapping
+      .parameters
+
+  private def trafficState(
       member: Member
-  )(implicit env: SpliceTestConsoleEnvironment): Long =
+  )(implicit env: SpliceTestConsoleEnvironment): Option[SequencerAdminConnection.TrafficState] =
     syncOperatorBackend.appState.sequencerAdminConnection
       .lookupSequencerTrafficControlState(member)
       .futureValue
-      .fold(0L)(_.extraTrafficLimit.value)
+
+  private def extraTrafficLimit(
+      member: Member
+  )(implicit env: SpliceTestConsoleEnvironment): Long =
+    trafficState(member).fold(0L)(_.extraTrafficLimit.value)
 }
