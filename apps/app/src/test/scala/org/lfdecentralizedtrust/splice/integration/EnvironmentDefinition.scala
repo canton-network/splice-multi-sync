@@ -505,8 +505,7 @@ case class EnvironmentDefinition(
   }
 
   /** Drops the splitwell apps and leaves alice's validator as the only one connected to the
-    * splitwell synchronizer. The sync-operator suites use splitwell as a stand-in dedicated
-    * synchronizer, where nothing may transact without purchased traffic.
+    * splitwell synchronizer.
     */
   def withOnlyAliceValidatorConnectingToSplitwell: EnvironmentDefinition = {
     this
