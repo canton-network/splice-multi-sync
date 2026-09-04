@@ -876,9 +876,8 @@ object SpliceConfig {
               s"Pruning retention period ${conf.participantPruningSchedule.map(_.retention)} must be bigger than the deduplication duration ${conf.deduplicationDuration}"
             ),
           )
-          // Covers every synchronizer we top up, not just global. topupTargets already drops
-          // zero-throughput entries, which is what the targetThroughput <= 0 disjunct did here
-          // by hand.
+          // Every synchronizer we top up, not just global. topupTargets already filters out
+          // zero-throughput entries.
           _ <- conf.domains.topupTargets
             .find(_._2.minTopupInterval.duration < conf.automation.pollingInterval.duration)
             .toLeft(())

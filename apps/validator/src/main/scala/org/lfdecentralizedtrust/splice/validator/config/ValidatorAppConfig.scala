@@ -125,8 +125,8 @@ case class ValidatorTrustedSynchronizerConfig(
 
 /** Extra traffic purchase settings for a single synchronizer.
   *
-  * Deliberately narrower than [[BuyExtraTrafficConfig]]: `grpcDeadline` is read once app-wide from
-  * `domains.global` and has no per-synchronizer plumbing, so it is not representable here.
+  * Narrower than [[BuyExtraTrafficConfig]], which also carries `grpcDeadline`. That one is
+  * app-wide and has no per-synchronizer plumbing.
   */
 final case class ExtraSynchronizerTopupConfig(
     /** target throughput in bytes per second; 0 disables top-ups for this synchronizer */
@@ -148,9 +148,7 @@ case class ValidatorSynchronizerConfig(
 
   /** Synchronizers with a non-zero top-up target, global first.
     *
-    * The per-synchronizer half of [[ValidatorTopupConfig]]; its third field,
-    * `topupTriggerPollingInterval`, is app-wide. Consumed by the top-up trigger fan-out, which maps
-    * this over the `ValidatorTopupConfig` construction in `ValidatorApp`.
+    * For the top-up trigger fan-out to build a `ValidatorTopupConfig` per synchronizer.
     */
   lazy val topupTargets: Seq[(SynchronizerAlias, ExtraSynchronizerTopupConfig)] =
     ((
