@@ -258,12 +258,10 @@ abstract class ScanStoreTest
         }
       }
 
-      // An operator change registers the new synchronizer before archiving the old one, so both
-      // are live in between. Serving the superseded one would credit the wrong operator as observer
-      // on the resulting MemberTraffic.
+      // Both registrations are live during an operator change; the superseded one would
+      // credit the wrong operator.
       "return the newest registration when a synchronizer id has more than one" in {
-        // The newer row also has the LARGER contract id, so ordering by contract_id alone would
-        // return the older one and this fails.
+        // The newer row also has the larger contract id, so contract_id alone would pick wrong.
         val older = registeredSynchronizer(userParty(1), "dedicated::1220aa", Instant.EPOCH)
         val newer =
           registeredSynchronizer(userParty(2), "dedicated::1220aa", Instant.EPOCH.plusSeconds(1))
@@ -279,13 +277,9 @@ abstract class ScanStoreTest
         }
       }
 
-      // Governance can create two registrations for one synchronizer id: the template has no key
-      // and DsoRules_RegisterSynchronizer creates unconditionally. Every Scan must pick the same
-      // one, because BftScanConnection compares responses structurally.
+      // Every Scan must pick the same registration: bftCall compares responses structurally.
       "pick deterministically when a synchronizer id has more than one registration" in {
-        // nextCid() is monotonic, so `lower` has the smaller contract id. Ingest it SECOND, so
-        // insertion order and contract-id order disagree: without an explicit `order by
-        // contract_id` the query returns `higher` and this fails.
+        // Ingest `lower` second so insertion order and contract-id order disagree.
         val lower = registeredSynchronizer(userParty(1), "dedicated::1220aa")
         val higher = registeredSynchronizer(userParty(2), "dedicated::1220aa")
         lower.contractId.contractId should be < higher.contractId.contractId
@@ -1775,8 +1769,7 @@ trait AmuletTransferUtil { self: StoreTestBase =>
     )
   }
 
-  // Built directly rather than through `contract(...)` so `createdAt` can vary, which the
-  // newest-wins ordering test needs. The blob stays EMPTY: it is not what these tests assert.
+  // Built directly rather than via contract(...) so createdAt can vary.
   def registeredSynchronizer(
       operator: PartyId,
       synchronizerId: String = dummyDomain.toProtoPrimitive,

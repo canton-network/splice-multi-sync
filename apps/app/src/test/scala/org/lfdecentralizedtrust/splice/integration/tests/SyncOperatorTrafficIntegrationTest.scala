@@ -74,9 +74,8 @@ class SyncOperatorTrafficIntegrationTest
           )
       }
 
-      // The purchase is submitted from alice's participant, which hosts neither the DSO nor the
-      // operator, so the registration has to be disclosed with its created-event blob. Scan is the
-      // only source of that blob, which is what this endpoint exists for.
+      // Alice's participant hosts neither the DSO nor the operator, so the registration has to
+      // be disclosed, and Scan is the only source of its created-event blob.
       sv1ScanBackend.lookupSynchronizerRegistration("dedicated::does-not-exist") shouldBe None
       val registration = eventually() {
         sv1ScanBackend.lookupSynchronizerRegistration(synchronizerId.toProtoPrimitive).value

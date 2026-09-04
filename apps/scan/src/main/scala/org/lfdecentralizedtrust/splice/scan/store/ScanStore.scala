@@ -206,11 +206,8 @@ trait ScanStore
 
   /** The registration authorizing Amulet-funded traffic for `synchronizerId`, if any.
     *
-    * Served from the ACS store so the result carries the created event blob a buyer needs to
-    * disclose it. `synchronizerId` is a raw string because the Daml field is `Text` and the
-    * on-ledger check is a string compare (`AmuletRules.daml`, validateBuyMemberTrafficInputs).
-    *
-    * Returns the newest registration if governance created more than one for this synchronizer.
+    * Comes from the ACS store, so the result carries the created event blob the buyer needs to
+    * disclose it. Returns the newest if more than one is live.
     */
   def lookupSynchronizerRegistration(
       synchronizerId: String
