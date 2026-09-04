@@ -120,6 +120,23 @@ trait PackageVersionSupport extends NamedLogging {
     )
   }
 
+  def supportsDedicatedSynchronizers(
+      parties: Seq[PartyId],
+      now: CantonTimestamp,
+  )(implicit
+      tc: TraceContext
+  ): Future[FeatureSupport] = {
+    isDarSupported(
+      Seq(
+        PackageIdResolver.Package.SpliceAmulet -> parties
+      ),
+      now,
+      DarResources.amulet,
+      DarResources.amulet_0_1_23,
+      ignoreRedundantCheck = false,
+    )
+  }
+
   // Synonym for supports24hSubmissionDelay as both features were introduced in amulet_0_1_17
 
   def supportsExpireTransferInstructions(

@@ -20,7 +20,10 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.amuletrules.{
   AmuletRules_MintResult,
 }
 import org.lfdecentralizedtrust.splice.codegen.java.splice.ans.AnsEntry
-import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.MemberTraffic
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.{
+  MemberTraffic,
+  RegisteredSynchronizer,
+}
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dso.decentralizedsynchronizer as decentralizedsynchronizerCodegen
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dsorules.{
   DsoRules,
@@ -184,6 +187,22 @@ abstract class ScanStoreTest
             .lookupAnsRules()
             .futureValue
             .map(_.contract) should be(Some(cr))
+        }
+      }
+    }
+
+    "RegisteredSynchronizer" should {
+      "be ingested" in {
+        val registration = registeredSynchronizer(operator = userParty(1))
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(registration)(store.multiDomainAcsStore)
+        } yield {
+          store.multiDomainAcsStore
+            .listContracts(RegisteredSynchronizer.COMPANION)
+            .futureValue
+            .loneElement
+            .contract should be(registration)
         }
       }
     }
@@ -1694,6 +1713,17 @@ trait AmuletTransferUtil { self: StoreTestBase =>
       template,
     )
   }
+
+  def registeredSynchronizer(operator: PartyId) =
+    contract(
+      RegisteredSynchronizer.TEMPLATE_ID_WITH_PACKAGE_ID,
+      new RegisteredSynchronizer.ContractId(nextCid()),
+      new RegisteredSynchronizer(
+        dsoParty.toProtoPrimitive,
+        dummyDomain.toProtoPrimitive,
+        operator.toProtoPrimitive,
+      ),
+    )
 
   lazy val domain = dummyDomain.toProtoPrimitive
 }
