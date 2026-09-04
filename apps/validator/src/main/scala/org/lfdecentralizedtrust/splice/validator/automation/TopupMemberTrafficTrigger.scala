@@ -135,8 +135,8 @@ class TopupMemberTrafficTrigger(
       task.topupState.payload.migrationId,
       new RelTime(task.topupParameters.minTopupInterval.duration.toMillis * 1000),
       Optional.of(task.topupState.contractId),
-      // Registration for a dedicated synchronizer, to be fetched from Scan and disclosed.
-      // Populated when the validator can resolve one, see ChainSafe/canton-extending-mainnet#40.
+      // Filled in once the validator can resolve a registration from Scan, see
+      // ChainSafe/canton-extending-mainnet#40.
       Optional.empty(),
     )
     for {

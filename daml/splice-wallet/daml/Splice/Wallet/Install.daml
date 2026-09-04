@@ -264,9 +264,8 @@ data AmuletOperation
       minTopupInterval: RelTime
       topupStateCid : Optional (ContractId ValidatorTopUpState)
       optRegisteredSynchronizer : Optional (ContractId RegisteredSynchronizer)
-        -- ^ For traffic on a governance-registered synchronizer: the registration authorizing it,
-        -- forwarded unchanged to `AmuletRules_BuyMemberTraffic`. Supplied via explicit disclosure
-        -- on a live ledger. `None` buys traffic on the decentralized synchronizer.
+        -- ^ Registration authorizing traffic on a dedicated synchronizer, disclosed by the
+        -- caller. `None` buys on the global synchronizer.
   | CO_CompleteBuyTrafficRequest with
       trafficRequestCid: ContractId BuyTrafficRequest
   | CO_Tap with
