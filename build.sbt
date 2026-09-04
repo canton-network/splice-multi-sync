@@ -2528,6 +2528,10 @@ updateTestConfigForParallelRuns := {
     name contains "LsuIntegrationTest"
   def isLSURollForwardTest(name: String): Boolean =
     name contains "RollForwardLsu"
+  // These run in their own CI job with a zero base traffic rate on the splitwell synchronizer;
+  // see start-canton.sh -t.
+  def isSyncOperatorTest(name: String): Boolean =
+    name contains "SyncOperator"
 
   val allTestNames =
     definedTests
@@ -2651,6 +2655,11 @@ updateTestConfigForParallelRuns := {
       "tests to check logical sync upgrade",
       "test-full-class-names-lsu.log",
       (t: String) => isLSUTest(t),
+    ),
+    (
+      "sync operator tests",
+      "test-full-class-names-sync-operator.log",
+      (t: String) => isSyncOperatorTest(t),
     ),
     (
       "tests with wall clock time",
