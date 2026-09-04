@@ -146,6 +146,7 @@ trait SynchronizerFeesTestUtil extends TestCommon {
           sv1ScanBackend.getMigrationId(),
           new RelTime(1),
           Optional.of(topupStateCid),
+          Optional.empty(),
         )
       ).asJava,
     )
