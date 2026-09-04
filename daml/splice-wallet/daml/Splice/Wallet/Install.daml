@@ -265,7 +265,7 @@ data AmuletOperation
       topupStateCid : Optional (ContractId ValidatorTopUpState)
       optRegisteredSynchronizer : Optional (ContractId RegisteredSynchronizer)
         -- ^ Registration authorizing traffic on a dedicated synchronizer, disclosed by the
-        -- caller. `None` buys on the global synchronizer.
+        -- caller. `None` buys on the decentralized synchronizer.
   | CO_CompleteBuyTrafficRequest with
       trafficRequestCid: ContractId BuyTrafficRequest
   | CO_Tap with
