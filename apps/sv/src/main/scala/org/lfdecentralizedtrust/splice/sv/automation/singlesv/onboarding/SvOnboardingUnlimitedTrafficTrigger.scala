@@ -3,23 +3,20 @@
 
 package org.lfdecentralizedtrust.splice.sv.automation.singlesv.onboarding
 
-import cats.implicits.catsSyntaxTuple2Semigroupal
-import org.lfdecentralizedtrust.splice.automation.{
-  PollingParallelTaskExecutionTrigger,
-  TaskOutcome,
-  TaskSuccess,
-  TriggerContext,
+import org.lfdecentralizedtrust.splice.automation.{GrantUnlimitedTrafficTriggerBase, TriggerContext}
+import org.lfdecentralizedtrust.splice.automation.GrantUnlimitedTrafficTriggerBase.{
+  Task,
+  UnlimitedTraffic,
 }
-import org.lfdecentralizedtrust.splice.environment.SynchronizerNodeService
-import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
+import org.lfdecentralizedtrust.splice.environment.{
+  SequencerAdminConnection,
+  SynchronizerNodeService,
+}
 import org.lfdecentralizedtrust.splice.sv.LocalSynchronizerNode
-import org.lfdecentralizedtrust.splice.sv.automation.singlesv.onboarding.SvOnboardingUnlimitedTrafficTrigger.UnlimitedTraffic
 import org.lfdecentralizedtrust.splice.sv.store.SvDsoStore
 import org.lfdecentralizedtrust.splice.util.AmuletConfigSchedule
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.topology.{SynchronizerId, Member}
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import io.opentelemetry.api.trace.Tracer
@@ -41,9 +38,19 @@ class SvOnboardingUnlimitedTrafficTrigger(
     override val ec: ExecutionContext,
     mat: Materializer,
     override val tracer: Tracer,
-) extends PollingParallelTaskExecutionTrigger[SvOnboardingUnlimitedTrafficTrigger.Task] {
+) extends GrantUnlimitedTrafficTriggerBase(trafficBalanceReconciliationDelay) {
 
-  import SvOnboardingUnlimitedTrafficTrigger.Task
+  override protected def sequencerAdminConnection()(implicit
+      tc: TraceContext
+  ): Future[SequencerAdminConnection] =
+    synchronizerNodeService.sequencerAdminConnection()
+
+  override protected def isActiveMember(task: Task)(implicit
+      tc: TraceContext
+  ): Future[Boolean] =
+    dsoStore
+      .getDsoRulesWithSvNodeStates()
+      .map(_.activeSvParticipantAndMediatorIds(task.synchronizerId).contains(task.memberId))
 
   override protected def retrieveTasks()(implicit
       tc: TraceContext
@@ -60,14 +67,14 @@ class SvOnboardingUnlimitedTrafficTrigger(
       activeSynchronizerId = SynchronizerId.tryFromString(
         decentralizedSynchronizerConfig.activeSynchronizer
       )
-      sequencerAdminConnection <- synchronizerNodeService.sequencerAdminConnection()
+      connection <- sequencerAdminConnection()
       svMembersWithTrafficState <- MonadUtil
         .sequentialTraverse(
           dsoRulesAndStates
             .activeSvParticipantAndMediatorIds(activeSynchronizerId)
         ) { memberId =>
           for {
-            stateO <- sequencerAdminConnection.lookupSequencerTrafficControlState(memberId)
+            stateO <- connection.lookupSequencerTrafficControlState(memberId)
           } yield {
             if (stateO.isEmpty) {
               // This can happen for mediators which are registered in DsoRules before they connect.
@@ -84,57 +91,5 @@ class SvOnboardingUnlimitedTrafficTrigger(
           Task(activeSynchronizerId, memberId)
       }
     }
-  }
-
-  override protected def completeTask(task: SvOnboardingUnlimitedTrafficTrigger.Task)(implicit
-      tc: TraceContext
-  ): Future[TaskOutcome] = {
-    for {
-      sequencerAdminConnection <- synchronizerNodeService.sequencerAdminConnection()
-      // We must read the state here again to pick up on new serials
-      (trafficState, sequencerState) <- (
-        sequencerAdminConnection.getSequencerTrafficControlState(task.memberId),
-        sequencerAdminConnection.getSequencerSynchronizerState(TopologySnapshot.Sequenced),
-      ).tupled
-      _ <- sequencerAdminConnection.setSequencerTrafficControlState(
-        trafficState,
-        sequencerState,
-        UnlimitedTraffic,
-        context.pollingClock,
-        trafficBalanceReconciliationDelay,
-      )
-    } yield TaskSuccess(
-      s"Updated traffic limit for ${task.memberId} to NonNegativeLong.maxValue"
-    )
-  }
-
-  override protected def isStaleTask(task: Task)(implicit
-      tc: TraceContext
-  ): Future[Boolean] = {
-    for {
-      sequencerAdminConnection <- synchronizerNodeService.sequencerAdminConnection()
-      dsoRulesAndStates <- dsoStore.getDsoRulesWithSvNodeStates()
-      trafficState <- sequencerAdminConnection.getSequencerTrafficControlState(task.memberId)
-    } yield {
-      !dsoRulesAndStates
-        .activeSvParticipantAndMediatorIds(task.synchronizerId)
-        .contains(task.memberId) || trafficState.extraTrafficLimit == UnlimitedTraffic
-    }
-  }
-}
-
-object SvOnboardingUnlimitedTrafficTrigger {
-
-  val UnlimitedTraffic: NonNegativeLong = NonNegativeLong.maxValue
-
-  final case class Task(
-      synchronizerId: SynchronizerId,
-      memberId: Member,
-  ) extends PrettyPrinting {
-    override def pretty: Pretty[this.type] =
-      prettyOfClass(
-        param("synchronizerId", _.synchronizerId),
-        param("memberId", _.memberId),
-      )
   }
 }

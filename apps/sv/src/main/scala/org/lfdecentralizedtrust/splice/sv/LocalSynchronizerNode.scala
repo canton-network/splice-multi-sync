@@ -39,7 +39,7 @@ import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.Topol
 import TopologyAdminConnection.TopologySnapshot
 import org.lfdecentralizedtrust.splice.http.HttpClient
 import org.lfdecentralizedtrust.splice.sv.admin.api.client.SvConnection
-import org.lfdecentralizedtrust.splice.sv.automation.singlesv.onboarding.SvOnboardingUnlimitedTrafficTrigger.UnlimitedTraffic
+import org.lfdecentralizedtrust.splice.automation.GrantUnlimitedTrafficTriggerBase.UnlimitedTraffic
 import org.lfdecentralizedtrust.splice.sv.cometbft.CometBftNode
 import org.lfdecentralizedtrust.splice.sv.config.SvSynchronizerNodeConfig
 import org.lfdecentralizedtrust.splice.util.TemplateJsonDecoder
