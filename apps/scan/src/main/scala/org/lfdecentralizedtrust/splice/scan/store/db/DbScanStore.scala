@@ -382,13 +382,12 @@ class DbScanStore(
             domainMigrationId,
             RegisteredSynchronizer.COMPANION,
             additionalWhere = sql"""
-                and acs.create_arguments->>'synchronizerId' = ${lengthLimited(synchronizerId)}
+                and registered_synchronizer_id = ${lengthLimited(synchronizerId)}
             """,
-            // Two registrations can be live at once during an operator change, so serve the
-            // newest. contract_id breaks ties: every Scan must return the same row for bftCall
-            // to agree.
+            // Uniqueness is not enforced on-ledger, so pick a total order: every Scan must
+            // return the same row for bftCall to agree.
             orderLimit = sql"""
-                order by acs.created_at desc, acs.contract_id limit 1
+                order by contract_id limit 1
             """,
           ).headOption,
           "lookupSynchronizerRegistration",

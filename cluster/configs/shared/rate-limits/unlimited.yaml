@@ -45,6 +45,10 @@ rateLimits:
     name: domains-v1
     type: unlimited
 
+  /api/scan/v0/synchronizers:
+    name: synchronizers
+    type: unlimited
+
   /api/scan/v0/closed-rounds:
     name: closed-rounds
     type: unlimited

@@ -207,7 +207,8 @@ trait ScanStore
   /** The registration authorizing Amulet-funded traffic for `synchronizerId`, if any.
     *
     * Comes from the ACS store, so the result carries the created event blob the buyer needs to
-    * disclose it. Returns the newest if more than one is live.
+    * disclose it. If more than one is live, returns one of them under a stable total order; no
+    * supersession is implied.
     */
   def lookupSynchronizerRegistration(
       synchronizerId: String
@@ -422,8 +423,14 @@ object ScanStore {
               pkgVersionSupport
                 .supportsDedicatedSynchronizers(Seq(key.dsoParty), now)(tc)
           },
-        )(
-          ScanAcsStoreRowData(_)
+        )(contract =>
+          // A String, not a SynchronizerId: DsoRules_RegisterSynchronizer only checks the id is
+          // non-empty, so tryFromString here would throw on a governance typo and take down the
+          // ingestion pipeline. The query compares it as text.
+          ScanAcsStoreRowData(
+            contract,
+            registeredSynchronizerId = Some(contract.payload.synchronizerId),
+          )
         ),
         mkFilter(splice.validatorlicense.ValidatorLicense.COMPANION)(co => co.payload.dso == dso) {
           contract =>

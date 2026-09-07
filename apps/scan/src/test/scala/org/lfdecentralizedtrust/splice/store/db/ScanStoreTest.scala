@@ -53,8 +53,6 @@ import org.lfdecentralizedtrust.splice.store.*
 import org.lfdecentralizedtrust.splice.util.SpliceUtil.damlDecimal
 import org.lfdecentralizedtrust.splice.util.*
 
-import com.google.protobuf.ByteString
-
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.{Collections, Optional}
@@ -258,26 +256,9 @@ abstract class ScanStoreTest
         }
       }
 
-      // Both registrations are live during an operator change; the superseded one would
-      // credit the wrong operator.
-      "return the newest registration when a synchronizer id has more than one" in {
-        // The newer row also has the larger contract id, so contract_id alone would pick wrong.
-        val older = registeredSynchronizer(userParty(1), "dedicated::1220aa", Instant.EPOCH)
-        val newer =
-          registeredSynchronizer(userParty(2), "dedicated::1220aa", Instant.EPOCH.plusSeconds(1))
-        older.contractId.contractId should be < newer.contractId.contractId
-        for {
-          store <- mkStore()
-          _ <- dummyDomain.create(older)(store.multiDomainAcsStore)
-          _ <- dummyDomain.create(newer)(store.multiDomainAcsStore)
-        } yield {
-          store.lookupSynchronizerRegistration("dedicated::1220aa").futureValue should be(
-            Some(ContractWithState(newer, Assigned(dummyDomain)))
-          )
-        }
-      }
-
-      // Every Scan must pick the same registration: bftCall compares responses structurally.
+      // Governance can create two registrations for one synchronizer id: the template has no
+      // key and DsoRules_RegisterSynchronizer creates unconditionally. Every Scan must pick the
+      // same one, because bftCall compares responses structurally.
       "pick deterministically when a synchronizer id has more than one registration" in {
         // Ingest `lower` second so insertion order and contract-id order disagree.
         val lower = registeredSynchronizer(userParty(1), "dedicated::1220aa")
@@ -1769,13 +1750,11 @@ trait AmuletTransferUtil { self: StoreTestBase =>
     )
   }
 
-  // Built directly rather than via contract(...) so createdAt can vary.
   def registeredSynchronizer(
       operator: PartyId,
       synchronizerId: String = dummyDomain.toProtoPrimitive,
-      createdAt: Instant = Instant.EPOCH,
   ) =
-    Contract(
+    contract(
       RegisteredSynchronizer.TEMPLATE_ID_WITH_PACKAGE_ID,
       new RegisteredSynchronizer.ContractId(nextCid()),
       new RegisteredSynchronizer(
@@ -1783,8 +1762,6 @@ trait AmuletTransferUtil { self: StoreTestBase =>
         synchronizerId,
         operator.toProtoPrimitive,
       ),
-      ByteString.EMPTY,
-      createdAt,
     )
 
   lazy val domain = dummyDomain.toProtoPrimitive
