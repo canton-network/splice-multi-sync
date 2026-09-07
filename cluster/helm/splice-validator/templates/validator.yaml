@@ -166,6 +166,12 @@ spec:
             canton.validator-apps.validator_backend.domains.extra.{{ $ii }} = {
               alias = {{ $domain.alias | quote }}
               url = {{ $domain.url | quote }}
+              {{- with $domain.topup }}
+              topup {
+                target-throughput = {{ .targetThroughput }}
+                min-topup-interval = {{ .minTopupInterval }}
+              }
+              {{- end }}
             }
         {{- end }}
         {{- if (.Values.topup).enabled }}

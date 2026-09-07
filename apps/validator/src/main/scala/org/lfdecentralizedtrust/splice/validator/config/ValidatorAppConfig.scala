@@ -127,12 +127,22 @@ case class ValidatorTrustedSynchronizerConfig(
 case class ValidatorExtraSynchronizerConfig(
     alias: SynchronizerAlias,
     url: String,
+    topup: BuyExtraTrafficConfig = BuyExtraTrafficConfig(),
 )
 
 case class ValidatorSynchronizerConfig(
     global: ValidatorDecentralizedSynchronizerConfig,
     extra: Seq[ValidatorExtraSynchronizerConfig] = Seq(),
-)
+) {
+
+  /** Synchronizers with a non-zero top-up target, global first.
+    *
+    * For the top-up trigger fan-out to build a `ValidatorTopupConfig` per synchronizer.
+    */
+  lazy val topupTargets: Seq[(SynchronizerAlias, BuyExtraTrafficConfig)] =
+    ((global.alias, global.buyExtraTraffic) +: extra.map(e => (e.alias, e.topup)))
+      .filter(_._2.targetThroughput.value > 0)
+}
 
 final case class MigrateValidatorPartyConfig(
     // The scan instance the ACS snapshot should be fetched from.

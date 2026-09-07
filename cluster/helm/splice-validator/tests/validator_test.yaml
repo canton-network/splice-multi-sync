@@ -261,6 +261,38 @@ tests:
           path: spec.template.spec.containers[?(@.name=='validator-app')].env[?(@.name=='ADDITIONAL_CONFIG_SYNCHRONIZER_URL')].value
           pattern: 'canton\.validator-apps\.validator_backend\.domains\.global\.url = "https://new-sequencer\.mock\.com"'
 
+  - it: "renders extra domain topup settings when provided"
+    set:
+      extraDomains:
+        - alias: "dedicated-1"
+          url: "https://dedicated-1.mock.com"
+          topup:
+            targetThroughput: 5000
+            minTopupInterval: "1m"
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name=='validator-app')].env[?(@.name=='ADDITIONAL_CONFIG_EXTRA_DOMAIN_0')].value
+          pattern: 'target-throughput = 5000'
+      - matchRegex:
+          path: spec.template.spec.containers[?(@.name=='validator-app')].env[?(@.name=='ADDITIONAL_CONFIG_EXTRA_DOMAIN_0')].value
+          pattern: 'min-topup-interval = 1m'
+
+  - it: "omits the extra domain topup block when not provided"
+    set:
+      extraDomains:
+        - alias: "dedicated-1"
+          url: "https://dedicated-1.mock.com"
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[?(@.name=='validator-app')].env[?(@.name=='ADDITIONAL_CONFIG_EXTRA_DOMAIN_0')].value
+          pattern: 'topup'
+
   - it: "uses synchronizer.svNames as a JSON array when provided"
     set:
       synchronizer:
