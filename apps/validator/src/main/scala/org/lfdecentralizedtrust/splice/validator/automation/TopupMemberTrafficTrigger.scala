@@ -135,6 +135,9 @@ class TopupMemberTrafficTrigger(
       task.topupState.payload.migrationId,
       new RelTime(task.topupParameters.minTopupInterval.duration.toMillis * 1000),
       Optional.of(task.topupState.contractId),
+      // Filled in once the validator can resolve a registration from Scan, see
+      // ChainSafe/canton-extending-mainnet#40.
+      Optional.empty(),
     )
     for {
       validatorWallet <- ValidatorUtil.getValidatorWallet(store, walletManager)
