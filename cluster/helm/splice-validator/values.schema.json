@@ -250,18 +250,7 @@
         "required": ["topup"],
         "properties": {
           "topup": {
-            "type": "object",
-            "required": ["targetThroughput", "minTopupInterval"],
-            "properties": {
-              "targetThroughput": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "minTopupInterval": {
-                "type": "string",
-                "pattern": "^[0-9]+[smh]$"
-              }
-            }
+            "$ref": "#/$defs/topup"
           }
         }
       }
@@ -498,18 +487,7 @@
                 "type": "string"
               },
               "topup": {
-                "type": "object",
-                "properties": {
-                  "targetThroughput": {
-                    "type": "number",
-                    "minimum": 0
-                  },
-                  "minTopupInterval": {
-                    "type": "string",
-                    "pattern": "^[0-9]+[smh]$"
-                  }
-                },
-                "required": ["targetThroughput"]
+                "$ref": "#/$defs/topup"
               }
             }
           }
@@ -795,5 +773,21 @@
         ]
       }
     }
-  ]
+  ],
+  "$defs": {
+    "topup": {
+      "type": "object",
+      "required": ["targetThroughput", "minTopupInterval"],
+      "properties": {
+        "targetThroughput": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "minTopupInterval": {
+          "type": "string",
+          "pattern": "^[0-9]+[smh]$"
+        }
+      }
+    }
+  }
 }
