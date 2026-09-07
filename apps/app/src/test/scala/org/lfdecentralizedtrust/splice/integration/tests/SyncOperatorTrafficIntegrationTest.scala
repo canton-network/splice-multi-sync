@@ -68,6 +68,22 @@ class SyncOperatorTrafficIntegrationTest
         synchronizerParameters.trafficControl.map(_.maxBaseTrafficAmount.value) shouldBe Some(0L)
       }
 
+      clue("the mediator is granted unlimited traffic") {
+        val mediator = syncOperatorBackend.appState.sequencerAdminConnection
+          .getMediatorSynchronizerState(
+            syncOperatorBackend.appState.store.key.synchronizerId,
+            TopologySnapshot.Effective,
+          )
+          .futureValue
+          .mapping
+          .active
+          .forgetNE
+          .loneElement
+        eventually() {
+          extraTrafficLimit(mediator) shouldBe NonNegativeLong.maxValue.value
+        }
+      }
+
       val registration = clue("the DSO registers the synchronizer to this operator") {
         // The purchase is submitted from alice's participant, which hosts neither the DSO nor
         // the operator, so the registration must be disclosed with its created-event blob.
@@ -129,22 +145,6 @@ class SyncOperatorTrafficIntegrationTest
         "the limit rises by exactly the second amount",
         _ => extraTrafficLimit(member) shouldBe (firstPurchase + secondPurchase),
       )
-    }
-
-    "grant unlimited traffic to its mediator" in { implicit env =>
-      val mediator = syncOperatorBackend.appState.sequencerAdminConnection
-        .getMediatorSynchronizerState(
-          syncOperatorBackend.appState.store.key.synchronizerId,
-          TopologySnapshot.Effective,
-        )
-        .futureValue
-        .mapping
-        .active
-        .forgetNE
-        .loneElement
-      eventually() {
-        extraTrafficLimit(mediator) shouldBe NonNegativeLong.maxValue.value
-      }
     }
   }
 
