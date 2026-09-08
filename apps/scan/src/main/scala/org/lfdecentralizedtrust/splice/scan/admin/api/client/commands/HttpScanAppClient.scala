@@ -32,6 +32,7 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.round.{
 }
 import org.lfdecentralizedtrust.splice.codegen.java.splice.ans as ansCodegen
 import org.lfdecentralizedtrust.splice.codegen.java.splice.ans.AnsRules
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.RegisteredSynchronizer
 import org.lfdecentralizedtrust.splice.config.SpliceInstanceNamesConfig
 import org.lfdecentralizedtrust.splice.http.v0.{definitions, scan as http}
 import org.lfdecentralizedtrust.tokenstandard.{
@@ -598,6 +599,30 @@ object HttpScanAppClient {
           .map(Some(_))
           .leftMap(_.toString)
       case http.LookupTransferPreapprovalByPartyResponse.NotFound(_) =>
+        Right(None)
+    }
+  }
+
+  case class LookupSynchronizerRegistration(
+      synchronizerId: String
+  ) extends InternalBaseCommand[http.LookupSynchronizerRegistrationResponse, Option[
+        ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
+      ]] {
+
+    override def submitRequest(
+        client: ScanClient,
+        headers: List[HttpHeader],
+    ) = client.lookupSynchronizerRegistration(synchronizerId, headers)
+
+    override def handleOk()(implicit
+        decoder: TemplateJsonDecoder
+    ) = {
+      case http.LookupSynchronizerRegistrationResponse.OK(response) =>
+        ContractWithState
+          .fromHttp(RegisteredSynchronizer.COMPANION)(response.registration)
+          .map(Some(_))
+          .leftMap(_.toString)
+      case http.LookupSynchronizerRegistrationResponse.NotFound(_) =>
         Right(None)
     }
   }

@@ -104,6 +104,7 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.api.token.allocationi
 import org.lfdecentralizedtrust.splice.codegen.java.splice.api.token.allocationinstructionv2
 import org.lfdecentralizedtrust.splice.codegen.java.splice.api.token.transferinstructionv1
 import org.lfdecentralizedtrust.splice.codegen.java.splice.api.token.transferinstructionv2
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.RegisteredSynchronizer
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dsorules.{
   DsoRules,
   DsoRules_CloseVoteRequestResult,
@@ -482,6 +483,12 @@ class BftScanConnection(
       tc: TraceContext,
   ): Future[Option[LookupTransferCommandStatusResponse]] =
     bftCall(_.lookupTransferCommandStatus(sender, nonce), "lookupTransferCommandStatus")
+
+  override def lookupSynchronizerRegistration(synchronizerId: String)(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): Future[Option[ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]]] =
+    bftCall(_.lookupSynchronizerRegistration(synchronizerId), "lookupSynchronizerRegistration")
 
   override def lookupTransferPreapprovalByParty(receiver: PartyId)(implicit
       ec: ExecutionContext,

@@ -24,6 +24,7 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.round.{
   OpenMiningRound,
 }
 import org.lfdecentralizedtrust.splice.codegen.java.splice.ans.AnsRules
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.RegisteredSynchronizer
 import org.lfdecentralizedtrust.splice.config.NetworkAppClientConfig
 import org.lfdecentralizedtrust.splice.environment.SpliceConsoleEnvironment
 import org.lfdecentralizedtrust.splice.http.v0.definitions
@@ -194,6 +195,14 @@ abstract class ScanAppReference(
   ): Option[ContractWithState[TransferPreapproval.ContractId, TransferPreapproval]] =
     consoleEnvironment.run {
       httpCommand(HttpScanAppClient.LookupTransferPreapprovalByParty(party))
+    }
+
+  @Help.Summary("Lookup the RegisteredSynchronizer for a dedicated synchronizer id")
+  def lookupSynchronizerRegistration(
+      synchronizerId: String
+  ): Option[ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]] =
+    consoleEnvironment.run {
+      httpCommand(HttpScanAppClient.LookupSynchronizerRegistration(synchronizerId))
     }
 
   @Help.Summary("Lookup a TransferCommandCounter by the receiver party")

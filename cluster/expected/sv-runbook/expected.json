@@ -997,6 +997,10 @@
           "name": "synchronizer-identities",
           "type": "unlimited"
         },
+        "/api/scan/v0/synchronizers": {
+          "name": "synchronizers",
+          "type": "unlimited"
+        },
         "/api/scan/v0/transfer-command": {
           "name": "transfer-command-status",
           "type": "unlimited"

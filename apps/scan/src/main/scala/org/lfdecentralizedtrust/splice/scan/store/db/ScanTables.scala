@@ -56,6 +56,7 @@ object ScanTables extends AcsTables {
       transferPreapprovalReceiver: Option[PartyId] = None,
       transferPreapprovalValidFrom: Option[Timestamp] = None,
       walletParty: Option[PartyId] = None,
+      registeredSynchronizerId: Option[String] = None,
   ) extends AcsRowData.AcsRowDataFromContract {
     override def indexColumns: Seq[(String, IndexColumnValue[?])] = Seq(
       ScanAcsStoreRowData.IndexColumns.round -> round,
@@ -75,6 +76,8 @@ object ScanTables extends AcsTables {
       ScanAcsStoreRowData.IndexColumns.transfer_preapproval_receiver -> transferPreapprovalReceiver,
       ScanAcsStoreRowData.IndexColumns.transfer_preapproval_valid_from -> transferPreapprovalValidFrom,
       ScanAcsStoreRowData.IndexColumns.wallet_party -> walletParty,
+      ScanAcsStoreRowData.IndexColumns.registered_synchronizer_id -> registeredSynchronizerId
+        .map(lengthLimited),
     )
   }
 
@@ -101,6 +104,7 @@ object ScanTables extends AcsTables {
       val transfer_preapproval_receiver = "transfer_preapproval_receiver"
       val transfer_preapproval_valid_from = "transfer_preapproval_valid_from"
       val wallet_party = "wallet_party"
+      val registered_synchronizer_id = "registered_synchronizer_id"
       val All = Seq(
         round,
         validator,
@@ -119,6 +123,7 @@ object ScanTables extends AcsTables {
         transfer_preapproval_receiver,
         transfer_preapproval_valid_from,
         wallet_party,
+        registered_synchronizer_id,
       )
     }
   }

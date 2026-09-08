@@ -42,6 +42,7 @@ class SqlIndexInitializationTriggerStoreTest
     "updt_hist_crea_hi_mi_ci_import_updates",
     "updt_hist_tran_hi_eth",
     "dso_acs_store_sid_mid_pn_tid_rbio",
+    "scan_acs_store_sid_mid_pn_tid_rsid",
     "scan_txlog_store_sid_effat_en_vot",
   )
 

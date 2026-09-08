@@ -266,6 +266,15 @@ object SqlIndexInitializationTrigger {
       ),
     IndexAction
       .Create(
+        indexName = "scan_acs_store_sid_mid_pn_tid_rsid",
+        createAction = sqlu"""
+          create index concurrently if not exists scan_acs_store_sid_mid_pn_tid_rsid
+          on scan_acs_store (store_id, migration_id, package_name, template_id_qualified_name, registered_synchronizer_id)
+          where registered_synchronizer_id is not null
+        """,
+      ),
+    IndexAction
+      .Create(
         indexName = "scan_txlog_store_sid_effat_en_vot",
         createAction = sqlu"""
           create index concurrently if not exists scan_txlog_store_sid_effat_en_vot

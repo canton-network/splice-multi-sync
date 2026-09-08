@@ -240,6 +240,42 @@ abstract class ScanStoreTest
       }
     }
 
+    "lookupSynchronizerRegistration" should {
+      "return the registration for the requested synchronizer id" in {
+        val wanted = registeredSynchronizer(userParty(1), "dedicated::1220aa")
+        val other = registeredSynchronizer(userParty(2), "dedicated::1220bb")
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(wanted)(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(other)(store.multiDomainAcsStore)
+        } yield {
+          store.lookupSynchronizerRegistration("dedicated::1220aa").futureValue should be(
+            Some(ContractWithState(wanted, Assigned(dummyDomain)))
+          )
+          store.lookupSynchronizerRegistration("dedicated::1220zz").futureValue should be(None)
+        }
+      }
+
+      // Governance can create two registrations for one synchronizer id: the template has no
+      // key and DsoRules_RegisterSynchronizer creates unconditionally. Every Scan must pick the
+      // same one, because bftCall compares responses structurally.
+      "pick deterministically when a synchronizer id has more than one registration" in {
+        // Ingest `lower` second so insertion order and contract-id order disagree.
+        val lower = registeredSynchronizer(userParty(1), "dedicated::1220aa")
+        val higher = registeredSynchronizer(userParty(2), "dedicated::1220aa")
+        lower.contractId.contractId should be < higher.contractId.contractId
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(higher)(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(lower)(store.multiDomainAcsStore)
+        } yield {
+          store.lookupSynchronizerRegistration("dedicated::1220aa").futureValue should be(
+            Some(ContractWithState(lower, Assigned(dummyDomain)))
+          )
+        }
+      }
+    }
+
     "lookupTransferPreapprovalByParty" should {
       "return the TransferPreapproval contract signed by the specified party if available" in {
         val wanted = transferPreapproval(userParty(1), providerParty(1), time(0), time(1))
@@ -1714,13 +1750,16 @@ trait AmuletTransferUtil { self: StoreTestBase =>
     )
   }
 
-  def registeredSynchronizer(operator: PartyId) =
+  def registeredSynchronizer(
+      operator: PartyId,
+      synchronizerId: String = dummyDomain.toProtoPrimitive,
+  ) =
     contract(
       RegisteredSynchronizer.TEMPLATE_ID_WITH_PACKAGE_ID,
       new RegisteredSynchronizer.ContractId(nextCid()),
       new RegisteredSynchronizer(
         dsoParty.toProtoPrimitive,
-        dummyDomain.toProtoPrimitive,
+        synchronizerId,
         operator.toProtoPrimitive,
       ),
     )
