@@ -65,6 +65,15 @@ class SyncOperatorAutomationService(
   )
 
   registerTrigger(
+    new MediatorUnlimitedTrafficTrigger(
+      triggerContext,
+      store.key.synchronizerId,
+      sequencerConnection,
+      trafficBalanceReconciliationDelay,
+    )
+  )
+
+  registerTrigger(
     new ReconcileDedicatedSequencerTrafficTrigger(
       triggerContext,
       store,

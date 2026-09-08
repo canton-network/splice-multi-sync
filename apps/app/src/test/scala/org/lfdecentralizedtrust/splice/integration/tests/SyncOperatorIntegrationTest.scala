@@ -15,6 +15,7 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
         Seq("simple-topology-1sv.conf", "sync-operator-topology.conf"),
         this.getClass.getSimpleName,
       )
+      .withOnlyAliceValidatorConnectingToSplitwell
       .withStandardSetup
 
   "sync operator" should {
@@ -29,7 +30,8 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
     }
 
     "take its synchronizer id from the sequencer it is configured with" in { implicit env =>
-      val served = splitwellValidatorBackend.participantClientWithAdminToken.synchronizers
+      // Alice's participant is the one still connected to splitwell in this topology.
+      val served = aliceValidatorBackend.participantClientWithAdminToken.synchronizers
         .id_of(SynchronizerAlias.tryCreate("splitwell"))
         .logical
       syncOperatorBackend.appState.store.key.synchronizerId shouldBe served
