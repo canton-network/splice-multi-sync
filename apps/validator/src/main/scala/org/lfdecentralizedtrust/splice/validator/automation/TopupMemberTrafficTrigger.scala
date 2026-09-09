@@ -44,7 +44,7 @@ import org.lfdecentralizedtrust.splice.validator.config.{
   BuyExtraTrafficConfig,
   ValidatorSynchronizerConfig,
 }
-import org.lfdecentralizedtrust.splice.wallet.{UserWalletManager, UserWalletService}
+import org.lfdecentralizedtrust.splice.wallet.UserWalletManager
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.logging.TracedLogger
@@ -116,12 +116,22 @@ class TopupMemberTrafficTrigger(
         logger = logger,
       )
       validatorWallet <- ValidatorUtil.getValidatorWallet(store, walletManager)
-      tasks <- MonadUtil.sequentialTraverseFilter(targets)(target =>
+      budget <- TopupUtil.topupBudget(scanConnection, validatorWallet.store)
+      candidates <- MonadUtil.sequentialTraverseFilter(targets)(target =>
         skipOnFailure(target, hasOtherTargets = targets.sizeIs > 1)(
-          retrieveTaskFor(target, validatorWallet, activeSynchronizerId)
+          retrieveTaskFor(target, activeSynchronizerId)
         )
       )
-    } yield tasks
+      (funded, unfunded) = TopupMemberTrafficTrigger.fundedTasks(candidates, budget)
+      // we do not even submit the topup tx if the validator does not have sufficient funds because we know
+      // the tx would fail but it would still drain synchronizer traffic which we would like to avoid (see #11915).
+      _ = unfunded.foreach(task =>
+        logger.warn(
+          s"Insufficient funds to buy configured traffic amount. Please ensure that the validator's wallet has enough amulets to purchase " +
+            s"${BigDecimal(task.target.topupParameters.topupAmount) / 1e6} MB of traffic on ${task.target.alias} to continue healthy operation."
+        )
+      )
+    } yield funded
   }
 
   /** A failure costs every other target its top-up for that poll, so an unreachable dedicated
@@ -140,11 +150,13 @@ class TopupMemberTrafficTrigger(
       case success => success
     }
 
+  /** The task this target is due, paired with what it would cost the wallet. */
   private def retrieveTaskFor(
       target: TopupMemberTrafficTrigger.Target,
-      validatorWallet: UserWalletService,
       submissionSynchronizerId: SynchronizerId,
-  )(implicit tc: TraceContext): Future[Option[TopupMemberTrafficTrigger.Task]] =
+  )(implicit
+      tc: TraceContext
+  ): Future[Option[(TopupMemberTrafficTrigger.Task, BigDecimal)]] =
     for {
       currentTrafficState <- participantAdminConnection.getParticipantTrafficState(
         target.synchronizerId
@@ -163,22 +175,20 @@ class TopupMemberTrafficTrigger(
         } else
           for {
             topupState <- getOrCreateValidatorTopupState(target, submissionSynchronizerId)
-            hasSufficientFunds <- TopupUtil.hasSufficientFundsForTopup(
-              scanConnection,
-              validatorWallet.store,
-              // The required balance is derived from this target's throughput and interval.
-              target.topupConfig,
-              clock,
-            )
-          } yield Option.when(
-            shouldTopup(target, hasSufficientFunds, currentTrafficState, topupState)
-          )(
+            cost <-
+              if (!wantsTopup(target, currentTrafficState, topupState)) Future.successful(None)
+              else
+                TopupUtil
+                  // The cost is derived from this target's throughput and interval.
+                  .minWalletBalanceForTopup(scanConnection, target.topupConfig, clock)
+                  .map(Some(_))
+          } yield cost.map(
             TopupMemberTrafficTrigger.Task(
               target,
               topupState,
               currentTrafficState,
               registration,
-            )
+            ) -> _
           )
     } yield task
 
@@ -247,40 +257,30 @@ class TopupMemberTrafficTrigger(
     )
   }
 
-  private def shouldTopup(
+  /** Whether the target is due a top-up, before the wallet balance is taken into account. */
+  private def wantsTopup(
       target: TopupMemberTrafficTrigger.Target,
-      hasSufficientFunds: Boolean,
       currentTrafficState: TrafficState,
       topupState: Contract[ValidatorTopUpState.ContractId, ValidatorTopUpState],
   )(implicit traceContext: TraceContext): Boolean = {
     val topupParameters = target.topupParameters
-    // we do not even submit the topup tx if the validator does not have sufficient funds because we know
-    // the tx would fail but it would still drain synchronizer traffic which we would like to avoid (see #11915).
-    if (!hasSufficientFunds) {
-      logger.warn(
-        s"Insufficient funds to buy configured traffic amount. Please ensure that the validator's wallet has enough amulets to purchase " +
-          s"${BigDecimal(topupParameters.topupAmount) / 1e6} MB of traffic on ${target.alias} to continue healthy operation."
+    val currentExtraTrafficRemainder =
+      currentTrafficState.extraTrafficRemainder
+    val currentTime = clock.now
+    val tooSoon =
+      topupState.payload.lastPurchasedAt.toEpochMilli + topupParameters.minTopupInterval.duration.toMillis > currentTime.toEpochMilli
+    if (tooSoon) {
+      logger.trace(
+        s"Trying to top-up ${target.alias} too soon after previous top-up (last purchased at = ${topupState.payload.lastPurchasedAt}, current time = $currentTime)"
+      )
+      false
+    } else if (currentExtraTrafficRemainder >= topupParameters.topupAmount) {
+      logger.trace(
+        s"Sufficient traffic balance remains on ${target.alias} (current traffic balance = $currentExtraTrafficRemainder, topup amount = ${topupParameters.topupAmount})"
       )
       false
     } else {
-      val currentExtraTrafficRemainder =
-        currentTrafficState.extraTrafficRemainder
-      val currentTime = clock.now
-      val tooSoon =
-        topupState.payload.lastPurchasedAt.toEpochMilli + topupParameters.minTopupInterval.duration.toMillis > currentTime.toEpochMilli
-      if (tooSoon) {
-        logger.trace(
-          s"Trying to top-up ${target.alias} too soon after previous top-up (last purchased at = ${topupState.payload.lastPurchasedAt}, current time = $currentTime)"
-        )
-        false
-      } else if (currentExtraTrafficRemainder >= topupParameters.topupAmount) {
-        logger.trace(
-          s"Sufficient traffic balance remains on ${target.alias} (current traffic balance = $currentExtraTrafficRemainder, topup amount = ${topupParameters.topupAmount})"
-        )
-        false
-      } else {
-        true
-      }
+      true
     }
   }
 
@@ -360,6 +360,25 @@ object TopupMemberTrafficTrigger {
       param("migrationId", _.migrationId),
       param("topupParameters", _.topupParameters),
     )
+  }
+
+  /** Splits candidates into the ones the balance covers and the ones it does not, in target order.
+    * Every buy draws on the same wallet, so a target is only funded once the ones before it are.
+    * A `None` budget does not bound the purchases.
+    */
+  private[automation] def fundedTasks[A](
+      candidates: Seq[(A, BigDecimal)],
+      budget: Option[BigDecimal],
+  ): (Seq[A], Seq[A]) = budget match {
+    case None => (candidates.map(_._1), Seq.empty)
+    case Some(balance) =>
+      val (funded, unfunded, _) =
+        candidates.foldLeft((Seq.empty[A], Seq.empty[A], balance)) {
+          case ((funded, unfunded, remaining), (task, cost)) =>
+            if (cost <= remaining) (funded :+ task, unfunded, remaining - cost)
+            else (funded, unfunded :+ task, remaining)
+        }
+      (funded, unfunded)
   }
 
   /** Resolves the configured top-up targets against the synchronizers the participant is

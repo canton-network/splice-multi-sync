@@ -106,4 +106,24 @@ class TopupMemberTrafficTriggerTest extends AnyWordSpec with BaseTest {
       target.isGlobal shouldBe true
     }
   }
+
+  "TopupMemberTrafficTrigger.fundedTasks" should {
+
+    // Costs only; what they are attached to does not affect the allocation.
+    val candidates = Seq(globalAlias -> BigDecimal(100), dedicatedAlias -> BigDecimal(100))
+
+    "fund only what the balance covers, in order" in {
+      // Enough for either one alone, not for both, so the second one misses out.
+      val (funded, unfunded) =
+        TopupMemberTrafficTrigger.fundedTasks(candidates, Some(BigDecimal(150)))
+      funded shouldBe Seq(globalAlias)
+      unfunded shouldBe Seq(dedicatedAlias)
+    }
+
+    "fund every target when the balance does not bound the purchases" in {
+      val (funded, unfunded) = TopupMemberTrafficTrigger.fundedTasks(candidates, None)
+      funded shouldBe Seq(globalAlias, dedicatedAlias)
+      unfunded shouldBe empty
+    }
+  }
 }
