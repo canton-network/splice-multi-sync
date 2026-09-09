@@ -5,7 +5,6 @@ package org.lfdecentralizedtrust.splice.validator.automation
 
 import com.digitalasset.canton.config.NonNegativeFiniteDuration as ConfigNonNegativeFiniteDuration
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.sequencing.SequencerConnectionPoolDelays
@@ -32,6 +31,7 @@ import org.lfdecentralizedtrust.splice.store.DomainTimeSynchronization
 import org.lfdecentralizedtrust.splice.store.AppStoreWithIngestion.SpliceLedgerConnectionPriority
 import org.lfdecentralizedtrust.splice.validator.domain.SynchronizerConnector
 import org.lfdecentralizedtrust.splice.validator.lsu.RollForwardLsuTrigger
+import org.lfdecentralizedtrust.splice.validator.config.ValidatorSynchronizerConfig
 import org.lfdecentralizedtrust.splice.validator.store.ValidatorStore
 import org.lfdecentralizedtrust.splice.wallet.UserWalletManager
 import org.lfdecentralizedtrust.splice.wallet.automation.{
@@ -49,7 +49,7 @@ class ValidatorAutomationService(
     automationConfig: AutomationConfig,
     backupDumpConfig: Option[PeriodicBackupDumpConfig],
     validatorTopupConfig: ValidatorTopupConfig,
-    grpcDeadline: Option[ConfigNonNegativeFiniteDuration],
+    synchronizerConfig: ValidatorSynchronizerConfig,
     transferPreapprovalConfig: TransferPreapprovalConfig,
     sequencerConnectionFromScan: Boolean,
     isSvValidator: Boolean,
@@ -75,7 +75,6 @@ class ValidatorAutomationService(
     latestPackagesOnly: Boolean,
     enabledFeatures: EnabledFeaturesConfig,
     additionalPackagesToUnvet: Map[PackageName, Set[PackageVersion]],
-    globalSynchronizerAlias: SynchronizerAlias,
     enableDeprecatedTransferCommandSupport: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
     packageVersionSupport: PackageVersionSupport,
@@ -144,7 +143,7 @@ class ValidatorAutomationService(
         transferPreapprovalConfig,
         clock,
         participantAdminConnection,
-        globalSynchronizerAlias,
+        synchronizerConfig.global.alias,
       )
     )
 
@@ -175,11 +174,14 @@ class ValidatorAutomationService(
       logger.info(
         s"Not starting TopupMemberTrafficTrigger, as this is an SV validator."
       )(TraceContext.empty)
-    else if (validatorTopupConfig.targetThroughput.value <= 0L)
+    else if (synchronizerConfig.topupTargets.isEmpty)
       logger.info(
         s"Not starting TopupMemberTrafficTrigger, as the validator is not configured to buy extra traffic."
       )(TraceContext.empty)
-    else
+    else {
+      logger.info(
+        s"Starting TopupMemberTrafficTrigger for ${synchronizerConfig.topupTargets.map(_._1.unwrap)}"
+      )(TraceContext.empty)
       registerTrigger(
         new TopupMemberTrafficTrigger(
           triggerContext
@@ -188,14 +190,14 @@ class ValidatorAutomationService(
           store,
           connection(SpliceLedgerConnectionPriority.High),
           participantAdminConnection,
-          validatorTopupConfig,
-          grpcDeadline,
+          synchronizerConfig,
           clock,
           walletManager,
           scanConnection,
           domainMigrationId,
         )
       )
+    }
 
     if (enableDeprecatedTransferCommandSupport) {
       registerTrigger(
@@ -272,7 +274,7 @@ class ValidatorAutomationService(
       RollForwardLsuTrigger(
         participantAdminConnection,
         scanConnection,
-        globalSynchronizerAlias,
+        synchronizerConfig.global.alias,
         triggerContext,
       )
     )

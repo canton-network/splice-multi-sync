@@ -15,6 +15,7 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.wallet.install.amulet
   COO_BuyMemberTraffic,
   COO_Error,
 }
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.RegisteredSynchronizer
 import org.lfdecentralizedtrust.splice.codegen.java.splice.wallet.topupstate.ValidatorTopUpState
 import org.lfdecentralizedtrust.splice.codegen.java.da.time.types.RelTime
 import org.lfdecentralizedtrust.splice.environment.RetryProvider.QuietNonRetryableException
@@ -26,7 +27,12 @@ import org.lfdecentralizedtrust.splice.environment.{
 }
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.BftScanConnection
 import org.lfdecentralizedtrust.splice.store.MultiDomainAcsStore.QueryResult
-import org.lfdecentralizedtrust.splice.util.{AmuletConfigSchedule, Contract}
+import org.lfdecentralizedtrust.splice.util.{
+  AmuletConfigSchedule,
+  Contract,
+  ContractWithState,
+  DisclosedContracts,
+}
 import org.lfdecentralizedtrust.splice.validator.store.ValidatorStore
 import org.lfdecentralizedtrust.splice.validator.util.ValidatorUtil
 import org.lfdecentralizedtrust.splice.wallet.util.{
@@ -34,8 +40,11 @@ import org.lfdecentralizedtrust.splice.wallet.util.{
   TopupUtil,
   ValidatorTopupConfig,
 }
-import org.lfdecentralizedtrust.splice.validator.config.BuyExtraTrafficConfig
-import org.lfdecentralizedtrust.splice.wallet.UserWalletManager
+import org.lfdecentralizedtrust.splice.validator.config.{
+  BuyExtraTrafficConfig,
+  ValidatorSynchronizerConfig,
+}
+import org.lfdecentralizedtrust.splice.wallet.{UserWalletManager, UserWalletService}
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.logging.TracedLogger
@@ -44,6 +53,7 @@ import com.digitalasset.canton.sequencing.protocol.{SequencerErrors, TrafficStat
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.MonadUtil
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
@@ -51,14 +61,16 @@ import org.apache.pekko.stream.Materializer
 import java.time.Instant
 import java.util.Optional
 import scala.concurrent.{ExecutionContext, Future}
+import scala.jdk.CollectionConverters.*
+import scala.jdk.OptionConverters.*
+import scala.util.{Failure, Success}
 
 class TopupMemberTrafficTrigger(
     override protected val context: TriggerContext,
     store: ValidatorStore,
     connection: SpliceLedgerConnection,
     participantAdminConnection: ParticipantAdminConnection,
-    validatorTopupConfig: ValidatorTopupConfig,
-    grpcDeadline: Option[NonNegativeFiniteDuration],
+    synchronizerConfig: ValidatorSynchronizerConfig,
     clock: Clock,
     walletManager: UserWalletManager,
     scanConnection: BftScanConnection,
@@ -79,13 +91,6 @@ class TopupMemberTrafficTrigger(
       decentralizedSynchronizerConfig = AmuletConfigSchedule(amuletRules)
         .getConfigAsOf(clock.now)
         .decentralizedSynchronizer
-      topupParameters = ExtraTrafficTopupParameters(
-        validatorTopupConfig.targetThroughput,
-        validatorTopupConfig.minTopupInterval,
-        decentralizedSynchronizerConfig.fees.minTopupAmount,
-        validatorTopupConfig.topupTriggerPollingInterval,
-      )
-      _ = assert(topupParameters.topupAmount > 0, "topupAmount must be positive")
       // TODO(DACH-NY/canton-network-node#13301) This switches over to purchasing traffic for the new synchronizer
       // as soon as it is active. This might be sufficient for Amulet where
       // there a validator has a relatively small amount of contracts and everything is
@@ -96,56 +101,109 @@ class TopupMemberTrafficTrigger(
       activeSynchronizerId = SynchronizerId.tryFromString(
         decentralizedSynchronizerConfig.activeSynchronizer
       )
-      currentTrafficState <- participantAdminConnection.getParticipantTrafficState(
-        activeSynchronizerId
+      connected <- participantAdminConnection.listConnectedSynchronizers()
+      targets = TopupMemberTrafficTrigger.resolveTargets(
+        topupTargets = synchronizerConfig.topupTargets,
+        globalAlias = synchronizerConfig.global.alias,
+        globalSynchronizerId = activeSynchronizerId,
+        connectedSynchronizerIds =
+          connected.map(r => r.synchronizerAlias -> r.synchronizerId).toMap,
+        requiredSynchronizerIds =
+          decentralizedSynchronizerConfig.requiredSynchronizers.map.keySet.asScala.toSet,
+        minTopupAmount = decentralizedSynchronizerConfig.fees.minTopupAmount,
+        pollingInterval = context.config.pollingInterval,
+        domainMigrationId = domainMigrationId,
+        logger = logger,
       )
-      topupState <- getOrCreateValidatorTopupState(activeSynchronizerId)
       validatorWallet <- ValidatorUtil.getValidatorWallet(store, walletManager)
-      hasSufficientFunds <- TopupUtil
-        .hasSufficientFundsForTopup(
-          scanConnection,
-          validatorWallet.store,
-          validatorTopupConfig,
-          clock,
+      tasks <- MonadUtil.sequentialTraverseFilter(targets)(target =>
+        skipOnFailure(target, hasOtherTargets = targets.sizeIs > 1)(
+          retrieveTaskFor(target, validatorWallet, activeSynchronizerId)
         )
-    } yield {
-      if (
-        shouldTopup(
-          hasSufficientFunds,
-          currentTrafficState,
-          topupState,
-          topupParameters,
-        )
-      ) {
-        Seq(
-          TopupMemberTrafficTrigger.Task(
-            topupParameters,
-            topupState,
-            currentTrafficState,
-          )
-        )
-      } else Seq.empty
-    }
+      )
+    } yield tasks
   }
+
+  /** A failure costs every other target its top-up for that poll, so an unreachable dedicated
+    * synchronizer is skipped. A failure on the decentralized synchronizer, or on a lone target,
+    * stays visible: every buy is submitted there, so nothing can be bought at all.
+    */
+  private def skipOnFailure[A](
+      target: TopupMemberTrafficTrigger.Target,
+      hasOtherTargets: Boolean,
+  )(task: Future[Option[A]])(implicit tc: TraceContext): Future[Option[A]] =
+    task.transform {
+      case Failure(ex) if target.isGlobal || !hasOtherTargets => Failure(ex)
+      case Failure(ex) =>
+        logger.info(s"Skipping the top-up for ${target.alias} in this poll", ex)
+        Success(None)
+      case success => success
+    }
+
+  private def retrieveTaskFor(
+      target: TopupMemberTrafficTrigger.Target,
+      validatorWallet: UserWalletService,
+      submissionSynchronizerId: SynchronizerId,
+  )(implicit tc: TraceContext): Future[Option[TopupMemberTrafficTrigger.Task]] =
+    for {
+      currentTrafficState <- participantAdminConnection.getParticipantTrafficState(
+        target.synchronizerId
+      )
+      registration <-
+        if (!target.needsRegistration) Future.successful(None)
+        else scanConnection.lookupSynchronizerRegistration(target.synchronizerId.toProtoPrimitive)
+      task <-
+        if (target.needsRegistration && registration.isEmpty) {
+          // A buy without it is rejected on-ledger, and lastPurchasedAt never advances, so
+          // nothing would stop the retry.
+          logger.info(
+            s"Not topping up ${target.alias}: Scan serves no registration for ${target.synchronizerId}"
+          )
+          Future.successful(None)
+        } else
+          for {
+            topupState <- getOrCreateValidatorTopupState(target, submissionSynchronizerId)
+            hasSufficientFunds <- TopupUtil.hasSufficientFundsForTopup(
+              scanConnection,
+              validatorWallet.store,
+              // The required balance is derived from this target's throughput and interval.
+              target.topupConfig,
+              clock,
+            )
+          } yield Option.when(
+            shouldTopup(target, hasSufficientFunds, currentTrafficState, topupState)
+          )(
+            TopupMemberTrafficTrigger.Task(
+              target,
+              topupState,
+              currentTrafficState,
+              registration,
+            )
+          )
+    } yield task
 
   override protected def completeTask(
       task: TopupMemberTrafficTrigger.Task
   )(implicit tc: TraceContext): Future[TaskOutcome] = {
     val coBuyMemberTraffic = new CO_BuyMemberTraffic(
-      task.topupParameters.topupAmount,
+      task.target.topupParameters.topupAmount,
       task.topupState.payload.memberId,
       task.topupState.payload.synchronizerId,
       task.topupState.payload.migrationId,
-      new RelTime(task.topupParameters.minTopupInterval.duration.toMillis * 1000),
+      new RelTime(task.target.topupParameters.minTopupInterval.duration.toMillis * 1000),
       Optional.of(task.topupState.contractId),
-      // Filled in once the validator can resolve a registration from Scan, see
-      // ChainSafe/canton-extending-mainnet#40.
-      Optional.empty(),
+      task.registration.map(_.contractId).toJava,
     )
     for {
       validatorWallet <- ValidatorUtil.getValidatorWallet(store, walletManager)
       outcome <- validatorWallet.treasury
-        .enqueueAmuletOperation(coBuyMemberTraffic, CommandPriority.High)
+        .enqueueAmuletOperation(
+          coBuyMemberTraffic,
+          CommandPriority.High,
+          // The buyer is not a stakeholder on the registration, so it has to be disclosed.
+          extraDisclosedContracts = task.registration
+            .fold[DisclosedContracts](DisclosedContracts.Empty)(connection.disclosedContracts(_)),
+        )
         .map {
           case outcome: COO_BuyMemberTraffic =>
             TaskSuccess(s"Successfully bought extra traffic: $outcome")
@@ -173,28 +231,35 @@ class TopupMemberTrafficTrigger(
   )(implicit tc: TraceContext): Future[Boolean] = {
     for {
       currentTopupState <- store
-        .lookupValidatorTopUpStateWithOffset(
-          SynchronizerId.tryFromString(task.topupState.payload.synchronizerId),
-          domainMigrationId,
-        )
+        .lookupValidatorTopUpStateWithOffset(task.target.synchronizerId, task.target.migrationId)
         .map(_.value)
-    } yield currentTopupState.fold(false)(
+      // A registration archived by the DSO makes every retry a rejected submission. Compare
+      // contract ids, so a re-registration also reads as stale.
+      registrationGone <- task.registration match {
+        case None => Future.successful(false)
+        case Some(registration) =>
+          scanConnection
+            .lookupSynchronizerRegistration(registration.payload.synchronizerId)
+            .map(!_.exists(_.contractId == registration.contractId))
+      }
+    } yield registrationGone || currentTopupState.exists(
       _.payload.lastPurchasedAt.isAfter(task.topupState.payload.lastPurchasedAt)
     )
   }
 
   private def shouldTopup(
+      target: TopupMemberTrafficTrigger.Target,
       hasSufficientFunds: Boolean,
       currentTrafficState: TrafficState,
       topupState: Contract[ValidatorTopUpState.ContractId, ValidatorTopUpState],
-      topupParameters: ExtraTrafficTopupParameters,
   )(implicit traceContext: TraceContext): Boolean = {
+    val topupParameters = target.topupParameters
     // we do not even submit the topup tx if the validator does not have sufficient funds because we know
     // the tx would fail but it would still drain synchronizer traffic which we would like to avoid (see #11915).
     if (!hasSufficientFunds) {
       logger.warn(
         s"Insufficient funds to buy configured traffic amount. Please ensure that the validator's wallet has enough amulets to purchase " +
-          s"${BigDecimal(topupParameters.topupAmount) / 1e6} MB of traffic to continue healthy operation."
+          s"${BigDecimal(topupParameters.topupAmount) / 1e6} MB of traffic on ${target.alias} to continue healthy operation."
       )
       false
     } else {
@@ -205,12 +270,12 @@ class TopupMemberTrafficTrigger(
         topupState.payload.lastPurchasedAt.toEpochMilli + topupParameters.minTopupInterval.duration.toMillis > currentTime.toEpochMilli
       if (tooSoon) {
         logger.trace(
-          s"Trying to top-up too soon after previous top-up (last purchased at = ${topupState.payload.lastPurchasedAt}, current time = $currentTime)"
+          s"Trying to top-up ${target.alias} too soon after previous top-up (last purchased at = ${topupState.payload.lastPurchasedAt}, current time = $currentTime)"
         )
         false
       } else if (currentExtraTrafficRemainder >= topupParameters.topupAmount) {
         logger.trace(
-          s"Sufficient traffic balance remains (current traffic balance = $currentExtraTrafficRemainder, topup amount = ${topupParameters.topupAmount})"
+          s"Sufficient traffic balance remains on ${target.alias} (current traffic balance = $currentExtraTrafficRemainder, topup amount = ${topupParameters.topupAmount})"
         )
         false
       } else {
@@ -220,11 +285,13 @@ class TopupMemberTrafficTrigger(
   }
 
   private def getOrCreateValidatorTopupState(
-      activeSynchronizerId: SynchronizerId
+      target: TopupMemberTrafficTrigger.Target,
+      submissionSynchronizerId: SynchronizerId,
   )(implicit
       traceContext: TraceContext
   ): Future[Contract[ValidatorTopUpState.ContractId, ValidatorTopUpState]] = {
-    store.lookupValidatorTopUpStateWithOffset(activeSynchronizerId, domainMigrationId).flatMap {
+    // Keyed on the target, not on where the contract is assigned.
+    store.lookupValidatorTopUpStateWithOffset(target.synchronizerId, target.migrationId).flatMap {
       case QueryResult(_, Some(topupState)) =>
         Future.successful(topupState)
       case QueryResult(dedupOffset, None) =>
@@ -238,28 +305,32 @@ class TopupMemberTrafficTrigger(
                 store.key.dsoParty.toProtoPrimitive,
                 validator.toProtoPrimitive,
                 participantId.toProtoPrimitive,
-                activeSynchronizerId.toProtoPrimitive,
-                domainMigrationId,
+                target.synchronizerId.toProtoPrimitive,
+                // The buy fetches the state by this migration id, so it has to be the target's.
+                target.migrationId,
                 Instant.ofEpochSecond(0),
               ),
               priority = CommandPriority.High,
-              deadline = grpcDeadline,
+              deadline = target.grpcDeadline,
             )
             .withDedup(
               SpliceLedgerConnection.CommandId(
                 "org.lfdecentralizedtrust.splice.validator.automation.TopupMemberTrafficTrigger.getOrCreateValidatorTopupState",
                 Seq(validator),
-                activeSynchronizerId.toProtoPrimitive,
+                // The target's id, not the submission synchronizer's, which is the same for every
+                // target. Kept to one element, so the existing decentralized key hashes unchanged.
+                target.synchronizerId.toProtoPrimitive,
               ),
               DedupOffset(dedupOffset),
             )
-            .withSynchronizerId(activeSynchronizerId)
+            // The decentralized synchronizer, for every target: the buy infers its domain from
+            // the disclosed AmuletRules and open round, so a state assigned elsewhere is
+            // unfetchable in that transaction.
+            .withSynchronizerId(submissionSynchronizerId)
             .yieldResult()
             .flatMap(ev =>
-              // topping up is tied to the domain in scope here, which was
-              // picked from the on-ledger domain config
               store.multiDomainAcsStore.getContractByIdOnDomain(ValidatorTopUpState.COMPANION)(
-                activeSynchronizerId,
+                submissionSynchronizerId,
                 ev.contractId,
               )
             )
@@ -269,6 +340,7 @@ class TopupMemberTrafficTrigger(
 }
 
 object TopupMemberTrafficTrigger {
+
   /** One synchronizer this validator tops up, resolved against the participant's connections. */
   final case class Target(
       alias: SynchronizerAlias,
@@ -340,13 +412,16 @@ object TopupMemberTrafficTrigger {
       .distinctBy(_.synchronizerId)
 
   final case class Task(
-      topupParameters: ExtraTrafficTopupParameters,
+      target: Target,
       topupState: Contract[ValidatorTopUpState.ContractId, ValidatorTopUpState],
       trafficState: TrafficState,
+      registration: Option[
+        ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
+      ],
   ) extends PrettyPrinting {
     override def pretty: Pretty[Task] =
       prettyOfClass[Task](
-        param("topupParameters", _.topupParameters),
+        param("target", _.target),
         param("topupState", _.topupState),
         param("trafficState", _.trafficState),
       )
