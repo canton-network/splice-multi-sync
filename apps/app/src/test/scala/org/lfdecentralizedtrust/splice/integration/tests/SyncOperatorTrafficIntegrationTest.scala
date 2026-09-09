@@ -4,15 +4,19 @@
 package org.lfdecentralizedtrust.splice.integration.tests
 
 import com.digitalasset.canton.SynchronizerAlias
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, NonNegativeNumeric}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.{Member, PartyId, SynchronizerId}
+import monocle.macros.syntax.lens.*
 import org.lfdecentralizedtrust.splice.codegen.java.splice
 import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.RegisteredSynchronizer
 import org.lfdecentralizedtrust.splice.codegen.java.splice.round.IssuingMiningRound
+import org.lfdecentralizedtrust.splice.codegen.java.splice.wallet.topupstate.ValidatorTopUpState
 import org.lfdecentralizedtrust.splice.codegen.java.splice.types.Round
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
+import org.lfdecentralizedtrust.splice.config.ConfigTransforms
 import org.lfdecentralizedtrust.splice.integration.EnvironmentDefinition
 import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   IntegrationTest,
@@ -22,9 +26,12 @@ import org.lfdecentralizedtrust.splice.util.{
   ContractWithState,
   DisclosedContracts,
   SynchronizerFeesTestUtil,
+  TriggerTestUtil,
   WalletTestUtil,
 }
+import org.lfdecentralizedtrust.splice.validator.automation.TopupMemberTrafficTrigger
 
+import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
@@ -34,10 +41,12 @@ import scala.jdk.OptionConverters.*
 class SyncOperatorTrafficIntegrationTest
     extends IntegrationTest
     with SynchronizerFeesTestUtil
+    with TriggerTestUtil
     with WalletTestUtil {
 
   private val firstPurchase = 1_000_000L
   private val secondPurchase = 2_000_000L
+  private val splitwellAlias = SynchronizerAlias.tryCreate("splitwell")
 
   override def environmentDefinition: SpliceEnvironmentDefinition =
     EnvironmentDefinition
@@ -47,6 +56,34 @@ class SyncOperatorTrafficIntegrationTest
       )
       .withOnlyAliceValidatorConnectingToSplitwell
       .withStandardSetup
+      // withStandardSetup turns top-ups on for the decentralized synchronizer. Move alice's
+      // target onto splitwell instead, so the operator's synchronizer is the only one she tops
+      // up automatically.
+      .addConfigTransform((_, config) =>
+        ConfigTransforms.updateAllValidatorConfigs { case (name, validatorConfig) =>
+          if (name == "aliceValidator")
+            validatorConfig
+              .focus(_.domains.global.buyExtraTraffic.targetThroughput)
+              .replace(NonNegativeNumeric.tryCreate(BigDecimal(0)))
+              .focus(_.domains.extra)
+              .modify(_.map { extra =>
+                if (extra.alias == splitwellAlias)
+                  extra
+                    .focus(_.topup.targetThroughput)
+                    .replace(NonNegativeNumeric.tryCreate(BigDecimal(100000)))
+                    .focus(_.topup.minTopupInterval)
+                    .replace(NonNegativeFiniteDuration.ofMinutes(1))
+                else extra
+              })
+              // Resumed only at the end of the test: a trigger buying on splitwell for the same
+              // member would break the exact-equality assertions on the two manual purchases.
+              // Alice's validator only: pausing a trigger an app does not register warns, and the
+              // SV validator never registers this one.
+              .focus(_.automation)
+              .modify(_.withPausedTrigger[TopupMemberTrafficTrigger])
+          else validatorConfig
+        }(config)
+      )
 
   "sync operator" should {
 
@@ -57,7 +94,7 @@ class SyncOperatorTrafficIntegrationTest
       // The operator is pointed at the splitwell sequencer, so that is the synchronizer whose
       // traffic it grants. Alice's participant is a member of it.
       val synchronizerId = aliceValidatorBackend.participantClientWithAdminToken.synchronizers
-        .id_of(SynchronizerAlias.tryCreate("splitwell"))
+        .id_of(splitwellAlias)
         .logical
       val member = aliceValidatorBackend.participantClient.id
 
@@ -138,6 +175,28 @@ class SyncOperatorTrafficIntegrationTest
         "the limit rises by exactly the second amount",
         _ => extraTrafficLimit(member) shouldBe (firstPurchase + secondPurchase),
       )
+
+      // The validator's own top-up trigger does the same buy unattended, on splitwell only:
+      // alice's global target is zero, so the fan-out is the only reason it runs at all.
+      val topupTrigger = aliceValidatorBackend.appState.automation
+        .trigger[TopupMemberTrafficTrigger]
+      setTriggersWithin(triggersToResumeAtStart = Seq(topupTrigger)) {
+        clue("the trigger tops up splitwell on its own") {
+          eventually(2.minutes) {
+            extraTrafficLimit(member) should be > (firstPurchase + secondPurchase)
+          }
+        }
+        clue("it holds a top-up state for splitwell, which only the fan-out creates") {
+          inside(
+            listValidatorContracts(ValidatorTopUpState.COMPANION)(
+              aliceValidatorBackend,
+              _.data.synchronizerId == synchronizerId.toProtoPrimitive,
+            )
+          ) { case Seq(topupState) =>
+            topupState.data.memberId shouldBe member.toProtoPrimitive
+          }
+        }
+      }
     }
   }
 

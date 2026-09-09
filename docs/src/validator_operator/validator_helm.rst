@@ -689,6 +689,13 @@ To disable or tune to your needs, edit the following section in the validator-va
     :start-after: CONFIGURING_TOPUP_START
     :end-before: CONFIGURING_TOPUP_END
 
+A synchronizer configured under ``extraDomains`` is topped up the same way, using the ``topup``
+block on its entry, alongside its ``alias`` and ``url``. The DSO has to have registered it by
+governance vote, and its operator has to grant the purchased traffic on its own sequencer;
+otherwise the traffic balance never rises and the purchase repeats every ``minTopupInterval``.
+Such a purchase is submitted on the global synchronizer, so the global configuration above still
+governs the traffic it consumes.
+
 .. include:: ../common/traffic_topups.rst
 
 
