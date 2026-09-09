@@ -58,6 +58,7 @@ setupReportedActivity = do
     dso = app.dso
     synchronizerId = testSyncId
     operator
+    discountFactor = None
   stateCid <- submit app.dso $ createCmd DedicatedSynchronizerState with
     dso = app.dso
     synchronizerId = testSyncId
@@ -260,6 +261,7 @@ test_Expand_budgetEnforced = do
     dso = app.dso
     synchronizerId = testSyncId
     operator
+    discountFactor = None
   stateCid <- submit app.dso $ createCmd DedicatedSynchronizerState with
     dso = app.dso
     synchronizerId = testSyncId
@@ -376,6 +378,7 @@ test_Expand_pathExclusivity = do
     dso = app.dso
     synchronizerId = testSyncId
     operator
+    discountFactor = None
   stateCid <- submit app.dso $ createCmd DedicatedSynchronizerState with
     dso = app.dso
     synchronizerId = testSyncId
@@ -416,6 +419,7 @@ test_StartProcessing_registrationGate = do
     dso = app.dso
     synchronizerId = testSyncId
     operator = otherOperator
+    discountFactor = None
   submitMustFail app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
     reportCid
     registeredSynchronizerCid = dupRegCid
@@ -429,6 +433,7 @@ test_StartProcessing_registrationGate = do
     dso = app.dso
     synchronizerId = "registered-sync::1220abababababababababababababababababababababababababababababab"
     operator
+    discountFactor = None
   submitMustFail app.dso $ exerciseCmd amuletRulesCid AmuletRules_StartProcessingExtensionRewardsV2 with
     reportCid
     registeredSynchronizerCid = otherRegCid

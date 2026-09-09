@@ -4,7 +4,7 @@
 -- | Types and contracts for managing synchronizer fees
 module Splice.DecentralizedSynchronizer where
 
-import DA.Optional (optionalToList)
+import DA.Optional (fromOptional, optionalToList)
 import qualified DA.Set as Set
 import DA.Text as T
 import DA.Time
@@ -128,6 +128,17 @@ instance HasCheckedFetch MemberTraffic ForMemberTraffic where
 --
 -- This template lives in splice-amulet (not the governance package) so that `AmuletRules` can
 -- `fetch` it: the governance package depends on splice-amulet, not the reverse.
+defaultDiscountFactor : Decimal
+defaultDiscountFactor = 1.0
+
+-- | The multiplier a registration applies to its synchronizer's traffic price.
+getDiscountFactor : RegisteredSynchronizer -> Decimal
+getDiscountFactor reg = fromOptional defaultDiscountFactor reg.discountFactor
+
+data RegisteredSynchronizer_SetDiscountResult = RegisteredSynchronizer_SetDiscountResult with
+    registeredSynchronizerCid : ContractId RegisteredSynchronizer
+  deriving (Show, Eq)
+
 template RegisteredSynchronizer with
     dso : Party
       -- ^ The DSO party; sole signatory. Created by DSO governance (a `DsoRules` vote).
@@ -136,11 +147,14 @@ template RegisteredSynchronizer with
     operator : Party
       -- ^ The party operating the dedicated synchronizer. Observes this registration and every
       --   traffic purchase for its synchronizer (via the `operator` field on `MemberTraffic`).
+    discountFactor : Optional Decimal
+      -- ^ Multiplies this synchronizer's traffic price. `None` is the undiscounted 1.0.
   where
     signatory dso
     observer operator
 
     ensure not (T.isEmpty synchronizerId)
+        && (let f = fromOptional defaultDiscountFactor discountFactor in f > 0.0 && f <= 1.0)
 
     -- Public read choice, mirroring OpenMiningRound_Fetch: lets a buyer who is neither
     -- signatory nor observer read this contract inside AmuletRules_BuyMemberTraffic
@@ -152,6 +166,16 @@ template RegisteredSynchronizer with
         p : Party -- the reader (buyer/provider) authorized to read this disclosed contract
       controller p
       do pure this
+
+    choice RegisteredSynchronizer_SetDiscount : RegisteredSynchronizer_SetDiscountResult
+      with
+        newDiscountFactor : Decimal
+      controller dso
+      do
+        registeredSynchronizerCid <- create this with
+          -- use `None` for the default to maximize SCU compatibility
+          discountFactor = if newDiscountFactor == defaultDiscountFactor then None else Some newDiscountFactor
+        pure RegisteredSynchronizer_SetDiscountResult with registeredSynchronizerCid
 
 -- Group-id check for `fetchPublicReferenceData`: a `RegisteredSynchronizer` is scoped to the
 -- DSO party, so reads are validated against the expected DSO party (mirrors `MemberTraffic`).

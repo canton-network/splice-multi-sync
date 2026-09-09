@@ -50,6 +50,7 @@ test_BuyRegisteredSyncTraffic = do
     dso = app.dso
     synchronizerId = registeredSyncId
     operator
+    discountFactor = None
 
   -- Fund the buyer with Amulet to burn, and build a standard transfer context.
   amuletCid <- tap app provider 1_000_000.0
@@ -144,6 +145,7 @@ test_BuyRegisteredSyncTraffic_synchronizerIdMismatch = do
     dso = app.dso
     synchronizerId = "registered-sync::1220cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
     operator
+    discountFactor = None
 
   amuletCid <- tap app provider 1_000_000.0
   context <- getTransferContext app provider None
@@ -176,6 +178,7 @@ test_BuyRegisteredSyncTraffic_belowMinTopup = do
     dso = app.dso
     synchronizerId = registeredSyncId
     operator
+    discountFactor = None
 
   amuletCid <- tap app provider 1_000_000.0
   context <- getTransferContext app provider None
@@ -209,6 +212,7 @@ test_BuyRegisteredSyncTraffic_nonZeroMigrationId = do
     dso = app.dso
     synchronizerId = registeredSyncId
     operator
+    discountFactor = None
 
   amuletCid <- tap app provider 1_000_000.0
   context <- getTransferContext app provider None
@@ -242,6 +246,7 @@ test_BuyRegisteredSyncTraffic_wrongExpectedDso = do
     dso = app.dso
     synchronizerId = registeredSyncId
     operator
+    discountFactor = None
 
   amuletCid <- tap app provider 1_000_000.0
   context <- getTransferContext app provider None
@@ -269,6 +274,7 @@ test_RegisteredSynchronizer_ensureNonEmpty = do
     dso = app.dso
     synchronizerId = ""
     operator
+    discountFactor = None
 
 -- | Merging member traffic preserves the operator observer, and refuses to merge contracts whose
 --   operators disagree.

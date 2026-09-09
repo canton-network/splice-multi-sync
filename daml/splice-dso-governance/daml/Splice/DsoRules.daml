@@ -1712,7 +1712,7 @@ template DsoRules with
       controller dso
       do
         require "synchronizerId is non-empty" (not (T.isEmpty synchronizerId))
-        registeredSynchronizerCid <- create RegisteredSynchronizer with dso; synchronizerId; operator
+        registeredSynchronizerCid <- create RegisteredSynchronizer with dso; synchronizerId; operator; discountFactor = None
         -- reporting state for the extension reward flow (see DedicatedSynchronizerState),
         -- created at registration so the operator can report from its first round
         dedicatedSynchronizerStateCid <- create DedicatedSynchronizerState with
