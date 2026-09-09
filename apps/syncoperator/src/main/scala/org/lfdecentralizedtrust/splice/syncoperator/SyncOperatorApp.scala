@@ -100,7 +100,8 @@ class SyncOperatorApp(
       participantId <- appInitStep("Get participant id") {
         participantAdminConnection.getParticipantId()
       }
-      dsoParty <- appInitStep("Get DSO party id") { scanConnection.getDsoPartyId() }
+      // Scan may still be initializing when this app starts, so wait for it rather than failing.
+      dsoParty <- appInitStep("Get DSO party id") { scanConnection.getDsoPartyIdWithRetries() }
       sequencerAdminConnection = new SequencerAdminConnection(
         config.sequencer.adminApi,
         appParameters.loggingConfig.api,
@@ -151,6 +152,7 @@ class SyncOperatorApp(
         config.parameters,
         sequencerAdminConnection,
         config.trafficBalanceReconciliationDelay,
+        config.baseTrafficAmount,
         loggerFactory,
         packageVersionSupport,
       )

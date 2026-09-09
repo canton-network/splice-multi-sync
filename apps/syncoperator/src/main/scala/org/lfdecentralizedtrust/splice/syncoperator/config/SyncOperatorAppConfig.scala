@@ -4,6 +4,7 @@
 package org.lfdecentralizedtrust.splice.syncoperator.config
 
 import com.digitalasset.canton.config.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import org.lfdecentralizedtrust.splice.config.{
   AutomationConfig,
   HttpClientConfig,
@@ -33,6 +34,7 @@ case class SyncOperatorAppBackendConfig(
     parameters: SpliceParametersConfig = SpliceParametersConfig(batching = BatchingConfig()),
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration =
       NonNegativeFiniteDuration.ofSeconds(10),
+    baseTrafficAmount: NonNegativeLong = NonNegativeLong.zero,
     // Set to false to disable the DB-level exclusive lock that prevents two sync operator instances
     // from running concurrently against the same database.  Only disable for migration scenarios
     // where intentional overlap is required.
