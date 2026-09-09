@@ -153,6 +153,7 @@ class SyncOperatorApp(
         sequencerAdminConnection,
         config.trafficBalanceReconciliationDelay,
         config.baseTrafficAmount,
+        config.permissionedSynchronizer,
         loggerFactory,
         packageVersionSupport,
       )

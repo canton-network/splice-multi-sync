@@ -35,6 +35,8 @@ case class SyncOperatorAppBackendConfig(
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration =
       NonNegativeFiniteDuration.ofSeconds(10),
     baseTrafficAmount: NonNegativeLong = NonNegativeLong.zero,
+    // Restricts onboarding to participants the synchronizer owner has explicitly permissioned.
+    permissionedSynchronizer: Boolean = true,
     // Set to false to disable the DB-level exclusive lock that prevents two sync operator instances
     // from running concurrently against the same database.  Only disable for migration scenarios
     // where intentional overlap is required.

@@ -39,6 +39,7 @@ class SyncOperatorAutomationService(
     sequencerConnection: SequencerAdminConnection,
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
     baseTrafficAmount: NonNegativeLong,
+    permissionedSynchronizer: Boolean,
     protected val loggerFactory: NamedLoggerFactory,
     packageVersionSupport: PackageVersionSupport,
 )(implicit
@@ -72,6 +73,7 @@ class SyncOperatorAutomationService(
       store,
       sequencerConnection,
       baseTrafficAmount,
+      permissionedSynchronizer,
     )
   )
 
