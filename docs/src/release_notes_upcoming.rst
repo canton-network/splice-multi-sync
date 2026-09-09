@@ -23,7 +23,9 @@ release-notes:: Upcoming
           ``extraDomains``, not only on the global synchronizer. Give the entry a ``topup`` block
           to turn it on; without one, nothing changes. The synchronizer has to be one the DSO
           requires or one registered through governance, and the purchase itself is submitted on
-          the global synchronizer, so keep a global top-up configured as well.
+          the global synchronizer, so keep a global top-up configured as well. Its operator has to
+          grant the purchased traffic on its own sequencer; until it does, the traffic balance does
+          not rise and the purchase repeats every ``minTopupInterval``.
 
     - SV App
 
