@@ -111,7 +111,18 @@ instance HasCheckedFetch MemberTraffic ForMemberTraffic where
 
 -- Dedicated-synchronizer registration (PoC)
 ------------------------------------------------
---
+
+defaultDiscountFactor : Decimal
+defaultDiscountFactor = 1.0
+
+-- | The multiplier a registration applies to its synchronizer's traffic price.
+getDiscountFactor : RegisteredSynchronizer -> Decimal
+getDiscountFactor reg = fromOptional defaultDiscountFactor reg.discountFactor
+
+data RegisteredSynchronizer_SetDiscountResult = RegisteredSynchronizer_SetDiscountResult with
+    registeredSynchronizerCid : ContractId RegisteredSynchronizer
+  deriving (Show, Eq)
+
 -- A "dedicated synchronizer" is a synchronizer run by its own operator (stood up with the
 -- Splice software), separate from the decentralized synchronizer that hosts Amulet. Its traffic
 -- is funded by burning Amulet on the decentralized synchronizer. Before any Amulet can be
@@ -128,18 +139,6 @@ instance HasCheckedFetch MemberTraffic ForMemberTraffic where
 --
 -- This template lives in splice-amulet (not the governance package) so that `AmuletRules` can
 -- `fetch` it: the governance package depends on splice-amulet, not the reverse.
-
-defaultDiscountFactor : Decimal
-defaultDiscountFactor = 1.0
-
--- | The multiplier a registration applies to its synchronizer's traffic price.
-getDiscountFactor : RegisteredSynchronizer -> Decimal
-getDiscountFactor reg = fromOptional defaultDiscountFactor reg.discountFactor
-
-data RegisteredSynchronizer_SetDiscountResult = RegisteredSynchronizer_SetDiscountResult with
-    registeredSynchronizerCid : ContractId RegisteredSynchronizer
-  deriving (Show, Eq)
-
 template RegisteredSynchronizer with
     dso : Party
       -- ^ The DSO party; sole signatory. Created by DSO governance (a `DsoRules` vote).
