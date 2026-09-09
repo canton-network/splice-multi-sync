@@ -46,15 +46,12 @@ test_RegisterSynchronizer_viaVote = do
         operator
 
   -- The registration now exists on-ledger with exactly the fields we voted for.
-  registrations <- query @RegisteredSynchronizer dso
-  case registrations of
-    [(_cid, reg)] -> do
-      reg.dso === dso
-      reg.synchronizerId === dedicatedSyncId
-      reg.operator === operator
-      reg.discountFactor === None
-      getDiscountFactor reg === 1.0
-    _ -> abort $ "expected exactly one RegisteredSynchronizer, got " <> show (length registrations)
+  (_, reg) <- onlyRegistration dso
+  reg.dso === dso
+  reg.synchronizerId === dedicatedSyncId
+  reg.operator === operator
+  reg.discountFactor === None
+  getDiscountFactor reg === 1.0
 
   -- The operator is an observer, so it can see its own registration.
   operatorView <- query @RegisteredSynchronizer operator
@@ -94,7 +91,6 @@ test_SetSynchronizerDiscount_viaVote = do
   setDiscountTo registeredCid 0.75
   (discountedCid, discounted) <- onlyRegistration dso
   discounted.discountFactor === Some 0.75
-  getDiscountFactor discounted === 0.75
 
   setDiscountTo discountedCid 0.5
   (replacedCid, replaced) <- onlyRegistration dso

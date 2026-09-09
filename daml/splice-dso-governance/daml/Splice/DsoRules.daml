@@ -137,7 +137,8 @@ data DsoRules_ActionRequiringConfirmation
     -- ^ PoC (dedicated-synchronizer traffic): voted action to offboard a registered synchronizer,
     --   archiving its registration and reporting state.
   | SRARC_SetSynchronizerDiscount DsoRules_SetSynchronizerDiscount
-    -- ^ Set the traffic-price discount on a registered synchronizer.
+    -- ^ PoC (dedicated-synchronizer traffic): voted action to set the traffic-price discount
+    --   on a registered synchronizer.
   deriving (Eq, Show)
 
 data AnsEntryContext_ActionRequiringConfirmation

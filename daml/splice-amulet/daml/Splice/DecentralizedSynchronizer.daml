@@ -128,6 +128,7 @@ instance HasCheckedFetch MemberTraffic ForMemberTraffic where
 --
 -- This template lives in splice-amulet (not the governance package) so that `AmuletRules` can
 -- `fetch` it: the governance package depends on splice-amulet, not the reverse.
+
 defaultDiscountFactor : Decimal
 defaultDiscountFactor = 1.0
 
@@ -154,7 +155,7 @@ template RegisteredSynchronizer with
     observer operator
 
     ensure not (T.isEmpty synchronizerId)
-        && (let f = fromOptional defaultDiscountFactor discountFactor in f > 0.0 && f <= 1.0)
+        && (let f = getDiscountFactor this in f > 0.0 && f <= 1.0)
 
     -- Public read choice, mirroring OpenMiningRound_Fetch: lets a buyer who is neither
     -- signatory nor observer read this contract inside AmuletRules_BuyMemberTraffic
