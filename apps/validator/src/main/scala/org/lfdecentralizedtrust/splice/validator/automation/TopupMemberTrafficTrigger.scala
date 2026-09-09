@@ -63,7 +63,6 @@ import java.util.Optional
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
-import scala.util.{Failure, Success}
 
 class TopupMemberTrafficTrigger(
     override protected val context: TriggerContext,
@@ -118,9 +117,14 @@ class TopupMemberTrafficTrigger(
       validatorWallet <- ValidatorUtil.getValidatorWallet(store, walletManager)
       budget <- TopupUtil.topupBudget(scanConnection, validatorWallet.store)
       candidates <- MonadUtil.sequentialTraverseFilter(targets)(target =>
-        skipOnFailure(target, hasOtherTargets = targets.sizeIs > 1)(
-          retrieveTaskFor(target, activeSynchronizerId)
-        )
+        // The traversal is sequential, so a failure would otherwise cost every remaining target
+        // its top-up for this poll.
+        retrieveTaskFor(target, activeSynchronizerId).recover { case ex =>
+          if (context.retryProvider.isClosing)
+            logger.info(s"Not topping up ${target.alias}, as we are shutting down", ex)
+          else logger.warn(s"Skipping the top-up for ${target.alias} in this poll", ex)
+          None
+        }
       )
       (funded, unfunded) = TopupMemberTrafficTrigger.fundedTasks(candidates, budget)
       // we do not even submit the topup tx if the validator does not have sufficient funds because we know
@@ -133,22 +137,6 @@ class TopupMemberTrafficTrigger(
       )
     } yield funded
   }
-
-  /** A failure costs every other target its top-up for that poll, so an unreachable dedicated
-    * synchronizer is skipped. A failure on the decentralized synchronizer, or on a lone target,
-    * stays visible: every buy is submitted there, so nothing can be bought at all.
-    */
-  private def skipOnFailure[A](
-      target: TopupMemberTrafficTrigger.Target,
-      hasOtherTargets: Boolean,
-  )(task: Future[Option[A]])(implicit tc: TraceContext): Future[Option[A]] =
-    task.transform {
-      case Failure(ex) if target.isGlobal || !hasOtherTargets => Failure(ex)
-      case Failure(ex) =>
-        logger.info(s"Skipping the top-up for ${target.alias} in this poll", ex)
-        Success(None)
-      case success => success
-    }
 
   /** The task this target is due, paired with what it would cost the wallet. */
   private def retrieveTaskFor(
