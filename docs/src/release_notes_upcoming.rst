@@ -17,16 +17,6 @@ release-notes:: Upcoming
           account set via ``serviceAccountName``, you can restore the previous behavior by setting
           the new ``automountServiceAccountToken`` Helm value to ``true``.
 
-    - Validator App
-
-        - Validators can now buy extra traffic automatically on a synchronizer configured under
-          ``extraDomains``, not only on the global synchronizer. Give the entry a ``topup`` block
-          to turn it on; without one, nothing changes. The synchronizer has to be one the DSO
-          requires or one registered through governance, and the purchase itself is submitted on
-          the global synchronizer, so keep a global top-up configured as well. Its operator has to
-          grant the purchased traffic on its own sequencer; until it does, the traffic balance does
-          not rise and the purchase repeats every ``minTopupInterval``.
-
     - SV App
 
         - The public ``/v0/dso`` endpoint is deprecated and will be removed in 0.9.0
