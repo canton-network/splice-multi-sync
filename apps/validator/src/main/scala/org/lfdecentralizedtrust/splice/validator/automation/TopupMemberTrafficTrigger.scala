@@ -171,7 +171,8 @@ class TopupMemberTrafficTrigger(
     for {
       currentTopupState <- store
         .lookupValidatorTopUpStateWithOffset(
-          SynchronizerId.tryFromString(task.topupState.payload.synchronizerId)
+          SynchronizerId.tryFromString(task.topupState.payload.synchronizerId),
+          domainMigrationId,
         )
         .map(_.value)
     } yield currentTopupState.fold(false)(
@@ -220,7 +221,7 @@ class TopupMemberTrafficTrigger(
   )(implicit
       traceContext: TraceContext
   ): Future[Contract[ValidatorTopUpState.ContractId, ValidatorTopUpState]] = {
-    store.lookupValidatorTopUpStateWithOffset(activeSynchronizerId).flatMap {
+    store.lookupValidatorTopUpStateWithOffset(activeSynchronizerId, domainMigrationId).flatMap {
       case QueryResult(_, Some(topupState)) =>
         Future.successful(topupState)
       case QueryResult(dedupOffset, None) =>
