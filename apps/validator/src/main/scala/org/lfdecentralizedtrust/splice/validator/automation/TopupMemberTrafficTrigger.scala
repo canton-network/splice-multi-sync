@@ -118,11 +118,10 @@ class TopupMemberTrafficTrigger(
       budget <- TopupUtil.topupBudget(scanConnection, validatorWallet.store)
       candidates <- MonadUtil.sequentialTraverseFilter(targets)(target =>
         // The traversal is sequential, so a failure would otherwise cost every remaining target
-        // its top-up for this poll.
+        // its top-up for this poll. Info, not warn: a synchronizer is legitimately unreachable
+        // for a stretch of polls while it is being upgraded or recovered.
         retrieveTaskFor(target, activeSynchronizerId).recover { case ex =>
-          if (context.retryProvider.isClosing)
-            logger.info(s"Not topping up ${target.alias}, as we are shutting down", ex)
-          else logger.warn(s"Skipping the top-up for ${target.alias} in this poll", ex)
+          logger.info(s"Skipping the top-up for ${target.alias} in this poll", ex)
           None
         }
       )
