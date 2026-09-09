@@ -33,7 +33,7 @@ import scala.jdk.OptionConverters.*
 trait SynchronizerFeesTestUtil extends TestCommon {
   this: CommonAppInstanceReferences =>
 
-  private def listValidatorContracts[
+  protected def listValidatorContracts[
       TC <: javaapi.data.codegen.Contract[TCid, T],
       TCid <: javaapi.data.codegen.ContractId[T],
       T <: javaapi.data.Template,
