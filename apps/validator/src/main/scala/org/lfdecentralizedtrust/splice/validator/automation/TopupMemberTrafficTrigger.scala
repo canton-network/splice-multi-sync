@@ -34,8 +34,11 @@ import org.lfdecentralizedtrust.splice.wallet.util.{
   TopupUtil,
   ValidatorTopupConfig,
 }
+import org.lfdecentralizedtrust.splice.validator.config.BuyExtraTrafficConfig
 import org.lfdecentralizedtrust.splice.wallet.UserWalletManager
+import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.sequencing.protocol.{SequencerErrors, TrafficState}
 import com.digitalasset.canton.time.Clock
@@ -266,6 +269,76 @@ class TopupMemberTrafficTrigger(
 }
 
 object TopupMemberTrafficTrigger {
+  /** One synchronizer this validator tops up, resolved against the participant's connections. */
+  final case class Target(
+      alias: SynchronizerAlias,
+      synchronizerId: SynchronizerId,
+      isGlobal: Boolean,
+      // 0 for a registered synchronizer, which AmuletRules rejects at any other migration id.
+      migrationId: Long,
+      // False for anything in requiredSynchronizers, which AmuletRules authorizes by membership.
+      needsRegistration: Boolean,
+      topupConfig: ValidatorTopupConfig,
+      topupParameters: ExtraTrafficTopupParameters,
+      grpcDeadline: Option[NonNegativeFiniteDuration],
+  ) extends PrettyPrinting {
+    override def pretty: Pretty[Target] = prettyOfClass[Target](
+      param("alias", _.alias),
+      param("synchronizerId", _.synchronizerId),
+      param("migrationId", _.migrationId),
+      param("topupParameters", _.topupParameters),
+    )
+  }
+
+  /** Resolves the configured top-up targets against the synchronizers the participant is
+    * connected to.
+    */
+  private[automation] def resolveTargets(
+      topupTargets: Seq[(SynchronizerAlias, BuyExtraTrafficConfig)],
+      globalAlias: SynchronizerAlias,
+      globalSynchronizerId: SynchronizerId,
+      connectedSynchronizerIds: Map[SynchronizerAlias, SynchronizerId],
+      requiredSynchronizerIds: Set[String],
+      minTopupAmount: Long,
+      pollingInterval: NonNegativeFiniteDuration,
+      domainMigrationId: Long,
+      logger: TracedLogger,
+  )(implicit tc: TraceContext): Seq[Target] =
+    topupTargets
+      .flatMap { case (alias, topup) =>
+        val isGlobal = alias == globalAlias
+        val resolved =
+          if (isGlobal) Some(globalSynchronizerId) else connectedSynchronizerIds.get(alias)
+        resolved match {
+          case None =>
+            // Expected: an extra synchronizer stays configured while the participant is not
+            // connected to it.
+            logger.debug(s"Not topping up $alias: the participant is not connected to it")
+            None
+          case Some(synchronizerId) =>
+            // Never for the global target, whose migration id must follow the DSO even if
+            // activeSynchronizer ever leaves requiredSynchronizers.
+            val needsRegistration =
+              !isGlobal && !requiredSynchronizerIds.contains(synchronizerId.toProtoPrimitive)
+            val topupConfig =
+              ValidatorTopupConfig(topup.targetThroughput, topup.minTopupInterval, pollingInterval)
+            Some(
+              Target(
+                alias,
+                synchronizerId,
+                isGlobal = isGlobal,
+                migrationId = if (needsRegistration) 0L else domainMigrationId,
+                needsRegistration = needsRegistration,
+                topupConfig,
+                ExtraTrafficTopupParameters(topupConfig, minTopupAmount),
+                topup.grpcDeadline,
+              )
+            )
+        }
+      }
+      // Two aliases can resolve to one synchronizer; topupTargets is global-first, so global wins.
+      .distinctBy(_.synchronizerId)
+
   final case class Task(
       topupParameters: ExtraTrafficTopupParameters,
       topupState: Contract[ValidatorTopUpState.ContractId, ValidatorTopUpState],
