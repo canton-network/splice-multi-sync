@@ -10,6 +10,8 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.LifeCycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.sequencing.TrafficControlParameters
+import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
@@ -152,7 +154,14 @@ class SyncOperatorApp(
         config.parameters,
         sequencerAdminConnection,
         config.trafficBalanceReconciliationDelay,
-        config.baseTrafficAmount,
+        TrafficControlParameters(
+          maxBaseTrafficAmount = config.baseTrafficAmount,
+          readVsWriteScalingFactor = config.readVsWriteScalingFactor,
+          maxBaseTrafficAccumulationDuration = PositiveFiniteDuration.tryOfSeconds(
+            config.baseTrafficAccumulationDuration.duration.toSeconds
+          ),
+          freeConfirmationResponses = config.freeConfirmationResponses,
+        ),
         loggerFactory,
         packageVersionSupport,
       )

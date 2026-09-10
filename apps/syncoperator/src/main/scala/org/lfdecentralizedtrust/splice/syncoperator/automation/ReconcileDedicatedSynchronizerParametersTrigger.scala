@@ -28,7 +28,7 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
     override protected val context: TriggerContext,
     store: SyncOperatorStore,
     sequencerConnection: SequencerAdminConnection,
-    baseTrafficAmount: NonNegativeLong,
+    trafficControl: TrafficControlParameters,
 )(implicit
     override val ec: ExecutionContext,
     mat: Materializer,
@@ -45,7 +45,9 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
     store.lookupRegistration().flatMap {
       case None => Future.successful(Seq.empty)
       case Some(_) =>
-        isReconciled().map(if (_) Seq.empty else Seq(Task(synchronizerId, baseTrafficAmount)))
+        isReconciled().map(
+          if (_) Seq.empty else Seq(Task(synchronizerId, trafficControl.maxBaseTrafficAmount))
+        )
     }
 
   override protected def completeTask(task: Task)(implicit
@@ -68,7 +70,9 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
       .getSynchronizerParametersState(synchronizerId)
       .map(state => state.mapping.parameters == withTrafficControl(state.mapping.parameters))
 
-  /** Turns traffic control on if it is off, and forces the base amount either way. */
+  /** Applies the configured traffic control, turning it on if it is off. Parameters this operator
+    * does not configure keep whatever the synchronizer has.
+    */
   private def withTrafficControl(
       parameters: DynamicSynchronizerParameters
   ): DynamicSynchronizerParameters =
@@ -76,7 +80,12 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
       Some(
         parameters.trafficControl
           .getOrElse(TrafficControlParameters())
-          .copy(maxBaseTrafficAmount = baseTrafficAmount)
+          .copy(
+            maxBaseTrafficAmount = trafficControl.maxBaseTrafficAmount,
+            readVsWriteScalingFactor = trafficControl.readVsWriteScalingFactor,
+            maxBaseTrafficAccumulationDuration = trafficControl.maxBaseTrafficAccumulationDuration,
+            freeConfirmationResponses = trafficControl.freeConfirmationResponses,
+          )
       )
     )
 }

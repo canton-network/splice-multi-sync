@@ -13,7 +13,7 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice
 import org.lfdecentralizedtrust.splice.config.IngestionConfig
 import org.lfdecentralizedtrust.splice.environment.RetryProvider
 import org.lfdecentralizedtrust.splice.store.db.AcsInterfaceViewRowData
-import org.lfdecentralizedtrust.splice.store.{AppStore, Limit, MultiDomainAcsStore, PageLimit}
+import org.lfdecentralizedtrust.splice.store.{AppStore, Limit, MultiDomainAcsStore}
 import org.lfdecentralizedtrust.splice.syncoperator.store.db.DbSyncOperatorStore
 import org.lfdecentralizedtrust.splice.syncoperator.store.db.SyncOperatorTables.SyncOperatorAcsStoreRowData
 import org.lfdecentralizedtrust.splice.util.{ContractWithState, TemplateJsonDecoder}
@@ -48,11 +48,8 @@ trait SyncOperatorStore extends AppStore {
     ]
   ]] =
     multiDomainAcsStore
-      .listContracts(
-        splice.decentralizedsynchronizer.RegisteredSynchronizer.COMPANION,
-        PageLimit.tryCreate(1),
-      )
-      .map(_.headOption)
+      .findAnyContractWithOffset(splice.decentralizedsynchronizer.RegisteredSynchronizer.COMPANION)
+      .map(_.value)
 }
 
 object SyncOperatorStore {
