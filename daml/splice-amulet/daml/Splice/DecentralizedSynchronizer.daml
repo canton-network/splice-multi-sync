@@ -4,7 +4,7 @@
 -- | Types and contracts for managing synchronizer fees
 module Splice.DecentralizedSynchronizer where
 
-import DA.Optional (fromOptional, optionalToList)
+import DA.Optional (optionalToList)
 import qualified DA.Set as Set
 import DA.Text as T
 import DA.Time
@@ -115,11 +115,19 @@ instance HasCheckedFetch MemberTraffic ForMemberTraffic where
 defaultDiscountFactor : Decimal
 defaultDiscountFactor = 1.0
 
+-- | The registration parameters DSO governance can change by vote, as against the identity fields
+--   fixed at registration. One record, so a further parameter costs no new choice or vote action.
+data GovernanceParameters = GovernanceParameters with
+    discountFactor : Decimal
+      -- ^ Multiplies this synchronizer's traffic price.
+  deriving (Show, Eq)
+
 -- | The multiplier a registration applies to its synchronizer's traffic price.
 getDiscountFactor : RegisteredSynchronizer -> Decimal
-getDiscountFactor reg = fromOptional defaultDiscountFactor reg.discountFactor
+getDiscountFactor reg =
+  optional defaultDiscountFactor (.discountFactor) reg.governanceParameters
 
-data RegisteredSynchronizer_SetDiscountResult = RegisteredSynchronizer_SetDiscountResult with
+data RegisteredSynchronizer_SetGovernanceParametersResult = RegisteredSynchronizer_SetGovernanceParametersResult with
     registeredSynchronizerCid : ContractId RegisteredSynchronizer
   deriving (Show, Eq)
 
@@ -147,8 +155,8 @@ template RegisteredSynchronizer with
     operator : Party
       -- ^ The party operating the dedicated synchronizer. Observes this registration and every
       --   traffic purchase for its synchronizer (via the `operator` field on `MemberTraffic`).
-    discountFactor : Optional Decimal
-      -- ^ Multiplies this synchronizer's traffic price. `None` is the undiscounted 1.0.
+    governanceParameters : Optional GovernanceParameters
+      -- ^ Set by DSO governance. `None` is nothing voted yet, so every parameter is at its default.
   where
     signatory dso
     observer operator
@@ -167,15 +175,14 @@ template RegisteredSynchronizer with
       controller p
       do pure this
 
-    choice RegisteredSynchronizer_SetDiscount : RegisteredSynchronizer_SetDiscountResult
+    choice RegisteredSynchronizer_SetGovernanceParameters : RegisteredSynchronizer_SetGovernanceParametersResult
       with
-        newDiscountFactor : Decimal
+        newGovernanceParameters : GovernanceParameters
       controller dso
       do
         registeredSynchronizerCid <- create this with
-          -- use `None` for the default to maximize SCU compatibility
-          discountFactor = if newDiscountFactor == defaultDiscountFactor then None else Some newDiscountFactor
-        pure RegisteredSynchronizer_SetDiscountResult with registeredSynchronizerCid
+          governanceParameters = Some newGovernanceParameters
+        pure RegisteredSynchronizer_SetGovernanceParametersResult with registeredSynchronizerCid
 
 -- Group-id check for `fetchPublicReferenceData`: a `RegisteredSynchronizer` is scoped to the
 -- DSO party, so reads are validated against the expected DSO party (mirrors `MemberTraffic`).

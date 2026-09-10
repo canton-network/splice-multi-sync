@@ -50,7 +50,7 @@ test_RegisterSynchronizer_viaVote = do
   reg.dso === dso
   reg.synchronizerId === dedicatedSyncId
   reg.operator === operator
-  reg.discountFactor === None
+  reg.governanceParameters === None
   getDiscountFactor reg === 1.0
 
   -- The operator is an observer, so it can see its own registration.
@@ -66,20 +66,21 @@ test_RegisterSynchronizer_viaVote = do
       st.totalActivityReported === 0.0
     _ -> abort $ "expected exactly one DedicatedSynchronizerState, got " <> show (length states)
 
--- | Set the traffic discount by vote, replace it, then clear it. A replacement archives the
---   registration and recreates it, so exactly one is live throughout, and voting the default back
---   stores `None` rather than `Some 1.0`.
-test_SetSynchronizerDiscount_viaVote : Script ()
-test_SetSynchronizerDiscount_viaVote = do
+-- | Set the governance parameters by vote, then replace them twice. A replacement archives the
+--   registration and recreates it, so exactly one is live throughout, and the setter always stores
+--   the block, including when a parameter is voted back to its default.
+test_SetSynchronizerGovernanceParameters_viaVote : Script ()
+test_SetSynchronizerGovernanceParameters_viaVote = do
   (app, dso, (sv1, sv2, sv3, sv4)) <- initMainNet
   operator <- allocateParty "dedicatedSyncOperator"
   let dedicatedSyncId = "dedicated-sync::1220bebebebebebebebebebebebebebebebebebebebebebebebebebebebebebe"
       svs = [sv1, sv2, sv3, sv4]
       setDiscountTo cid f = initiateAndAcceptVote app svs $
         ARC_DsoRules with
-          dsoAction = SRARC_SetSynchronizerDiscount DsoRules_SetSynchronizerDiscount with
+          dsoAction = SRARC_SetSynchronizerGovernanceParameters DsoRules_SetSynchronizerGovernanceParameters with
             registeredSynchronizerCid = cid
-            setDiscount = RegisteredSynchronizer_SetDiscount with newDiscountFactor = f
+            setGovernanceParameters = RegisteredSynchronizer_SetGovernanceParameters with
+              newGovernanceParameters = GovernanceParameters with discountFactor = f
 
   initiateAndAcceptVote app svs $
     ARC_DsoRules with
@@ -90,17 +91,20 @@ test_SetSynchronizerDiscount_viaVote = do
   (registeredCid, _) <- onlyRegistration dso
   setDiscountTo registeredCid 0.75
   (discountedCid, discounted) <- onlyRegistration dso
-  discounted.discountFactor === Some 0.75
+  discounted.governanceParameters === Some (GovernanceParameters with discountFactor = 0.75)
 
   setDiscountTo discountedCid 0.5
   (replacedCid, replaced) <- onlyRegistration dso
-  replaced.discountFactor === Some 0.5
+  replaced.governanceParameters === Some (GovernanceParameters with discountFactor = 0.5)
 
+  -- Voting a parameter back to its default stores the block rather than clearing it: `None` means
+  -- nothing has been voted, which stops being well defined once the block has several parameters.
   setDiscountTo replacedCid 1.0
-  (_, cleared) <- onlyRegistration dso
-  cleared.discountFactor === None
+  (_, defaulted) <- onlyRegistration dso
+  defaulted.governanceParameters === Some (GovernanceParameters with discountFactor = 1.0)
+  getDiscountFactor defaulted === 1.0
 
--- | The one live registration, which also asserts that a discount vote replaced rather than added.
+-- | The one live registration, which also asserts that a parameter vote replaced rather than added.
 onlyRegistration : Party -> Script (ContractId RegisteredSynchronizer, RegisteredSynchronizer)
 onlyRegistration dso = do
   registrations <- query @RegisteredSynchronizer dso

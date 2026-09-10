@@ -30,7 +30,8 @@ import Splice.Wallet.Subscriptions
 -- `RegisteredSynchronizer` (PoC): created by `DsoRules_RegisterSynchronizer` below; the template
 -- itself lives in splice-amulet because AmuletRules must be able to fetch it.
 import Splice.DecentralizedSynchronizer (MemberTraffic, RegisteredSynchronizer(..),
-  RegisteredSynchronizer_SetDiscount, RegisteredSynchronizer_SetDiscountResult, DedicatedSynchronizerState(..))
+  GovernanceParameters, RegisteredSynchronizer_SetGovernanceParameters,
+  RegisteredSynchronizer_SetGovernanceParametersResult, DedicatedSynchronizerState(..))
 
 import qualified Splice.CometBft as CometBft
 import Splice.Ans
@@ -136,9 +137,9 @@ data DsoRules_ActionRequiringConfirmation
   | SRARC_ArchiveSynchronizerRegistration DsoRules_ArchiveSynchronizerRegistration
     -- ^ PoC (dedicated-synchronizer traffic): voted action to offboard a registered synchronizer,
     --   archiving its registration and reporting state.
-  | SRARC_SetSynchronizerDiscount DsoRules_SetSynchronizerDiscount
-    -- ^ PoC (dedicated-synchronizer traffic): voted action to set the traffic-price discount
-    --   on a registered synchronizer.
+  | SRARC_SetSynchronizerGovernanceParameters DsoRules_SetSynchronizerGovernanceParameters
+    -- ^ PoC (dedicated-synchronizer traffic): voted action to set the parameters of a registered
+    --   synchronizer, currently just its traffic-price discount.
   deriving (Eq, Show)
 
 data AnsEntryContext_ActionRequiringConfirmation
@@ -355,8 +356,8 @@ data DsoRules_RegisterSynchronizerResult = DsoRules_RegisterSynchronizerResult w
     registeredSynchronizerCid : ContractId RegisteredSynchronizer
     dedicatedSynchronizerStateCid : ContractId DedicatedSynchronizerState
 
-data DsoRules_SetSynchronizerDiscountResult = DsoRules_SetSynchronizerDiscountResult with
-    result : RegisteredSynchronizer_SetDiscountResult
+data DsoRules_SetSynchronizerGovernanceParametersResult = DsoRules_SetSynchronizerGovernanceParametersResult with
+    result : RegisteredSynchronizer_SetGovernanceParametersResult
 
 data DsoRules_ArchiveSynchronizerRegistrationResult = DsoRules_ArchiveSynchronizerRegistrationResult
 
@@ -1719,7 +1720,7 @@ template DsoRules with
       controller dso
       do
         require "synchronizerId is non-empty" (not (T.isEmpty synchronizerId))
-        registeredSynchronizerCid <- create RegisteredSynchronizer with dso; synchronizerId; operator; discountFactor = None
+        registeredSynchronizerCid <- create RegisteredSynchronizer with dso; synchronizerId; operator; governanceParameters = None
         -- reporting state for the extension reward flow (see DedicatedSynchronizerState),
         -- created at registration so the operator can report from its first round
         dedicatedSynchronizerStateCid <- create DedicatedSynchronizerState with
@@ -1730,15 +1731,15 @@ template DsoRules with
           totalActivityReported = 0.0
         pure $ DsoRules_RegisterSynchronizerResult with ..
 
-    nonconsuming choice DsoRules_SetSynchronizerDiscount : DsoRules_SetSynchronizerDiscountResult
+    nonconsuming choice DsoRules_SetSynchronizerGovernanceParameters : DsoRules_SetSynchronizerGovernanceParametersResult
       with
         registeredSynchronizerCid : ContractId RegisteredSynchronizer
-        setDiscount : RegisteredSynchronizer_SetDiscount
+        setGovernanceParameters : RegisteredSynchronizer_SetGovernanceParameters
       controller dso
       do
         void $ fetchChecked (ForDso with dso) registeredSynchronizerCid
-        result <- exercise registeredSynchronizerCid setDiscount
-        pure DsoRules_SetSynchronizerDiscountResult with result
+        result <- exercise registeredSynchronizerCid setGovernanceParameters
+        pure DsoRules_SetSynchronizerGovernanceParametersResult with result
 
     nonconsuming choice DsoRules_ArchiveSynchronizerRegistration : DsoRules_ArchiveSynchronizerRegistrationResult
       -- ^ PoC (dedicated-synchronizer traffic): governed offboarding of a registered synchronizer
@@ -1899,7 +1900,7 @@ executeActionRequiringConfirmation dso dsoRulesCid amuletRulesCid act = case act
       -- PoC: an accepted vote to register a dedicated synchronizer runs the choice on DsoRules.
       SRARC_RegisterSynchronizer choiceArg -> void $ exercise dsoRulesCid choiceArg
       SRARC_ArchiveSynchronizerRegistration choiceArg -> void $ exercise dsoRulesCid choiceArg
-      SRARC_SetSynchronizerDiscount choiceArg -> void $ exercise dsoRulesCid choiceArg
+      SRARC_SetSynchronizerGovernanceParameters choiceArg -> void $ exercise dsoRulesCid choiceArg
       SRARC_CreateBootstrapExternalPartyConfigStateInstruction choiceArg -> void $ exercise dsoRulesCid choiceArg
   ARC_AnsEntryContext with .. -> do
     void $ fetchChecked (ForDso with dso) ansEntryContextCid

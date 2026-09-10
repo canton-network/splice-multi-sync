@@ -18,7 +18,7 @@ import Daml.Script
 -- The extended buy choice, the merge choice, and `TransferInput`/`InputAmulet`/`TransferContext`.
 import Splice.AmuletRules
 -- The registry contract (rung 1) and the purchase record the buy choice creates.
-import Splice.DecentralizedSynchronizer (RegisteredSynchronizer(..), MemberTraffic(..))
+import Splice.DecentralizedSynchronizer (GovernanceParameters(..), RegisteredSynchronizer(..), MemberTraffic(..))
 
 -- App + user + round + funding helpers (setupDefaultAppWithUsers, tap, getTransferContext, ...).
 import Splice.Scripts.Util
@@ -50,7 +50,7 @@ test_BuyRegisteredSyncTraffic = do
     dso = app.dso
     synchronizerId = registeredSyncId
     operator
-    discountFactor = None
+    governanceParameters = None
 
   -- Fund the buyer with Amulet to burn, and build a standard transfer context.
   amuletCid <- tap app provider 1_000_000.0
@@ -145,7 +145,7 @@ test_BuyRegisteredSyncTraffic_synchronizerIdMismatch = do
     dso = app.dso
     synchronizerId = "registered-sync::1220cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
     operator
-    discountFactor = None
+    governanceParameters = None
 
   amuletCid <- tap app provider 1_000_000.0
   context <- getTransferContext app provider None
@@ -178,7 +178,7 @@ test_BuyRegisteredSyncTraffic_belowMinTopup = do
     dso = app.dso
     synchronizerId = registeredSyncId
     operator
-    discountFactor = None
+    governanceParameters = None
 
   amuletCid <- tap app provider 1_000_000.0
   context <- getTransferContext app provider None
@@ -212,7 +212,7 @@ test_BuyRegisteredSyncTraffic_nonZeroMigrationId = do
     dso = app.dso
     synchronizerId = registeredSyncId
     operator
-    discountFactor = None
+    governanceParameters = None
 
   amuletCid <- tap app provider 1_000_000.0
   context <- getTransferContext app provider None
@@ -246,7 +246,7 @@ test_BuyRegisteredSyncTraffic_wrongExpectedDso = do
     dso = app.dso
     synchronizerId = registeredSyncId
     operator
-    discountFactor = None
+    governanceParameters = None
 
   amuletCid <- tap app provider 1_000_000.0
   context <- getTransferContext app provider None
@@ -274,7 +274,7 @@ test_RegisteredSynchronizer_ensureNonEmpty = do
     dso = app.dso
     synchronizerId = ""
     operator
-    discountFactor = None
+    governanceParameters = None
 
 -- | Negative: the discount factor multiplies a price, so the template `ensure` bounds it to (0, 1].
 test_RegisteredSynchronizer_ensureDiscountBounds : Script ()
@@ -286,7 +286,7 @@ test_RegisteredSynchronizer_ensureDiscountBounds = do
         dso = app.dso
         synchronizerId = "dedicated-sync::1220bounds"
         operator
-        discountFactor = Some f
+        governanceParameters = Some (GovernanceParameters with discountFactor = f)
   register 0.0
   register 1.5
 

@@ -917,7 +917,7 @@ testBuyMemberTrafficForRegisteredSynchronizer = script do
     dso = app.dso
     synchronizerId = registeredSyncId
     operator
-    discountFactor = None
+    governanceParameters = None
 
   submit aliceValidator.primaryParty $ createCmd $ WalletAppInstall with
     endUserParty = aliceValidator.primaryParty
