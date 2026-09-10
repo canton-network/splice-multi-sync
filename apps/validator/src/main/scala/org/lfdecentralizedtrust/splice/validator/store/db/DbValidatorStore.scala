@@ -337,32 +337,35 @@ class DbValidatorStore(
   }
 
   override def lookupValidatorTopUpStateWithOffset(
-      synchronizerId: SynchronizerId
+      synchronizerId: SynchronizerId,
+      migrationId: Long,
   )(implicit traceContext: TraceContext): Future[QueryResult[Option[Contract[
     topupCodegen.ValidatorTopUpState.ContractId,
     topupCodegen.ValidatorTopUpState,
   ]]]] = waitUntilAcsIngested {
     for {
-      resultWithOffset <- storage
-        .querySingle(
+      resultsWithOffset <- storage
+        .query(
           selectFromAcsTableWithOffset(
             ValidatorTables.acsTableName,
             acsStoreId,
             domainMigrationId,
             topupCodegen.ValidatorTopUpState.COMPANION,
             where = sql"""traffic_domain_id = $synchronizerId""",
-            orderLimit = sql"limit 1",
-          ).headOption,
+          ),
           "lookupValidatorTopUpStateWithOffset",
         )
+      offset = resultsWithOffset.headOption
+        .map(_.offset)
         .getOrElse(throw offsetExpectedError())
     } yield QueryResult(
-      resultWithOffset.offset,
-      resultWithOffset.row.map(
-        contractFromRow(
-          topupCodegen.ValidatorTopUpState.COMPANION
-        )(_)
-      ),
+      offset,
+      // The payload's migration id is not a column; the ingestion filter admits only two
+      // migration ids per synchronizer.
+      resultsWithOffset
+        .flatMap(_.row)
+        .map(contractFromRow(topupCodegen.ValidatorTopUpState.COMPANION)(_))
+        .find(_.payload.migrationId == migrationId),
     )
   }
 }

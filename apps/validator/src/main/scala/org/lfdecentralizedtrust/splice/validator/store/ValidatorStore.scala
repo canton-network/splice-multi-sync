@@ -69,8 +69,12 @@ trait ValidatorStore extends WalletStore with AppStore {
     ]
   ]
 
+  /** The state for one top-up target. Keyed on the migration id as well as the synchronizer,
+    * since a registered synchronizer's state is pinned to 0 while the rest follow the DSO.
+    */
   def lookupValidatorTopUpStateWithOffset(
-      synchronizerId: SynchronizerId
+      synchronizerId: SynchronizerId,
+      migrationId: Long,
   )(implicit traceContext: TraceContext): Future[
     QueryResult[
       Option[
@@ -245,8 +249,12 @@ object ValidatorStore {
             providerParty = Some(PartyId.tryFromProtoPrimitive(contract.payload.provider)),
           )
         },
+        // A registered synchronizer pins migrationId to 0, so those states have to be ingested on
+        // any network past migration 0. Migration-0 states from a previous generation come in with
+        // them, and lookupValidatorTopUpStateWithOffset keys on the migration id to tell them apart.
         mkFilter(topUpCodegen.ValidatorTopUpState.COMPANION)(co =>
-          co.payload.validator == validator && co.payload.migrationId == domainMigrationId
+          co.payload.validator == validator &&
+            (co.payload.migrationId == domainMigrationId || co.payload.migrationId == 0L)
         ) { contract =>
           ValidatorAcsStoreRowData(
             contract = contract,
