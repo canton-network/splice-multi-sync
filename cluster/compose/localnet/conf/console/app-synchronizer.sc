@@ -94,3 +94,34 @@ utils.retry_until_true {
     .trafficControl
     .isDefined
 }
+
+// The app-synchronizer only admits participants its owner has permissioned. The permissions go on
+// before the restriction, so the participants already connected keep their access.
+multiSyncParticipants.foreach { participant =>
+  `app-sequencer`.topology.participant_synchronizer_permissions.propose(
+    appSynchronizerId.logical,
+    participant.id,
+    ParticipantPermission.Submission,
+  )
+}
+
+utils.retry_until_true {
+  multiSyncParticipants.forall(participant =>
+    `app-sequencer`.topology.participant_synchronizer_permissions
+      .find(appSynchronizerId.logical, participant.id)
+      .isDefined
+  )
+}
+
+`app-sequencer`.topology.synchronizer_parameters.propose_update(
+  appSynchronizerId.logical,
+  _.update(onboardingRestriction = OnboardingRestriction.RestrictedOpen),
+  signedBy = Some(`app-sequencer`.id.uid.namespace.fingerprint),
+)
+
+// Wait for the restriction to become effective before the console exits.
+utils.retry_until_true {
+  `app-sequencer`.topology.synchronizer_parameters
+    .get_dynamic_synchronizer_parameters(appSynchronizerId.logical)
+    .onboardingRestriction == OnboardingRestriction.RestrictedOpen
+}
