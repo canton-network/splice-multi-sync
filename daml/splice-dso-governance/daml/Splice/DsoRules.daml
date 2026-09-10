@@ -30,7 +30,7 @@ import Splice.Wallet.Subscriptions
 -- `RegisteredSynchronizer` (PoC): created by `DsoRules_RegisterSynchronizer` below; the template
 -- itself lives in splice-amulet because AmuletRules must be able to fetch it.
 import Splice.DecentralizedSynchronizer (MemberTraffic, RegisteredSynchronizer(..),
-  GovernanceParameters, RegisteredSynchronizer_SetGovernanceParameters,
+  RegisteredSynchronizer_SetGovernanceParameters,
   RegisteredSynchronizer_SetGovernanceParametersResult, DedicatedSynchronizerState(..))
 
 import qualified Splice.CometBft as CometBft
