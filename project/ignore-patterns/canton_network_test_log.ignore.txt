@@ -98,9 +98,6 @@ Consensus not reached.*BftScanConnection:TimeBasedTestNetPreviewIntegrationTest.
 # Scope the ignore to the two triggers that call these reads so real
 # BFT disagreements elsewhere still surface.
 The following Scan URLs disagreed with consensus.*BftScanConnection:.*"span-name":"(SummarizingMiningRoundTrigger|CalculateRewardsTrigger)"
-# The same two reads emit "Consensus not reached." when no peer converges
-# at all, which the per-test ignores above cover only for some suites.
-Consensus not reached.*BftScanConnection:.*"span-name":"(SummarizingMiningRoundTrigger|CalculateRewardsTrigger)"
 
 # internal selenium error. Potentially intermittent
 Exception managing firefox: error sending request for url .* http2 error: stream error received: refused stream before processing any application
