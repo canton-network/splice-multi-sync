@@ -114,6 +114,9 @@ class SyncOperatorApp(
       synchronizerId <- appInitStep("Get the synchronizer id from the sequencer") {
         servedSynchronizerId(sequencerAdminConnection)
       }
+      _ <- appInitStep("Check the synchronizer runs traffic control") {
+        requireTrafficControl(sequencerAdminConnection, synchronizerId)
+      }
       storeKey = SyncOperatorStore.Key(
         operatorParty = partyId,
         dsoParty = dsoParty,
@@ -178,6 +181,29 @@ class SyncOperatorApp(
       )
     }
   }
+
+  /** This app adjusts traffic control but never turns it on, which would strand members that have
+    * no traffic yet.
+    */
+  private def requireTrafficControl(
+      sequencerAdminConnection: SequencerAdminConnection,
+      synchronizerId: SynchronizerId,
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    sequencerAdminConnection
+      .getSynchronizerParametersState(synchronizerId)
+      .map(_.mapping.parameters.trafficControl)
+      .flatMap {
+        case Some(_) => Future.unit
+        case None =>
+          Future.failed(
+            Status.FAILED_PRECONDITION
+              .withDescription(
+                s"Synchronizer $synchronizerId does not run traffic control. Enable it on the " +
+                  "synchronizer before starting the sync operator."
+              )
+              .asRuntimeException()
+          )
+      }
 
   /** The synchronizer the configured sequencer serves. Waits while it is still initializing. */
   private def servedSynchronizerId(

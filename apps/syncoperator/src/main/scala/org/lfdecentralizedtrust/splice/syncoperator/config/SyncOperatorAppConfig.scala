@@ -35,9 +35,8 @@ case class SyncOperatorAppBackendConfig(
     parameters: SpliceParametersConfig = SpliceParametersConfig(batching = BatchingConfig()),
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration =
       NonNegativeFiniteDuration.ofSeconds(10),
-    // Traffic control for the synchronizer this operator serves. The base amount is what every
-    // member gets for free, zero so that all of its traffic is paid for; the rest are Canton's
-    // own defaults.
+    // Traffic control for the synchronizer this operator serves. Zero base amount so that all of
+    // its traffic is paid for.
     baseTrafficAmount: NonNegativeLong = NonNegativeLong.zero,
     readVsWriteScalingFactor: PositiveInt =
       TrafficControlParameters.DefaultReadVsWriteScalingFactor,

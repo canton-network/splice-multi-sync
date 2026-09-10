@@ -3,7 +3,6 @@
 
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.sequencing.TrafficControlParameters
@@ -44,10 +43,7 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
   ): Future[Seq[Task]] =
     store.lookupRegistration().flatMap {
       case None => Future.successful(Seq.empty)
-      case Some(_) =>
-        isReconciled().map(
-          if (_) Seq.empty else Seq(Task(synchronizerId, trafficControl.maxBaseTrafficAmount))
-        )
+      case Some(_) => isReconciled().map(if (_) Seq.empty else Seq(Task(synchronizerId)))
     }
 
   override protected def completeTask(task: Task)(implicit
@@ -57,7 +53,8 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
       .ensureDomainParameters(task.synchronizerId, withTrafficControl)
       .map(_ =>
         TaskSuccess(
-          s"Set the base traffic amount on ${task.synchronizerId} to ${task.baseTrafficAmount}"
+          s"Set the traffic control parameters on ${task.synchronizerId}, " +
+            s"base traffic amount ${trafficControl.maxBaseTrafficAmount}"
         )
       )
 
@@ -70,36 +67,28 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
       .getSynchronizerParametersState(synchronizerId)
       .map(state => state.mapping.parameters == withTrafficControl(state.mapping.parameters))
 
-  /** Applies the configured traffic control, turning it on if it is off. Parameters this operator
-    * does not configure keep whatever the synchronizer has.
-    */
+  /** Applies the configured parameters, leaving the rest as the synchronizer has them */
   private def withTrafficControl(
       parameters: DynamicSynchronizerParameters
   ): DynamicSynchronizerParameters =
-    parameters.tryUpdate(trafficControlParameters =
-      Some(
-        parameters.trafficControl
-          .getOrElse(TrafficControlParameters())
-          .copy(
+    parameters.trafficControl.fold(parameters)(current =>
+      parameters.tryUpdate(trafficControlParameters =
+        Some(
+          current.copy(
             maxBaseTrafficAmount = trafficControl.maxBaseTrafficAmount,
             readVsWriteScalingFactor = trafficControl.readVsWriteScalingFactor,
             maxBaseTrafficAccumulationDuration = trafficControl.maxBaseTrafficAccumulationDuration,
             freeConfirmationResponses = trafficControl.freeConfirmationResponses,
           )
+        )
       )
     )
 }
 
 object ReconcileDedicatedSynchronizerParametersTrigger {
 
-  final case class Task(
-      synchronizerId: SynchronizerId,
-      baseTrafficAmount: NonNegativeLong,
-  ) extends PrettyPrinting {
+  final case class Task(synchronizerId: SynchronizerId) extends PrettyPrinting {
     override def pretty: Pretty[this.type] =
-      prettyOfClass(
-        param("synchronizerId", _.synchronizerId),
-        param("baseTrafficAmount", _.baseTrafficAmount),
-      )
+      prettyOfClass(param("synchronizerId", _.synchronizerId))
   }
 }
