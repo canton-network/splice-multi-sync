@@ -4,7 +4,8 @@
 package org.lfdecentralizedtrust.splice.syncoperator.config
 
 import com.digitalasset.canton.config.*
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.sequencing.TrafficControlParameters
 import org.lfdecentralizedtrust.splice.config.{
   AutomationConfig,
   HttpClientConfig,
@@ -34,9 +35,14 @@ case class SyncOperatorAppBackendConfig(
     parameters: SpliceParametersConfig = SpliceParametersConfig(batching = BatchingConfig()),
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration =
       NonNegativeFiniteDuration.ofSeconds(10),
+    // Traffic control for the synchronizer this operator serves. Zero base amount so that all of
+    // its traffic is paid for.
     baseTrafficAmount: NonNegativeLong = NonNegativeLong.zero,
-    // Restricts onboarding to participants the synchronizer owner has explicitly permissioned.
-    permissionedSynchronizer: Boolean = true,
+    readVsWriteScalingFactor: PositiveInt =
+      TrafficControlParameters.DefaultReadVsWriteScalingFactor,
+    baseTrafficAccumulationDuration: NonNegativeFiniteDuration =
+      NonNegativeFiniteDuration.ofMinutes(10),
+    freeConfirmationResponses: Boolean = TrafficControlParameters.DefaultFreeConfirmationResponses,
     // Set to false to disable the DB-level exclusive lock that prevents two sync operator instances
     // from running concurrently against the same database.  Only disable for migration scenarios
     // where intentional overlap is required.

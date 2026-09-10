@@ -4,7 +4,7 @@
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
+import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.time.Clock
@@ -38,8 +38,7 @@ class SyncOperatorAutomationService(
     params: SpliceParametersConfig,
     sequencerConnection: SequencerAdminConnection,
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
-    baseTrafficAmount: NonNegativeLong,
-    permissionedSynchronizer: Boolean,
+    trafficControl: TrafficControlParameters,
     protected val loggerFactory: NamedLoggerFactory,
     packageVersionSupport: PackageVersionSupport,
 )(implicit
@@ -72,8 +71,7 @@ class SyncOperatorAutomationService(
       triggerContext,
       store,
       sequencerConnection,
-      baseTrafficAmount,
-      permissionedSynchronizer,
+      trafficControl,
     )
   )
 

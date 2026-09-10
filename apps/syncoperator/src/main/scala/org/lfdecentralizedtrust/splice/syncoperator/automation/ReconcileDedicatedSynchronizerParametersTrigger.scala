@@ -3,10 +3,8 @@
 
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
-import com.digitalasset.canton.protocol.OnboardingRestriction.{RestrictedOpen, UnrestrictedOpen}
 import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -29,8 +27,7 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
     override protected val context: TriggerContext,
     store: SyncOperatorStore,
     sequencerConnection: SequencerAdminConnection,
-    baseTrafficAmount: NonNegativeLong,
-    permissionedSynchronizer: Boolean,
+    trafficControl: TrafficControlParameters,
 )(implicit
     override val ec: ExecutionContext,
     mat: Materializer,
@@ -46,22 +43,18 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
   ): Future[Seq[Task]] =
     store.lookupRegistration().flatMap {
       case None => Future.successful(Seq.empty)
-      case Some(_) =>
-        isReconciled().map(
-          if (_) Seq.empty
-          else Seq(Task(synchronizerId, baseTrafficAmount, permissionedSynchronizer))
-        )
+      case Some(_) => isReconciled().map(if (_) Seq.empty else Seq(Task(synchronizerId)))
     }
 
   override protected def completeTask(task: Task)(implicit
       tc: TraceContext
   ): Future[TaskOutcome] =
     sequencerConnection
-      .ensureDomainParameters(task.synchronizerId, dedicatedParameters)
+      .ensureDomainParameters(task.synchronizerId, withTrafficControl)
       .map(_ =>
         TaskSuccess(
-          s"Set the base traffic amount on ${task.synchronizerId} to ${task.baseTrafficAmount}, " +
-            s"permissioned ${task.permissionedSynchronizer}"
+          s"Set the traffic control parameters on ${task.synchronizerId}, " +
+            s"base traffic amount ${trafficControl.maxBaseTrafficAmount}"
         )
       )
 
@@ -72,34 +65,30 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
   private def isReconciled()(implicit tc: TraceContext): Future[Boolean] =
     sequencerConnection
       .getSynchronizerParametersState(synchronizerId)
-      .map(state => state.mapping.parameters == dedicatedParameters(state.mapping.parameters))
+      .map(state => state.mapping.parameters == withTrafficControl(state.mapping.parameters))
 
-  /** Turns traffic control on if it is off, and forces the base amount either way. */
-  private def dedicatedParameters(
+  /** Applies the configured parameters, leaving the rest as the synchronizer has them */
+  private def withTrafficControl(
       parameters: DynamicSynchronizerParameters
   ): DynamicSynchronizerParameters =
-    parameters.tryUpdate(
-      trafficControlParameters = Some(
-        parameters.trafficControl
-          .getOrElse(TrafficControlParameters())
-          .copy(maxBaseTrafficAmount = baseTrafficAmount)
-      ),
-      onboardingRestriction = if (permissionedSynchronizer) RestrictedOpen else UnrestrictedOpen,
+    parameters.trafficControl.fold(parameters)(current =>
+      parameters.tryUpdate(trafficControlParameters =
+        Some(
+          current.copy(
+            maxBaseTrafficAmount = trafficControl.maxBaseTrafficAmount,
+            readVsWriteScalingFactor = trafficControl.readVsWriteScalingFactor,
+            maxBaseTrafficAccumulationDuration = trafficControl.maxBaseTrafficAccumulationDuration,
+            freeConfirmationResponses = trafficControl.freeConfirmationResponses,
+          )
+        )
+      )
     )
 }
 
 object ReconcileDedicatedSynchronizerParametersTrigger {
 
-  final case class Task(
-      synchronizerId: SynchronizerId,
-      baseTrafficAmount: NonNegativeLong,
-      permissionedSynchronizer: Boolean,
-  ) extends PrettyPrinting {
+  final case class Task(synchronizerId: SynchronizerId) extends PrettyPrinting {
     override def pretty: Pretty[this.type] =
-      prettyOfClass(
-        param("synchronizerId", _.synchronizerId),
-        param("baseTrafficAmount", _.baseTrafficAmount),
-        param("permissionedSynchronizer", _.permissionedSynchronizer),
-      )
+      prettyOfClass(param("synchronizerId", _.synchronizerId))
   }
 }

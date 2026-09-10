@@ -29,6 +29,8 @@ import org.lfdecentralizedtrust.splice.validator.config.{
 import org.lfdecentralizedtrust.splice.validator.store.db.DbValidatorStore
 
 import java.time.Instant
+import com.digitalasset.canton.util.MonadUtil
+
 import scala.concurrent.Future
 
 abstract class ValidatorStoreTest extends StoreTestBase with HasExecutionContext {
@@ -112,11 +114,41 @@ abstract class ValidatorStoreTest extends StoreTestBase with HasExecutionContext
           _ <- dummyDomain.create(topUpState1, createdEventSignatories = signatories)(
             store.multiDomainAcsStore
           )
-          result <- store.lookupValidatorTopUpStateWithOffset(dummyDomain)
+          result <- store.lookupValidatorTopUpStateWithOffset(dummyDomain, domainMigrationId)
         } yield {
           result.value.value.contractId should be(
             topUpState1.contractId
           )
+        }
+      }
+
+      // No dev environment reaches this: every one of them runs at migration 0.
+      "discriminate a registered synchronizer from a previous generation" in {
+        val signatories = Seq(validator)
+        for {
+          store <- mkStore(migrationId = nextDomainMigrationId)
+          currentGeneration = validatorTopUpState(dummyDomain, nextDomainMigrationId)
+          // Same synchronizer as the current generation, left behind by the migration.
+          previousGeneration = validatorTopUpState(dummyDomain, domainMigrationId)
+          registered = validatorTopUpState(dummy2Domain, migrationId = 0L)
+          _ <- MonadUtil.sequentialTraverse(
+            Seq(currentGeneration, previousGeneration, registered)
+          )(
+            dummyDomain.create(_, createdEventSignatories = signatories)(
+              store.multiDomainAcsStore
+            )
+          )
+          current <- store.lookupValidatorTopUpStateWithOffset(
+            dummyDomain,
+            nextDomainMigrationId,
+          )
+          previous <- store.lookupValidatorTopUpStateWithOffset(dummyDomain, domainMigrationId)
+          dedicated <- store.lookupValidatorTopUpStateWithOffset(dummy2Domain, 0L)
+        } yield {
+          current.value.value.contractId should be(currentGeneration.contractId)
+          previous.value.value.contractId should be(previousGeneration.contractId)
+          // Pinned to migration 0 and still ingested past it.
+          dedicated.value.value.contractId should be(registered.contractId)
         }
       }
     }
@@ -305,7 +337,10 @@ abstract class ValidatorStoreTest extends StoreTestBase with HasExecutionContext
     )
   }
 
-  private def validatorTopUpState(synchronizerId: SynchronizerId) = {
+  private def validatorTopUpState(
+      synchronizerId: SynchronizerId,
+      migrationId: Long = domainMigrationId,
+  ) = {
     val templateId = topUpCodegen.ValidatorTopUpState.TEMPLATE_ID_WITH_PACKAGE_ID
     val sequencerMemberId = "sequencerMemberId"
     val lastPurchasedAt = Instant.EPOCH
@@ -314,7 +349,7 @@ abstract class ValidatorStoreTest extends StoreTestBase with HasExecutionContext
       validator.toProtoPrimitive,
       sequencerMemberId,
       synchronizerId.toProtoPrimitive,
-      domainMigrationId,
+      migrationId,
       lastPurchasedAt,
     )
     contract(
@@ -340,7 +375,9 @@ abstract class ValidatorStoreTest extends StoreTestBase with HasExecutionContext
     )
   }
 
-  protected def mkStore(): Future[ValidatorStore]
+  protected def mkStore(
+      migrationId: Long = domainMigrationId
+  ): Future[ValidatorStore]
 
   lazy val domain = dummyDomain.toProtoPrimitive
   lazy val synchronizerAlias = SynchronizerAlias.tryCreate(domain)
@@ -358,7 +395,9 @@ class DbValidatorStoreTest
     with AcsJdbcTypes
     with AcsTables {
 
-  override protected def mkStore(): Future[DbValidatorStore] = {
+  override protected def mkStore(
+      migrationId: Long = domainMigrationId
+  ): Future[DbValidatorStore] = {
     val packageSignatures =
       ResourceTemplateDecoder.loadPackageSignaturesFromResources(
         DarResources.amulet.all ++
@@ -373,7 +412,7 @@ class DbValidatorStoreTest
       loggerFactory = loggerFactory,
       retryProvider =
         RetryProvider(loggerFactory, timeouts, FutureSupervisor.Noop, NoOpMetricsFactory),
-      domainMigrationId,
+      migrationId,
       participantId = mkParticipantId("ValidatorStoreTest"),
       IngestionConfig(),
       defaultLimit = HardLimit.tryCreate(Limit.DefaultMaxPageSize),

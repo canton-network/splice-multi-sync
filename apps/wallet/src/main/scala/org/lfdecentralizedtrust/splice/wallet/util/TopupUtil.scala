@@ -50,25 +50,34 @@ object TopupUtil {
       .map(_._1)
   } yield walletBalance
 
+  /** The balance the wallet can spend on traffic, or `None` where it does not bound the purchase. */
+  def topupBudget(
+      scanConnection: ScanConnection,
+      validatorWalletStore: UserWalletStore,
+  )(implicit
+      tc: TraceContext,
+      ec: ExecutionContext,
+      mat: Materializer,
+  ): Future[Option[BigDecimal]] = {
+    scanConnection.getAmuletRulesWithState().flatMap { amuletRules =>
+      // Since we auto-tap CC for traffic purchases on DevNet, we always have sufficient funds
+      // TODO(#851): Considering removing this once we remove auto-tapping in DevNet
+      if (amuletRules.payload.isDevNet) Future.successful(None)
+      else currentWalletBalance(scanConnection, validatorWalletStore).map(Some(_))
+    }
+  }
+
   def hasSufficientFundsForTopup(
       scanConnection: ScanConnection,
       validatorWalletStore: UserWalletStore,
       validatorTopupConfig: ValidatorTopupConfig,
       clock: Clock,
-  )(implicit tc: TraceContext, ec: ExecutionContext, mat: Materializer) = {
-    scanConnection.getAmuletRulesWithState().flatMap { amuletRules =>
-      // Since we auto-tap CC for traffic purchases on DevNet, we always have sufficient funds
-      // TODO(#851): Considering removing this once we remove auto-tapping in DevNet
-      if (amuletRules.payload.isDevNet) Future.successful(true)
-      else
-        for {
-          walletBalance <- currentWalletBalance(scanConnection, validatorWalletStore)
-          minBalanceForTopup <- minWalletBalanceForTopup(
-            scanConnection,
-            validatorTopupConfig,
-            clock,
-          )
-        } yield walletBalance >= minBalanceForTopup
+  )(implicit tc: TraceContext, ec: ExecutionContext, mat: Materializer): Future[Boolean] = {
+    topupBudget(scanConnection, validatorWalletStore).flatMap {
+      case None => Future.successful(true)
+      case Some(walletBalance) =>
+        minWalletBalanceForTopup(scanConnection, validatorTopupConfig, clock)
+          .map(walletBalance >= _)
     }
   }
 
