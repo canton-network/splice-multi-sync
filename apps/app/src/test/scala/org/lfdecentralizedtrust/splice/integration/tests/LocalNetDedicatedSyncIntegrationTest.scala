@@ -112,15 +112,18 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
 
       // The operator acts as the primary party of its ledger API user, onboarded by the
       // app-provider validator.
-      val operatorParty = eventually() {
+      val operatorParty = eventuallySucceeds(automationTimeout) {
         participant.ledger_api.users.get("sync-operator").primaryParty.value
       }
 
       val sv = sv_client("svClient").copy(token = Some(token))
+      // The SV serves its DSO info only once it is onboarded, which trails the compose start.
+      val svParty = eventuallySucceeds(automationTimeout)(sv.getDsoInfo().svParty)
+
       actAndCheck(automationTimeout)(
         "the DSO registers the synchronizer to the operator, which is what lets the operator act",
         sv.createVoteRequest(
-          sv.getDsoInfo().svParty.toProtoPrimitive,
+          svParty.toProtoPrimitive,
           new ARC_DsoRules(
             new SRARC_RegisterSynchronizer(
               new DsoRules_RegisterSynchronizer(
