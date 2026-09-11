@@ -5,7 +5,7 @@ module Splice.Wallet.BuyTrafficRequest where
 
 import Splice.Amulet
 import Splice.AmuletRules
-import Splice.DecentralizedSynchronizer (MemberTraffic)
+import Splice.DecentralizedSynchronizer (MemberTraffic, RegisteredSynchronizer)
 import Splice.Util
 
 
@@ -46,6 +46,9 @@ template BuyTrafficRequest
         inputs : [TransferInput]
         context : PaymentTransferContext
         walletProvider : Party
+        optRegisteredSynchronizer : Optional (ContractId RegisteredSynchronizer)
+          -- ^ Registration authorizing traffic on a dedicated synchronizer, disclosed by the
+          -- wallet provider. `None` buys on the decentralized synchronizer.
       controller endUserParty, walletProvider
       do
         now <- getTime
@@ -59,7 +62,7 @@ template BuyTrafficRequest
           migrationId
           trafficAmount
           expectedDso = Some dso
-          optRegisteredSynchronizer = None
+          optRegisteredSynchronizer
         let trackingInfo = BuyTrafficRequestTrackingInfo with ..
         pure BuyTrafficRequest_CompleteResult with
           purchasedTraffic = result.purchasedTraffic

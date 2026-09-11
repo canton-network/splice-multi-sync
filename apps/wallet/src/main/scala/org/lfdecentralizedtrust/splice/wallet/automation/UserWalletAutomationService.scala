@@ -121,6 +121,7 @@ class UserWalletAutomationService(
       store,
       treasury,
       connection(SpliceLedgerConnectionPriority.High),
+      scanConnection,
     )
   )
   if (automationConfig.enableAutomaticRewardsCollectionAndAmuletMerging) {
