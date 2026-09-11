@@ -294,6 +294,26 @@ paths:
             application/json:
               schema:
                 "$ref": "../../../../scan/src/main/openapi/scan.yaml#/components/schemas/ListUnclaimedDevelopmentFundCouponsResponse"
+  /v0/scan-proxy/synchronizers/{synchronizer_id}/registration:
+    get:
+      tags: [scan-proxy]
+      x-jvm-package: scanproxy
+      operationId: "lookupSynchronizerRegistration"
+      parameters:
+        - name: "synchronizer_id"
+          in: "path"
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                "$ref": "../../../../scan/src/main/openapi/scan.yaml#/components/schemas/LookupSynchronizerRegistrationResponse"
+        "404":
+          $ref: "../../../../common/src/main/openapi/common-external.yaml#/components/responses/404"
 components:
   schemas:
     # does not include the TTL, and the contracts are not-MaybeCached

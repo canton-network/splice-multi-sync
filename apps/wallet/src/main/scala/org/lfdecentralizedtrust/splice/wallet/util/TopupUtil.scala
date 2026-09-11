@@ -11,6 +11,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import org.apache.pekko.stream.Materializer
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.jdk.CollectionConverters.*
 
 object TopupUtil {
   def minWalletBalanceForTopup(
@@ -80,5 +81,23 @@ object TopupUtil {
           .map(walletBalance >= _)
     }
   }
+
+  /** The synchronizer ids the DSO authorizes traffic purchases on by membership. A purchase on
+    * any other synchronizer needs its `RegisteredSynchronizer` disclosed, at migration id 0.
+    */
+  def requiredSynchronizers(
+      scanConnection: ScanConnection,
+      clock: Clock,
+  )(implicit tc: TraceContext, ec: ExecutionContext): Future[Set[String]] =
+    scanConnection.getAmuletRulesWithState().map { amuletRules =>
+      AmuletConfigSchedule(amuletRules)
+        .getConfigAsOf(clock.now)
+        .decentralizedSynchronizer
+        .requiredSynchronizers
+        .map
+        .keySet
+        .asScala
+        .toSet
+    }
 
 }

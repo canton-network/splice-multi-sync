@@ -63,8 +63,8 @@ executeAmuletOperationRec executionContext inputs prevResults (operation::remain
     CO_BuyMemberTraffic trafficAmount memberId synchronizerId migrationId minTopupInterval topupStateCid optRegisteredSynchronizer -> do
       result <- handleBuyMemberTraffic trafficAmount memberId synchronizerId migrationId minTopupInterval topupStateCid optRegisteredSynchronizer
       handleResult COO_BuyMemberTraffic result
-    CO_CompleteBuyTrafficRequest cid -> do
-      result <- exercise cid (BuyTrafficRequest_Complete inputs executionContext.paymentContext executionContext.validator)
+    CO_CompleteBuyTrafficRequest cid optRegisteredSynchronizer -> do
+      result <- exercise cid (BuyTrafficRequest_Complete inputs executionContext.paymentContext executionContext.validator optRegisteredSynchronizer)
       handleResultBuyTraffic result
     CO_MergeTransferInputs -> do
         let transfer = mkMergeAmuletAndRewardsTransfer executionContext.endUser inputs
@@ -268,6 +268,9 @@ data AmuletOperation
         -- caller. `None` buys on the decentralized synchronizer.
   | CO_CompleteBuyTrafficRequest with
       trafficRequestCid: ContractId BuyTrafficRequest
+      optRegisteredSynchronizer : Optional (ContractId RegisteredSynchronizer)
+        -- ^ Registration authorizing traffic on a dedicated synchronizer, disclosed by the
+        -- caller. `None` buys on the decentralized synchronizer.
   | CO_Tap with
       tapAmount: Decimal
   | ExtAmuletOperation with

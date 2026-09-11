@@ -850,7 +850,7 @@ testBuyMemberTraffic = script do
   -- time-expired traffic requests cannot be completed or cancelled, only archived
   request1 <- createTrafficRequest minTopupAmount testParticipantId synchronizerId "request1" now
   executeAmuletOperationMustFail app provider2
-    (CO_CompleteBuyTrafficRequest request1)
+    (CO_CompleteBuyTrafficRequest request1 None)
     (expectMessageContains "The requirement 'Contract has not expired' was not met.")
   submitMustFail provider2.primaryParty $ exerciseCmd request1 BuyTrafficRequest_Cancel with reason = "not required"
   result <- submit provider2.primaryParty $ exerciseCmd request1 BuyTrafficRequest_Expire
@@ -861,7 +861,7 @@ testBuyMemberTraffic = script do
   -- unexpired traffic requests are completed successfully
   request2 <- createTrafficRequest minTopupAmount testParticipantId synchronizerId "request2" (now `addRelTime` minutes 1)
   COO_CompleteBuyTrafficRequest (requestTrafficCid, trackingInfo) <- executeAmuletOperation app provider2 $
-    CO_CompleteBuyTrafficRequest request2
+    CO_CompleteBuyTrafficRequest request2 None
   Some requestedTraffic <- queryContractId @MemberTraffic app.dso requestTrafficCid
   requestedTraffic.totalPurchased === minTopupAmount
   requestedTraffic.memberId === testParticipantId
@@ -935,6 +935,63 @@ testBuyMemberTrafficForRegisteredSynchronizer = script do
   Some traffic <- queryContractId @MemberTraffic app.dso trafficCid
   -- the registration's operator becomes an observer on the purchase record
   traffic.operator === Some operator
+
+  pure ()
+
+
+testBuyTrafficRequestForRegisteredSynchronizer : Script ()
+testBuyTrafficRequestForRegisteredSynchronizer = script do
+  DefaultAppWithUsers{..} <- setupDefaultAppWithUsers
+  runNextIssuance app
+  runAmuletDepositBots app
+
+  now <- getTime
+  [(_, amuletRules)] <- query @AmuletRules app.dso
+  let minTopupAmount = (Splice.Schedule.getValueAsOf now amuletRules.configSchedule).decentralizedSynchronizer.fees.minTopupAmount
+  let testParticipantId = "alice_validator_participant_id"
+
+  operator <- allocateParty "registeredSyncOperator"
+  let registeredSyncId = "registered-sync::1220deadbeef"
+  registeredCid <- submit app.dso $ createCmd RegisteredSynchronizer with
+    dso = app.dso
+    synchronizerId = registeredSyncId
+    operator
+    governanceParameters = None
+
+  aliceInstall <- submit (actAs alice.primaryParty <> actAs aliceValidator.primaryParty) $ createCmd $ WalletAppInstall with
+    endUserParty = alice.primaryParty
+    endUserName = "alice_wallet_user"
+    dsoParty = app.dso
+    validatorParty = aliceValidator.primaryParty
+  _ <- tap app alice 10.0
+
+  result <- submit (actAs aliceValidator.primaryParty <> readAs alice.primaryParty) $
+    exerciseCmd aliceInstall $ WalletAppInstall_CreateBuyTrafficRequest with
+      trafficAmount = minTopupAmount
+      memberId = testParticipantId
+      synchronizerId = registeredSyncId
+      -- a registered synchronizer is pinned to migration id 0
+      migrationId = 0
+      trackingId = "request1"
+      expiresAt = now `addRelTime` minutes 1
+  let request = result.buyTrafficRequest
+
+  -- without the registration the synchronizer is unknown to AmuletRules
+  executeAmuletOperationMustFail app alice
+    (CO_CompleteBuyTrafficRequest request None)
+    (expectFailureStatus \fs ->
+      fs.errorId == "splice.lfdecentralizedtrust.org/unknown-synchronizer" &&
+        fs.meta == TextMap.fromList [("synchronizerId", registeredSyncId)])
+
+  -- with it the purchase lands and carries the operator as observer
+  COO_CompleteBuyTrafficRequest (trafficCid, trackingInfo) <- executeAmuletOperation app alice $
+    CO_CompleteBuyTrafficRequest request (Some registeredCid)
+  Some traffic <- queryContractId @MemberTraffic app.dso trafficCid
+  traffic.synchronizerId === registeredSyncId
+  traffic.totalPurchased === minTopupAmount
+  traffic.operator === Some operator
+  trackingInfo.trackingId === "request1"
+  trackingInfo.endUserParty === alice.primaryParty
 
   pure ()
 
