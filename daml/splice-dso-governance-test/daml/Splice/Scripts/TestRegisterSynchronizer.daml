@@ -46,13 +46,12 @@ test_RegisterSynchronizer_viaVote = do
         operator
 
   -- The registration now exists on-ledger with exactly the fields we voted for.
-  registrations <- query @RegisteredSynchronizer dso
-  case registrations of
-    [(_cid, reg)] -> do
-      reg.dso === dso
-      reg.synchronizerId === dedicatedSyncId
-      reg.operator === operator
-    _ -> abort $ "expected exactly one RegisteredSynchronizer, got " <> show (length registrations)
+  (_, reg) <- onlyRegistration dso
+  reg.dso === dso
+  reg.synchronizerId === dedicatedSyncId
+  reg.operator === operator
+  reg.governanceParameters === None
+  getDiscountFactor reg === 1.0
 
   -- The operator is an observer, so it can see its own registration.
   operatorView <- query @RegisteredSynchronizer operator
@@ -66,6 +65,52 @@ test_RegisterSynchronizer_viaVote = do
       st.operator === operator
       st.totalActivityReported === 0.0
     _ -> abort $ "expected exactly one DedicatedSynchronizerState, got " <> show (length states)
+
+-- | Set the governance parameters by vote, then replace them twice. A replacement archives the
+--   registration and recreates it, so exactly one is live throughout, and the setter always stores
+--   the block, including when a parameter is voted back to its default.
+test_SetSynchronizerGovernanceParameters_viaVote : Script ()
+test_SetSynchronizerGovernanceParameters_viaVote = do
+  (app, dso, (sv1, sv2, sv3, sv4)) <- initMainNet
+  operator <- allocateParty "dedicatedSyncOperator"
+  let dedicatedSyncId = "dedicated-sync::1220bebebebebebebebebebebebebebebebebebebebebebebebebebebebebebe"
+      svs = [sv1, sv2, sv3, sv4]
+      setDiscountTo cid f = initiateAndAcceptVote app svs $
+        ARC_DsoRules with
+          dsoAction = SRARC_SetSynchronizerGovernanceParameters DsoRules_SetSynchronizerGovernanceParameters with
+            registeredSynchronizerCid = cid
+            setGovernanceParameters = RegisteredSynchronizer_SetGovernanceParameters with
+              newGovernanceParameters = GovernanceParameters with discountFactor = f
+
+  initiateAndAcceptVote app svs $
+    ARC_DsoRules with
+      dsoAction = SRARC_RegisterSynchronizer DsoRules_RegisterSynchronizer with
+        synchronizerId = dedicatedSyncId
+        operator
+
+  (registeredCid, _) <- onlyRegistration dso
+  setDiscountTo registeredCid 0.75
+  (discountedCid, discounted) <- onlyRegistration dso
+  discounted.governanceParameters === Some (GovernanceParameters with discountFactor = 0.75)
+
+  setDiscountTo discountedCid 0.5
+  (replacedCid, replaced) <- onlyRegistration dso
+  replaced.governanceParameters === Some (GovernanceParameters with discountFactor = 0.5)
+
+  -- Voting a parameter back to its default stores the block rather than clearing it: `None` means
+  -- nothing has been voted, which stops being well defined once the block has several parameters.
+  setDiscountTo replacedCid 1.0
+  (_, defaulted) <- onlyRegistration dso
+  defaulted.governanceParameters === Some (GovernanceParameters with discountFactor = 1.0)
+  getDiscountFactor defaulted === 1.0
+
+-- | The one live registration, which also asserts that a parameter vote replaced rather than added.
+onlyRegistration : Party -> Script (ContractId RegisteredSynchronizer, RegisteredSynchronizer)
+onlyRegistration dso = do
+  registrations <- query @RegisteredSynchronizer dso
+  case registrations of
+    [registration] -> pure registration
+    _ -> abort $ "expected exactly one RegisteredSynchronizer, got " <> show (length registrations)
 
 -- | Offboard a registered synchronizer via a supermajority vote: the registration is archived,
 --   which closes both economic paths (the buy needs the disclosed registration; reward
