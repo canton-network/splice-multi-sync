@@ -65,3 +65,32 @@ utils.retry_until_true {
     }
   }
 }
+
+// The app-synchronizer is bootstrapped with traffic control at Canton's defaults.
+// It can be further updated by the sync operator.
+`app-sequencer`.topology.synchronizer_parameters.propose_update(
+  appSynchronizerId.logical,
+  // The console TrafficControlParameters has no defaults, so every field is given.
+  _.update(trafficControl =
+    Some(
+      TrafficControlParameters(
+        maxBaseTrafficAmount = NonNegativeLong.tryCreate(10 * 20 * 1024),
+        readVsWriteScalingFactor = PositiveInt.tryCreate(200),
+        maxBaseTrafficAccumulationDuration = PositiveFiniteDuration.ofMinutes(10),
+        setBalanceRequestSubmissionWindowSize = PositiveFiniteDuration.ofMinutes(5),
+        enforceRateLimiting = true,
+        baseEventCost = NonNegativeLong.zero,
+        freeConfirmationResponses = false,
+      )
+    )
+  ),
+  signedBy = Some(`app-sequencer`.id.uid.namespace.fingerprint),
+)
+
+// Wait for the change to become effective before the console exits.
+utils.retry_until_true {
+  `app-sequencer`.topology.synchronizer_parameters
+    .get_dynamic_synchronizer_parameters(appSynchronizerId.logical)
+    .trafficControl
+    .isDefined
+}

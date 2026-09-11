@@ -16,15 +16,15 @@ import org.lfdecentralizedtrust.splice.store.db.AcsInterfaceViewRowData
 import org.lfdecentralizedtrust.splice.store.{AppStore, Limit, MultiDomainAcsStore}
 import org.lfdecentralizedtrust.splice.syncoperator.store.db.DbSyncOperatorStore
 import org.lfdecentralizedtrust.splice.syncoperator.store.db.SyncOperatorTables.SyncOperatorAcsStoreRowData
-import org.lfdecentralizedtrust.splice.util.TemplateJsonDecoder
+import org.lfdecentralizedtrust.splice.util.{ContractWithState, TemplateJsonDecoder}
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.OptionConverters.*
 
 /** Store of a sync operator app.
   *
-  * Ingests the `MemberTraffic` purchases made for this operator's synchronizer, which the buy choice
-  * makes it an observer of.
+  * Ingests the registration of this operator's synchronizer and the `MemberTraffic` purchases made
+  * for it, both of which the operator is an observer of.
   */
 trait SyncOperatorStore extends AppStore {
 
@@ -37,6 +37,19 @@ trait SyncOperatorStore extends AppStore {
   def getTotalPurchasedMemberTraffic(memberId: Member)(implicit
       tc: TraceContext
   ): Future[Long]
+
+  /** The registration authorizing Amulet-funded traffic on this operator's synchronizer, once the
+    * DSO has voted it through.
+    */
+  def lookupRegistration()(implicit tc: TraceContext): Future[Option[
+    ContractWithState[
+      splice.decentralizedsynchronizer.RegisteredSynchronizer.ContractId,
+      splice.decentralizedsynchronizer.RegisteredSynchronizer,
+    ]
+  ]] =
+    multiDomainAcsStore
+      .findAnyContractWithOffset(splice.decentralizedsynchronizer.RegisteredSynchronizer.COMPANION)
+      .map(_.value)
 }
 
 object SyncOperatorStore {
@@ -110,7 +123,12 @@ object SyncOperatorStore {
             memberTrafficDomain = Some(key.synchronizerId),
             totalTrafficPurchased = Some(contract.payload.totalPurchased),
           )
-        }
+        },
+        mkFilter(splice.decentralizedsynchronizer.RegisteredSynchronizer.COMPANION)(co =>
+          co.payload.dso == dso &&
+            co.payload.operator == operator &&
+            co.payload.synchronizerId == synchronizerId
+        )(SyncOperatorAcsStoreRowData(_)),
       ),
     )
   }

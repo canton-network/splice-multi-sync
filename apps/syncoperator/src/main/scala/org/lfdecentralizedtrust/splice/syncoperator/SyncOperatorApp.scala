@@ -10,6 +10,8 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.LifeCycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.resource.DbStorage
+import com.digitalasset.canton.sequencing.TrafficControlParameters
+import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
@@ -100,7 +102,8 @@ class SyncOperatorApp(
       participantId <- appInitStep("Get participant id") {
         participantAdminConnection.getParticipantId()
       }
-      dsoParty <- appInitStep("Get DSO party id") { scanConnection.getDsoPartyId() }
+      // Scan may still be initializing when this app starts, so wait for it rather than failing.
+      dsoParty <- appInitStep("Get DSO party id") { scanConnection.getDsoPartyIdWithRetries() }
       sequencerAdminConnection = new SequencerAdminConnection(
         config.sequencer.adminApi,
         appParameters.loggingConfig.api,
@@ -110,6 +113,9 @@ class SyncOperatorApp(
       )
       synchronizerId <- appInitStep("Get the synchronizer id from the sequencer") {
         servedSynchronizerId(sequencerAdminConnection)
+      }
+      _ <- appInitStep("Check the synchronizer runs traffic control") {
+        requireTrafficControl(sequencerAdminConnection, synchronizerId)
       }
       storeKey = SyncOperatorStore.Key(
         operatorParty = partyId,
@@ -151,6 +157,14 @@ class SyncOperatorApp(
         config.parameters,
         sequencerAdminConnection,
         config.trafficBalanceReconciliationDelay,
+        TrafficControlParameters(
+          maxBaseTrafficAmount = config.baseTrafficAmount,
+          readVsWriteScalingFactor = config.readVsWriteScalingFactor,
+          maxBaseTrafficAccumulationDuration = PositiveFiniteDuration.tryOfSeconds(
+            config.baseTrafficAccumulationDuration.duration.toSeconds
+          ),
+          freeConfirmationResponses = config.freeConfirmationResponses,
+        ),
         loggerFactory,
         packageVersionSupport,
       )
@@ -167,6 +181,29 @@ class SyncOperatorApp(
       )
     }
   }
+
+  /** This app adjusts traffic control but never turns it on, which would strand members that have
+    * no traffic yet.
+    */
+  private def requireTrafficControl(
+      sequencerAdminConnection: SequencerAdminConnection,
+      synchronizerId: SynchronizerId,
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    sequencerAdminConnection
+      .getSynchronizerParametersState(synchronizerId)
+      .map(_.mapping.parameters.trafficControl)
+      .flatMap {
+        case Some(_) => Future.unit
+        case None =>
+          Future.failed(
+            Status.FAILED_PRECONDITION
+              .withDescription(
+                s"Synchronizer $synchronizerId does not run traffic control. Enable it on the " +
+                  "synchronizer before starting the sync operator."
+              )
+              .asRuntimeException()
+          )
+      }
 
   /** The synchronizer the configured sequencer serves. Waits while it is still initializing. */
   private def servedSynchronizerId(

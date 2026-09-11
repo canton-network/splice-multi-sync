@@ -1,0 +1,94 @@
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package org.lfdecentralizedtrust.splice.syncoperator.automation
+
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
+import com.digitalasset.canton.sequencing.TrafficControlParameters
+import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.tracing.TraceContext
+import io.opentelemetry.api.trace.Tracer
+import org.apache.pekko.stream.Materializer
+import org.lfdecentralizedtrust.splice.automation.{
+  PollingParallelTaskExecutionTrigger,
+  TaskOutcome,
+  TaskSuccess,
+  TriggerContext,
+}
+import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
+import org.lfdecentralizedtrust.splice.syncoperator.automation.ReconcileDedicatedSynchronizerParametersTrigger.Task
+import org.lfdecentralizedtrust.splice.syncoperator.store.SyncOperatorStore
+
+import scala.concurrent.{ExecutionContext, Future}
+
+/** Reconciles the dynamic parameters of the dedicated synchronizer this operator serves. */
+class ReconcileDedicatedSynchronizerParametersTrigger(
+    override protected val context: TriggerContext,
+    store: SyncOperatorStore,
+    sequencerConnection: SequencerAdminConnection,
+    trafficControl: TrafficControlParameters,
+)(implicit
+    override val ec: ExecutionContext,
+    mat: Materializer,
+    override val tracer: Tracer,
+) extends PollingParallelTaskExecutionTrigger[Task] {
+
+  private val synchronizerId = store.key.synchronizerId
+
+  // Members onboard with charged topology transactions, and traffic cannot be bought for this
+  // synchronizer until the DSO has registered it.
+  override protected def retrieveTasks()(implicit
+      tc: TraceContext
+  ): Future[Seq[Task]] =
+    store.lookupRegistration().flatMap {
+      case None => Future.successful(Seq.empty)
+      case Some(_) => isReconciled().map(if (_) Seq.empty else Seq(Task(synchronizerId)))
+    }
+
+  override protected def completeTask(task: Task)(implicit
+      tc: TraceContext
+  ): Future[TaskOutcome] =
+    sequencerConnection
+      .ensureDomainParameters(task.synchronizerId, withTrafficControl)
+      .map(_ =>
+        TaskSuccess(
+          s"Set the traffic control parameters on ${task.synchronizerId}, " +
+            s"base traffic amount ${trafficControl.maxBaseTrafficAmount}"
+        )
+      )
+
+  override protected def isStaleTask(task: Task)(implicit
+      tc: TraceContext
+  ): Future[Boolean] = isReconciled()
+
+  private def isReconciled()(implicit tc: TraceContext): Future[Boolean] =
+    sequencerConnection
+      .getSynchronizerParametersState(synchronizerId)
+      .map(state => state.mapping.parameters == withTrafficControl(state.mapping.parameters))
+
+  /** Applies the configured parameters, leaving the rest as the synchronizer has them */
+  private def withTrafficControl(
+      parameters: DynamicSynchronizerParameters
+  ): DynamicSynchronizerParameters =
+    parameters.trafficControl.fold(parameters)(current =>
+      parameters.tryUpdate(trafficControlParameters =
+        Some(
+          current.copy(
+            maxBaseTrafficAmount = trafficControl.maxBaseTrafficAmount,
+            readVsWriteScalingFactor = trafficControl.readVsWriteScalingFactor,
+            maxBaseTrafficAccumulationDuration = trafficControl.maxBaseTrafficAccumulationDuration,
+            freeConfirmationResponses = trafficControl.freeConfirmationResponses,
+          )
+        )
+      )
+    )
+}
+
+object ReconcileDedicatedSynchronizerParametersTrigger {
+
+  final case class Task(synchronizerId: SynchronizerId) extends PrettyPrinting {
+    override def pretty: Pretty[this.type] =
+      prettyOfClass(param("synchronizerId", _.synchronizerId))
+  }
+}
