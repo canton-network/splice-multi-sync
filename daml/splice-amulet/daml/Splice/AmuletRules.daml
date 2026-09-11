@@ -2021,8 +2021,7 @@ data AmuletRules_BuyMemberTrafficResult = AmuletRules_BuyMemberTrafficResult wit
     senderChangeAmulet : Optional (ContractId Amulet)
     meta : Optional Metadata
     effectiveTrafficPrice : Optional Decimal
-      -- ^ The $/MB rate this purchase was priced at.
-      -- Note: Made optional as the addition of this field is checked by the upgrade checker.
+      -- ^ Made optional as the addition of this field is checked by the upgrade checker.
   deriving (Show, Eq)
 
 data AmuletRules_CreateExternalPartySetupProposalResult = AmuletRules_CreateExternalPartySetupProposalResult

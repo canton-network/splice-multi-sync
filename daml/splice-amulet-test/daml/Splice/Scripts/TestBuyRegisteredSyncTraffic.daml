@@ -84,8 +84,6 @@ test_BuyRegisteredSyncTraffic = do
   mt.synchronizerId === registeredSyncId
   mt.memberId === memberId
   mt.totalPurchased === 2_500_000
-  -- The recorded rate is what priced the purchase: deriving the USD cost forward from it
-  -- reproduces what was spent.
   Some effectiveTrafficPrice <- pure result.effectiveTrafficPrice
   intToDecimal mt.totalPurchased / 1e6 * effectiveTrafficPrice === mt.usdSpent
 
