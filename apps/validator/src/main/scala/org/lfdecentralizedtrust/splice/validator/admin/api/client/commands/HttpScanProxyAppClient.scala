@@ -16,6 +16,7 @@ import org.lfdecentralizedtrust.splice.util.{Codec, ContractWithState, DsoInfo, 
 import com.digitalasset.canton.topology.PartyId
 import org.lfdecentralizedtrust.splice.codegen.java.splice.amulet.UnclaimedDevelopmentFundCoupon
 import org.lfdecentralizedtrust.splice.codegen.java.splice.amuletrules.TransferPreapproval
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.RegisteredSynchronizer
 import org.lfdecentralizedtrust.splice.codegen.java.splice.externalpartyamuletrules.TransferCommandCounter
 
 import scala.concurrent.Future
@@ -160,6 +161,30 @@ object HttpScanProxyAppClient {
           .map(Some(_))
           .leftMap(_.toString)
       case scanProxy.LookupTransferPreapprovalByPartyResponse.NotFound(_) =>
+        Right(None)
+    }
+  }
+
+  case class LookupSynchronizerRegistration(synchronizerId: String)
+      extends ScanProxyBaseCommand[scanProxy.LookupSynchronizerRegistrationResponse, Option[
+        ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
+      ]] {
+
+    override def submitRequest(
+        client: Client,
+        headers: List[HttpHeader],
+    ) =
+      client.lookupSynchronizerRegistration(synchronizerId, headers)
+
+    override def handleOk()(implicit
+        decoder: TemplateJsonDecoder
+    ) = {
+      case scanProxy.LookupSynchronizerRegistrationResponse.OK(response) =>
+        ContractWithState
+          .fromHttp(RegisteredSynchronizer.COMPANION)(response.registration)
+          .map(Some(_))
+          .leftMap(_.toString)
+      case scanProxy.LookupSynchronizerRegistrationResponse.NotFound(_) =>
         Right(None)
     }
   }
