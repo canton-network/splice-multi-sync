@@ -111,7 +111,26 @@ instance HasCheckedFetch MemberTraffic ForMemberTraffic where
 
 -- Dedicated-synchronizer registration (PoC)
 ------------------------------------------------
---
+
+defaultDiscountFactor : Decimal
+defaultDiscountFactor = 1.0
+
+-- | The registration parameters DSO governance can change by vote, as against the identity fields
+--   fixed at registration. One record, so a further parameter costs no new choice or vote action.
+data GovernanceParameters = GovernanceParameters with
+    discountFactor : Decimal
+      -- ^ Multiplies this synchronizer's traffic price.
+  deriving (Show, Eq)
+
+-- | The multiplier a registration applies to its synchronizer's traffic price.
+getDiscountFactor : RegisteredSynchronizer -> Decimal
+getDiscountFactor reg =
+  optional defaultDiscountFactor (.discountFactor) reg.governanceParameters
+
+data RegisteredSynchronizer_SetGovernanceParametersResult = RegisteredSynchronizer_SetGovernanceParametersResult with
+    registeredSynchronizerCid : ContractId RegisteredSynchronizer
+  deriving (Show, Eq)
+
 -- A "dedicated synchronizer" is a synchronizer run by its own operator (stood up with the
 -- Splice software), separate from the decentralized synchronizer that hosts Amulet. Its traffic
 -- is funded by burning Amulet on the decentralized synchronizer. Before any Amulet can be
@@ -136,11 +155,14 @@ template RegisteredSynchronizer with
     operator : Party
       -- ^ The party operating the dedicated synchronizer. Observes this registration and every
       --   traffic purchase for its synchronizer (via the `operator` field on `MemberTraffic`).
+    governanceParameters : Optional GovernanceParameters
+      -- ^ Set by DSO governance. `None` is nothing voted yet, so every parameter is at its default.
   where
     signatory dso
     observer operator
 
     ensure not (T.isEmpty synchronizerId)
+        && (let f = getDiscountFactor this in f > 0.0 && f <= 1.0)
 
     -- Public read choice, mirroring OpenMiningRound_Fetch: lets a buyer who is neither
     -- signatory nor observer read this contract inside AmuletRules_BuyMemberTraffic
@@ -152,6 +174,15 @@ template RegisteredSynchronizer with
         p : Party -- the reader (buyer/provider) authorized to read this disclosed contract
       controller p
       do pure this
+
+    choice RegisteredSynchronizer_SetGovernanceParameters : RegisteredSynchronizer_SetGovernanceParametersResult
+      with
+        newGovernanceParameters : GovernanceParameters
+      controller dso
+      do
+        registeredSynchronizerCid <- create this with
+          governanceParameters = Some newGovernanceParameters
+        pure RegisteredSynchronizer_SetGovernanceParametersResult with registeredSynchronizerCid
 
 -- Group-id check for `fetchPublicReferenceData`: a `RegisteredSynchronizer` is scoped to the
 -- DSO party, so reads are validated against the expected DSO party (mirrors `MemberTraffic`).
