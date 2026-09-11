@@ -343,3 +343,4 @@ then each call to one of these endpoints is simply forwarded to the scan service
    * - **GET** /v0/scan-proxy/transfer-command-counter/{party}
    * - **GET** /v0/scan-proxy/transfer-command/status
    * - **GET** /v0/scan-proxy/transfer-preapprovals/by-party/{party
+   * - **GET** /v0/scan-proxy/synchronizers/{synchronizer_id}/registration

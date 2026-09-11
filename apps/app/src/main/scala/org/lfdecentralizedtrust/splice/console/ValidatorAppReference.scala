@@ -35,6 +35,7 @@ import com.digitalasset.canton.console.{BaseInspection, Help}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.PartyId
 import org.lfdecentralizedtrust.splice.codegen.java.splice.amuletrules.TransferPreapproval
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.RegisteredSynchronizer
 import org.lfdecentralizedtrust.splice.codegen.java.splice.api.token.{
   allocationinstructionv1,
   allocationv1,
@@ -382,6 +383,16 @@ abstract class ValidatorAppReference(
       consoleEnvironment.run {
         httpCommand(
           HttpScanProxyAppClient.LookupTransferPreapprovalByParty(party)
+        )
+      }
+    }
+
+    def lookupSynchronizerRegistration(
+        synchronizerId: String
+    ): Option[ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]] = {
+      consoleEnvironment.run {
+        httpCommand(
+          HttpScanProxyAppClient.LookupSynchronizerRegistration(synchronizerId)
         )
       }
     }

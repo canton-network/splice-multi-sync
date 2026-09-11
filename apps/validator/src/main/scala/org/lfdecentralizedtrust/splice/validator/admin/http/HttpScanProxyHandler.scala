@@ -262,6 +262,32 @@ class HttpScanProxyHandler(
     }
   }
 
+  override def lookupSynchronizerRegistration(
+      respond: ScanproxyResource.LookupSynchronizerRegistrationResponse.type
+  )(synchronizerId: String)(
+      tUser: AuthenticatedRequest
+  ): Future[ScanproxyResource.LookupSynchronizerRegistrationResponse] = {
+    implicit val AuthenticatedRequest(_, traceContext) = tUser
+    withSpan(s"$workflowId.lookupSynchronizerRegistration") { implicit traceContext => _ =>
+      for {
+        registrationOpt <- scanConnection.lookupSynchronizerRegistration(synchronizerId)
+      } yield {
+        registrationOpt match {
+          case None =>
+            respond.NotFound(
+              definitions.ErrorResponse(
+                s"No RegisteredSynchronizer found for synchronizer id: $synchronizerId"
+              )
+            )
+          case Some(registration) =>
+            respond.OK(
+              definitions.LookupSynchronizerRegistrationResponse(registration.toHttp)
+            )
+        }
+      }
+    }
+  }
+
   override def lookupTransferCommandCounterByParty(
       respond: ScanproxyResource.LookupTransferCommandCounterByPartyResponse.type
   )(party: String)(
