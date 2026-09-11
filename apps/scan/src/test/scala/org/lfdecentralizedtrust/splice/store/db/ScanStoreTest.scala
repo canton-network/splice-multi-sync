@@ -1512,6 +1512,7 @@ trait AmuletTransferUtil { self: StoreTestBase =>
       memberTrafficCid,
       Optional.empty(),
       Optional.empty(),
+      Optional.empty(),
     ).toValue
 
   def amuletRulesBuyMemberTrafficTransaction(

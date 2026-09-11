@@ -69,7 +69,9 @@ test_BuyRegisteredSyncTraffic = do
       memberId
       synchronizerId = registeredSyncId
       migrationId = 0
-      trafficAmount = 1_000_000
+      -- 2.5MB, not the 1MB minimum: the recorded rate and the USD spent are then different
+      -- numbers, so the assertion below cannot pass on a field wired to the wrong one.
+      trafficAmount = 2_500_000
       expectedDso = Some app.dso
       optRegisteredSynchronizer = Some registeredCid
 
@@ -81,7 +83,9 @@ test_BuyRegisteredSyncTraffic = do
   mt.operator === Some operator
   mt.synchronizerId === registeredSyncId
   mt.memberId === memberId
-  mt.totalPurchased === 1_000_000
+  mt.totalPurchased === 2_500_000
+  Some effectiveTrafficPrice <- pure result.effectiveTrafficPrice
+  intToDecimal mt.totalPurchased / 1e6 * effectiveTrafficPrice === mt.usdSpent
 
   -- The operator is an observer, so its node can pick up the purchase on-ledger.
   operatorView <- query @MemberTraffic operator
