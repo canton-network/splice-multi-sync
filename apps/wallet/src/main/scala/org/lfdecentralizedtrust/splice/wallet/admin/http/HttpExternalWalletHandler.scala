@@ -16,13 +16,15 @@ import org.lfdecentralizedtrust.splice.environment.ledger.api.DedupOffset
 import org.lfdecentralizedtrust.splice.http.v0.external.wallet.WalletResource as r0
 import org.lfdecentralizedtrust.splice.http.v0.{external, definitions as d0}
 import org.lfdecentralizedtrust.splice.store.MultiDomainAcsStore.QueryResult
-import org.lfdecentralizedtrust.splice.util.Codec
+import org.lfdecentralizedtrust.splice.util.{AmuletConfigSchedule, Codec}
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.BftScanConnection
 import org.lfdecentralizedtrust.splice.wallet.UserWalletManager
 import org.lfdecentralizedtrust.splice.wallet.util.TopupUtil
+import org.lfdecentralizedtrust.splice.wallet.util.TopupUtil.TrafficAuthorization
 import com.digitalasset.canton.config.RequireTypes.PositiveLong
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.{ExceptionRetryPolicy, ErrorKind}
 import io.grpc.Status
@@ -166,9 +168,33 @@ class HttpExternalWalletHandler(
             .asRuntimeException()
         )
       for {
+        amuletRules <- scanConnection.getAmuletRulesWithState()
+        decentralizedSynchronizerConfig = AmuletConfigSchedule(amuletRules)
+          .getConfigAsOf(clock.now)
+          .decentralizedSynchronizer
+        authorization <- TopupUtil.trafficAuthorization(
+          scanConnection,
+          decentralizedSynchronizerConfig,
+          synchronizerId.toProtoPrimitive,
+        )
+        migrationId = authorization match {
+          case TrafficAuthorization.Required => domainMigrationId
+          // AmuletRules pins a registered synchronizer to migration id 0.
+          case TrafficAuthorization.Registered(_) => 0L
+          case TrafficAuthorization.Unknown =>
+            throw io.grpc.Status.INVALID_ARGUMENT
+              .withDescription(s"Synchronizer ${synchronizerId} is not registered")
+              .asRuntimeException()
+        }
+        // Every validator party is hosted on the decentralized synchronizer, and a participant id
+        // is the same on every synchronizer. A dedicated synchronizer may not carry the party yet:
+        // with a zero base rate, the participant's topology broadcasts wait on this very purchase.
+        activeSynchronizerId = SynchronizerId.tryFromString(
+          decentralizedSynchronizerConfig.activeSynchronizer
+        )
         participantId <- participantAdminConnection
           .getPartyToParticipant(
-            synchronizerId,
+            activeSynchronizerId,
             receivingValidator,
             topologySnapshot = TopologySnapshot.Effective,
             // Follow the usual Canton APIs to use the effective state although for the currently short delay we have it doesn't really matter.
@@ -182,7 +208,7 @@ class HttpExternalWalletHandler(
                   if ex.getStatus.getCode == io.grpc.Status.Code.NOT_FOUND =>
                 throw io.grpc.Status.INVALID_ARGUMENT
                   .withDescription(
-                    s"Could not find participant hosting ${receivingValidator} on domain ${synchronizerId}"
+                    s"Could not find participant hosting ${receivingValidator} on domain ${activeSynchronizerId}"
                   )
                   .asRuntimeException()
               case other => other
@@ -192,7 +218,7 @@ class HttpExternalWalletHandler(
             case Seq() =>
               throw io.grpc.Status.INVALID_ARGUMENT
                 .withDescription(
-                  s"Could not find participant hosting ${receivingValidator} on domain ${synchronizerId}"
+                  s"Could not find participant hosting ${receivingValidator} on domain ${activeSynchronizerId}"
                 )
                 .asRuntimeException()
             case Seq(participantId) => participantId
@@ -203,22 +229,6 @@ class HttpExternalWalletHandler(
                 )
                 .asRuntimeException()
           }
-        requiredSynchronizers <- TopupUtil.requiredSynchronizers(scanConnection, clock)
-        migrationId <-
-          if (requiredSynchronizers.contains(synchronizerId.toProtoPrimitive))
-            Future.successful(domainMigrationId)
-          else
-            // Any other synchronizer is authorized by its registration, which AmuletRules pins
-            // to migration id 0.
-            scanConnection
-              .lookupSynchronizerRegistration(synchronizerId.toProtoPrimitive)
-              .map {
-                case Some(_) => 0L
-                case None =>
-                  throw io.grpc.Status.INVALID_ARGUMENT
-                    .withDescription(s"Synchronizer ${synchronizerId} is not registered")
-                    .asRuntimeException()
-              }
         result <- userWallet.store
           .getLatestBuyTrafficRequestEventByTrackingId(request.trackingId)
           .flatMap {

@@ -3,15 +3,18 @@
 
 package org.lfdecentralizedtrust.splice.wallet.util
 
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.{
+  AmuletDecentralizedSynchronizerConfig,
+  RegisteredSynchronizer,
+}
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.ScanConnection
-import org.lfdecentralizedtrust.splice.util.{AmuletConfigSchedule, SpliceUtil}
+import org.lfdecentralizedtrust.splice.util.{AmuletConfigSchedule, ContractWithState, SpliceUtil}
 import org.lfdecentralizedtrust.splice.wallet.store.UserWalletStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import org.apache.pekko.stream.Materializer
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.CollectionConverters.*
 
 object TopupUtil {
   def minWalletBalanceForTopup(
@@ -82,22 +85,35 @@ object TopupUtil {
     }
   }
 
-  /** The synchronizer ids the DSO authorizes traffic purchases on by membership. A purchase on
-    * any other synchronizer needs its `RegisteredSynchronizer` disclosed, at migration id 0.
-    */
-  def requiredSynchronizers(
+  /** How AmuletRules authorizes a traffic purchase on a synchronizer. */
+  sealed trait TrafficAuthorization
+  object TrafficAuthorization {
+
+    /** Listed in `requiredSynchronizers`: bought at the validator's migration id, without a
+      * registration.
+      */
+    case object Required extends TrafficAuthorization
+
+    /** Authorized by a `RegisteredSynchronizer` disclosed with the purchase, at migration id 0. */
+    final case class Registered(
+        registration: ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
+    ) extends TrafficAuthorization
+
+    /** Neither required nor registered: no purchase can succeed. */
+    case object Unknown extends TrafficAuthorization
+  }
+
+  def trafficAuthorization(
       scanConnection: ScanConnection,
-      clock: Clock,
-  )(implicit tc: TraceContext, ec: ExecutionContext): Future[Set[String]] =
-    scanConnection.getAmuletRulesWithState().map { amuletRules =>
-      AmuletConfigSchedule(amuletRules)
-        .getConfigAsOf(clock.now)
-        .decentralizedSynchronizer
-        .requiredSynchronizers
-        .map
-        .keySet
-        .asScala
-        .toSet
-    }
+      decentralizedSynchronizerConfig: AmuletDecentralizedSynchronizerConfig,
+      synchronizerId: String,
+  )(implicit tc: TraceContext, ec: ExecutionContext): Future[TrafficAuthorization] =
+    if (decentralizedSynchronizerConfig.requiredSynchronizers.map.containsKey(synchronizerId))
+      Future.successful(TrafficAuthorization.Required)
+    else
+      scanConnection.lookupSynchronizerRegistration(synchronizerId).map {
+        case Some(registration) => TrafficAuthorization.Registered(registration)
+        case None => TrafficAuthorization.Unknown
+      }
 
 }

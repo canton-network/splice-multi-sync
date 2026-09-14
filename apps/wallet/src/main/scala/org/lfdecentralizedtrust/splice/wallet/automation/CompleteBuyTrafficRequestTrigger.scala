@@ -19,6 +19,7 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.wallet.{
 import org.lfdecentralizedtrust.splice.environment.SpliceLedgerConnection
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.BftScanConnection
 import org.lfdecentralizedtrust.splice.util.{
+  AmuletConfigSchedule,
   AssignedContract,
   ContractWithState,
   DisclosedContracts,
@@ -26,6 +27,7 @@ import org.lfdecentralizedtrust.splice.util.{
 import org.lfdecentralizedtrust.splice.wallet.store.UserWalletStore
 import org.lfdecentralizedtrust.splice.wallet.treasury.TreasuryService
 import org.lfdecentralizedtrust.splice.wallet.util.TopupUtil
+import org.lfdecentralizedtrust.splice.wallet.util.TopupUtil.TrafficAuthorization
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
@@ -67,22 +69,29 @@ class CompleteBuyTrafficRequestTrigger(
     } else {
       val synchronizerId = trafficRequest.contract.payload.synchronizerId
       for {
-        requiredSynchronizers <- TopupUtil.requiredSynchronizers(scanConnection, context.clock)
-        needsRegistration = !requiredSynchronizers.contains(synchronizerId)
-        registration <-
-          if (needsRegistration) scanConnection.lookupSynchronizerRegistration(synchronizerId)
-          else Future.successful(None)
-        // Neither can succeed on-ledger. A non-zero migration id fails with a status the treasury
-        // does not map to a reason, which would retry until the request expires.
-        rejection =
-          if (!needsRegistration) None
-          else if (registration.isEmpty) Some(s"synchronizer $synchronizerId is not registered")
-          else if (trafficRequest.contract.payload.migrationId != 0L)
-            Some(s"registered synchronizer $synchronizerId requires migration id 0")
-          else None
-        outcome <- rejection match {
-          case Some(reason) => cancelTrafficRequest(trafficRequest, reason)
-          case None => completeTrafficRequest(trafficRequest, registration)
+        amuletRules <- scanConnection.getAmuletRulesWithState()
+        authorization <- TopupUtil.trafficAuthorization(
+          scanConnection,
+          AmuletConfigSchedule(amuletRules)
+            .getConfigAsOf(context.clock.now)
+            .decentralizedSynchronizer,
+          synchronizerId,
+        )
+        // A cancelled request could not succeed on-ledger. Cancelling names the reason instead
+        // of failing the task and leaving the request to expire.
+        outcome <- authorization match {
+          case TrafficAuthorization.Required =>
+            completeTrafficRequest(trafficRequest, None)
+          case TrafficAuthorization.Registered(_)
+              if trafficRequest.contract.payload.migrationId != 0L =>
+            cancelTrafficRequest(
+              trafficRequest,
+              s"registered synchronizer $synchronizerId requires migration id 0",
+            )
+          case TrafficAuthorization.Registered(registration) =>
+            completeTrafficRequest(trafficRequest, Some(registration))
+          case TrafficAuthorization.Unknown =>
+            cancelTrafficRequest(trafficRequest, s"synchronizer $synchronizerId is not registered")
         }
       } yield outcome
     }
