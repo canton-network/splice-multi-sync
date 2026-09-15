@@ -23,9 +23,9 @@ import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 import scala.sys.process.*
 
-/** Verifies that the sync operator serves the app-synchronizer as a dedicated synchronizer: it
-  * holds off until the DSO registers the synchronizer, then narrows the base rate to zero, and a
-  * member transacts on it only against traffic it has bought.
+/** Verifies that the sync operator serves the app-synchronizer as a dedicated synchronizer: it is
+  * bootstrapped with a zero base rate, the DSO registers it to the operator, and a member transacts
+  * on it only against traffic it has bought.
   *
   * This spins up the docker-compose localnet with the sync operator enabled (-O)
   */
@@ -106,8 +106,8 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
 
       def trafficState() = participant.traffic_control.traffic_state(appSynchronizerId)
 
-      clue("the synchronizer is bootstrapped with traffic control and a base rate to join on") {
-        trafficControl().value.maxBaseTrafficAmount.value should be > 0L
+      clue("the synchronizer is bootstrapped with traffic control at a zero base rate") {
+        trafficControl().value.maxBaseTrafficAmount shouldBe NonNegativeLong.zero
       }
 
       // The operator acts as the primary party of its ledger API user, onboarded by the
@@ -120,8 +120,8 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
       // The SV serves its DSO info only once it is onboarded, which trails the compose start.
       val svParty = eventuallySucceeds(automationTimeout)(sv.getDsoInfo().svParty)
 
-      actAndCheck(automationTimeout)(
-        "the DSO registers the synchronizer to the operator, which is what lets the operator act",
+      val (_, registration) = actAndCheck(automationTimeout)(
+        "the DSO registers the synchronizer to the operator",
         sv.createVoteRequest(
           svParty.toProtoPrimitive,
           new ARC_DsoRules(
@@ -138,8 +138,11 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
           None,
         ),
       )(
-        "the operator narrows the base rate to zero, leaving traffic control on",
-        _ => trafficControl().value.maxBaseTrafficAmount shouldBe NonNegativeLong.zero,
+        "Scan serves the registration",
+        _ =>
+          scancl("scanClient")
+            .lookupSynchronizerRegistration(appSynchronizerId.toProtoPrimitive)
+            .value,
       )
 
       clue("with a zero base rate the participant has no allowance of its own") {
@@ -157,13 +160,6 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
         )
       }
 
-      // The registration is what authorizes a purchase on this synchronizer, and Scan is the
-      // only source of its created-event blob.
-      val registration = eventually(automationTimeout) {
-        scancl("scanClient")
-          .lookupSynchronizerRegistration(appSynchronizerId.toProtoPrimitive)
-          .value
-      }
       val buyer = vc("providerValidatorClient").copy(token = Some(token)).getValidatorPartyId()
 
       actAndCheck(automationTimeout)(

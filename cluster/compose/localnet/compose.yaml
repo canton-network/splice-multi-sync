@@ -186,6 +186,7 @@ services:
         BASE_IMAGE: ${IMAGE_REPO}canton:${IMAGE_TAG}
     environment:
       - MULTI_SYNC=false
+      - SYNC_OPERATOR_PROFILE=${SYNC_OPERATOR_PROFILE}
     env_file:
       - ${LOCALNET_ENV_DIR}/common.env
       - *app-provider-auth-env
