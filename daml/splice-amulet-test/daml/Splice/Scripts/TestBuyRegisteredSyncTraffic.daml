@@ -276,6 +276,41 @@ test_RegisteredSynchronizer_ensureNonEmpty = do
     operator
     governanceParameters = None
 
+-- | A discounted registration prices the same traffic lower.
+test_BuyRegisteredSyncTraffic_discounted : Script ()
+test_BuyRegisteredSyncTraffic_discounted = do
+  d <- setupDefaultAppWithUsers
+  let app = d.app
+      provider = d.provider1
+  operator <- allocateParty "registeredSyncOperator"
+  let registeredSyncId = "registered-sync::1220dededededededededededededededededededededededededededededede"
+
+  registeredCid <- submit app.dso $ createCmd RegisteredSynchronizer with
+    dso = app.dso
+    synchronizerId = registeredSyncId
+    operator
+    governanceParameters = Some GovernanceParameters with discountFactor = 0.75
+
+  amuletCid <- tap app provider 1_000_000.0
+  context <- getTransferContext app provider None
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+
+  result <- submit (actAs provider.primaryParty <> readAs app.dso) $
+    exerciseCmd amuletRulesCid AmuletRules_BuyMemberTraffic with
+      inputs = [InputAmulet amuletCid]
+      context
+      provider = provider.primaryParty
+      memberId = "PAR::participant::1220abababababababababababababababababababababababababababababab"
+      synchronizerId = registeredSyncId
+      migrationId = 0
+      trafficAmount = 2_500_000
+      expectedDso = Some app.dso
+      optRegisteredSynchronizer = Some registeredCid
+
+  -- Fixture price is 1.0 USD/MB, so 2.5MB is 2.5 undiscounted and 1.875 at 0.75.
+  Some mt <- queryContractId app.dso result.purchasedTraffic
+  mt.usdSpent === 1.875
+
 -- | Negative: the discount factor multiplies a price, so the template `ensure` bounds it to (0, 1].
 test_RegisteredSynchronizer_ensureDiscountBounds : Script ()
 test_RegisteredSynchronizer_ensureDiscountBounds = do
