@@ -186,9 +186,8 @@ class HttpExternalWalletHandler(
               .withDescription(s"Synchronizer ${synchronizerId} is not registered")
               .asRuntimeException()
         }
-        // Every validator party is hosted on the decentralized synchronizer, and a participant id
-        // is the same on every synchronizer. A dedicated synchronizer may not carry the party yet:
-        // with a zero base rate, the participant's topology broadcasts wait on this very purchase.
+        // The participant id is the same on every synchronizer, and a dedicated one with a zero
+        // base rate may not carry the party until this purchase is granted.
         activeSynchronizerId = SynchronizerId.tryFromString(
           decentralizedSynchronizerConfig.activeSynchronizer
         )

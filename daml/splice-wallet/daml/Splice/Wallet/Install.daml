@@ -269,8 +269,7 @@ data AmuletOperation
   | CO_CompleteBuyTrafficRequest with
       trafficRequestCid: ContractId BuyTrafficRequest
       optRegisteredSynchronizer : Optional (ContractId RegisteredSynchronizer)
-        -- ^ Registration authorizing traffic on a dedicated synchronizer, disclosed by the
-        -- caller. `None` buys on the decentralized synchronizer.
+        -- ^ Registration of a dedicated synchronizer, disclosed by the caller.
   | CO_Tap with
       tapAmount: Decimal
   | ExtAmuletOperation with

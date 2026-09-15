@@ -395,9 +395,7 @@ components:
           type: string
         domain_id:
           description: |
-            The synchronizer to purchase traffic for: one the DSO lists in `requiredSynchronizers`,
-            or one it has registered through a `RegisteredSynchronizer`. Traffic for a registered
-            synchronizer is bought at migration id 0. Any other synchronizer is rejected with 400 Bad Request.
+            The domain to purchase traffic for.
           type: string
         traffic_amount:
           description: |

@@ -403,12 +403,6 @@ class TreasuryService(
         case "splice.lfdecentralizedtrust.org/maximum-outputs-exceeded" =>
           Some(new ITR_Other(message))
 
-        case "splice.lfdecentralizedtrust.org/registered-synchronizer-mismatch" =>
-          Some(new ITR_Other(message))
-
-        case "splice.lfdecentralizedtrust.org/non-zero-migration-id" =>
-          Some(new ITR_Other(message))
-
         case _ =>
           None
       }

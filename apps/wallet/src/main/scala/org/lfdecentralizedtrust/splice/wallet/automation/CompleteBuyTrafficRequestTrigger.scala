@@ -77,8 +77,7 @@ class CompleteBuyTrafficRequestTrigger(
             .decentralizedSynchronizer,
           synchronizerId,
         )
-        // A cancelled request could not succeed on-ledger. Cancelling names the reason instead
-        // of failing the task and leaving the request to expire.
+        // A cancelled request could not have succeeded on-ledger; cancelling names the reason.
         outcome <- authorization match {
           case TrafficAuthorization.Required =>
             completeTrafficRequest(trafficRequest, None)

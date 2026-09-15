@@ -47,8 +47,7 @@ template BuyTrafficRequest
         context : PaymentTransferContext
         walletProvider : Party
         optRegisteredSynchronizer : Optional (ContractId RegisteredSynchronizer)
-          -- ^ Registration authorizing traffic on a dedicated synchronizer, disclosed by the
-          -- wallet provider. `None` buys on the decentralized synchronizer.
+          -- ^ Registration of a dedicated synchronizer, disclosed by the wallet provider.
       controller endUserParty, walletProvider
       do
         now <- getTime
