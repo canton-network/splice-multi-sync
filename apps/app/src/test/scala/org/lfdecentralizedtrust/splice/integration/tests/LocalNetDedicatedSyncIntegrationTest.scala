@@ -120,8 +120,7 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
       // The SV serves its DSO info only once it is onboarded, which trails the compose start.
       val svParty = eventuallySucceeds(automationTimeout)(sv.getDsoInfo().svParty)
 
-      val (_, registration) = actAndCheck(automationTimeout)(
-        "the DSO registers the synchronizer to the operator",
+      clue("the DSO registers the synchronizer to the operator") {
         sv.createVoteRequest(
           svParty.toProtoPrimitive,
           new ARC_DsoRules(
@@ -136,14 +135,16 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
           "Register the app-synchronizer as a dedicated synchronizer",
           new RelTime(Duration.ofDays(1).toMillis * 1000),
           None,
-        ),
-      )(
-        "Scan serves the registration",
-        _ =>
-          scancl("scanClient")
-            .lookupSynchronizerRegistration(appSynchronizerId.toProtoPrimitive)
-            .value,
-      )
+        )
+      }
+
+      // Scan serves the registration once the vote has closed and Scan itself is up, which
+      // trails the compose start.
+      val registration = eventuallySucceeds(automationTimeout) {
+        scancl("scanClient")
+          .lookupSynchronizerRegistration(appSynchronizerId.toProtoPrimitive)
+          .value
+      }
 
       clue("with a zero base rate the participant has no allowance of its own") {
         eventually(automationTimeout) {
