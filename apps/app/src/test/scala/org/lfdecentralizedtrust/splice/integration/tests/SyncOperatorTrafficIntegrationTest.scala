@@ -152,6 +152,13 @@ class SyncOperatorTrafficIntegrationTest
         trafficState(member).map(_.state.baseTrafficRemainder.value) shouldBe Some(0L)
       }
 
+      // Alice's vetting for splitwell is still pending, so a restart has to pick it up rather than
+      // propose it again.
+      clue("alice's validator restarts before it has bought any traffic") {
+        aliceValidatorBackend.stop()
+        aliceValidatorBackend.startSync()
+      }
+
       actAndCheck(
         "alice buys traffic for the splitwell synchronizer",
         buyTraffic(aliceParty, member, synchronizerId, registration, dsoParty, firstPurchase),
