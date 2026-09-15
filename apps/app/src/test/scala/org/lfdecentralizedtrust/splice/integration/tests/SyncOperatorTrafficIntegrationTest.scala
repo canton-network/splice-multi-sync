@@ -142,6 +142,13 @@ class SyncOperatorTrafficIntegrationTest
         sv1ScanBackend.lookupSynchronizerRegistration(synchronizerId.toProtoPrimitive).value
       }
 
+      clue("the validator serves the registration to its wallet clients through the scan proxy") {
+        aliceValidatorBackend.scanProxy
+          .lookupSynchronizerRegistration(synchronizerId.toProtoPrimitive)
+          .value
+          .contractId shouldBe registration.contractId
+      }
+
       val aliceParty = onboardWalletUser(aliceWalletClient, aliceValidatorBackend)
       aliceWalletClient.tap(walletUsdToAmulet(200.0))
 
