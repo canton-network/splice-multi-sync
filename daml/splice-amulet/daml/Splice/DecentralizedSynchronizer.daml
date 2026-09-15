@@ -25,14 +25,14 @@ data AmuletDecentralizedSynchronizerConfig = AmuletDecentralizedSynchronizerConf
     activeSynchronizer : Text -- ^ The synchronizer-id of the synchronizer on which the SVs accepts transactions involving the
                         -- AmuletRules and related contracts, which must be one of the `requiredSynchronizers`.
     fees : SynchronizerFeesConfig -- ^ The fees charged for using the decentralized synchronizer. We use the same fees across all active decentralized synchronizers.
-  deriving (Eq, Show)
+  deriving (Eq, Show, Serializable)
 
 -- | The limits defining the free base rate delivered by the synchronizer.
 -- It defines the base rate as allowing at most burstAmount of sequencing traffic within a window of burstWindow seconds.
 data BaseRateTrafficLimits = BaseRateTrafficLimits with
     burstAmount: Int -- ^ The total burstAmount in bytes of sequencing traffic delivered over the burstWindow
     burstWindow: RelTime -- ^ Time window within which the burstAmount must not be exceeded
-  deriving (Eq, Show)
+  deriving (Eq, Show, Serializable)
 
 -- | Synchronizer fees related configuration to be tracked on the DsoRules contract
 data SynchronizerFeesConfig = SynchronizerFeesConfig with
@@ -45,7 +45,7 @@ data SynchronizerFeesConfig = SynchronizerFeesConfig with
     -- smaller one than the cost of a write.
     minTopupAmount: Int -- ^ The minimum amount of extra traffic (in bytes) that must be bought when buying extra traffic.
     -- This ensures that the SVs can amortize the cost of executing that transaction.
-  deriving (Eq, Show)
+  deriving (Eq, Show, Serializable)
 
 
 validAmuletDecentralizedSynchronizerConfig : AmuletDecentralizedSynchronizerConfig -> Bool
@@ -101,7 +101,7 @@ data ForMemberTraffic = ForMemberTraffic with
     memberId : Text
     synchronizerId : Text
     migrationId: Int
-  deriving (Eq, Show)
+  deriving (Eq, Show, Serializable)
 
 instance HasCheckedFetch MemberTraffic ForDso where
     contractGroupId MemberTraffic{..} = ForDso with ..
@@ -120,7 +120,7 @@ defaultDiscountFactor = 1.0
 data GovernanceParameters = GovernanceParameters with
     discountFactor : Decimal
       -- ^ Multiplies this synchronizer's traffic price.
-  deriving (Show, Eq)
+  deriving (Show, Eq, Serializable)
 
 -- | The multiplier a registration applies to its synchronizer's traffic price.
 getDiscountFactor : RegisteredSynchronizer -> Decimal
@@ -129,7 +129,7 @@ getDiscountFactor reg =
 
 data RegisteredSynchronizer_SetGovernanceParametersResult = RegisteredSynchronizer_SetGovernanceParametersResult with
     registeredSynchronizerCid : ContractId RegisteredSynchronizer
-  deriving (Show, Eq)
+  deriving (Show, Eq, Serializable)
 
 -- A "dedicated synchronizer" is a synchronizer run by its own operator (stood up with the
 -- Splice software), separate from the decentralized synchronizer that hosts Amulet. Its traffic
@@ -192,7 +192,7 @@ instance HasCheckedFetch RegisteredSynchronizer ForDso where
 data DedicatedSynchronizerState_ReportActivityResult = DedicatedSynchronizerState_ReportActivityResult with
     reportCid : ContractId ExtensionActivityReport
     stateCid : ContractId DedicatedSynchronizerState
-  deriving (Show, Eq)
+  deriving (Show, Eq, Serializable)
 
 -- PoC (extension reward reporting): per-synchronizer reporting state, created at registration.
 -- The operator reports its synchronizer's activity per round as a commitment: a Merkle root hash

@@ -15,6 +15,7 @@ data-dependencies:
   - ../splice-wallet/.daml/dist/splice-wallet-current.dar
   - ../splice-wallet-test/.daml/dist/splice-wallet-test-current.dar
 build-options:
+  - --explicit-serializable=yes
   - --ghc-option=-Wunused-binds
   - --ghc-option=-Wunused-matches
   - --target=2.1

@@ -23,6 +23,7 @@ data-dependencies:
   - ../../splice-token-standard-v2-test/.daml/dist/splice-token-standard-v2-test-current.dar
 
 build-options:
+  - --explicit-serializable=yes
   - --target=2.1
   - --ghc-option=-Wunused-binds
   - --ghc-option=-Wunused-matches

@@ -13,6 +13,7 @@ data-dependencies:
   - ../splice-util-batched-markers/.daml/dist/splice-util-batched-markers-current.dar
   - ../../token-standard/splice-token-standard-v1-test/.daml/dist/splice-token-standard-v1-test-current.dar
 build-options:
+  - --explicit-serializable=yes
   - --ghc-option=-Wunused-binds
   - --ghc-option=-Wunused-matches
   - --target=2.1

@@ -37,6 +37,39 @@ const NatPortUsageConfigSchema = z.object({
 
 export type NatPortUsageConfig = z.infer<typeof NatPortUsageConfigSchema>;
 
+const CloudArmorAlertsConfigSchema = z.object({
+  // Number of requests denied by Cloud Armor within the rolling window above which the
+  // alert fires.
+  deniedRequestsThreshold: z.number().min(0),
+});
+
+export type CloudArmorAlertsConfig = z.infer<typeof CloudArmorAlertsConfigSchema>;
+
+// Subset of the Cloud Armor config (owned by the infra stack, see
+// cluster/pulumi/infra/src/config.ts) that the alerts need. Parsed leniently, as the
+// infra stack is the one validating the full config.
+const CloudArmorConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  allRulesPreviewOnly: z.boolean().default(false),
+  // Cloud Armor rule decisions are only logged if the load balancer backend request
+  // logging is enabled, which the WAF log based alert depends on.
+  logging: z
+    .object({
+      enabled: z.boolean().default(false),
+    })
+    .prefault({}),
+  wafRules: z
+    .object({
+      enabled: z.boolean().default(true),
+      previewOnly: z.boolean().default(true),
+    })
+    .prefault({}),
+});
+
+export type CloudArmorConfig = z.infer<typeof CloudArmorConfigSchema>;
+
+export const cloudArmorConfig = CloudArmorConfigSchema.parse(clusterSubConfig('cloudArmor'));
+
 const MuteTimeWindowSchema = z.object({
   times: z.array(
     z.object({
@@ -67,6 +100,8 @@ const MonitoringConfigSchema = z
     grafanaPostgres: SplicePostgresSchema.default({ deployment: 'legacy-helm-chart' }),
     alerting: z.object({
       enableNoDataAlerts: z.boolean(),
+      // routes more alerts than just "mining rounds are not advancing" to #team-canton-network-high-prio-prod-alerts
+      enableExtraHighPrioAlerts: z.boolean().default(false),
       alerts: z.object({
         pruning: z.object({
           participantRetentionDays: z.number(),
@@ -172,6 +207,7 @@ const MonitoringConfigSchema = z
           tolerance: z.number(),
         }),
         gcpQuotas: GcpQuotasConfigSchema,
+        cloudArmor: CloudArmorAlertsConfigSchema.prefault({ deniedRequestsThreshold: 0 }),
         natPortUsage: NatPortUsageConfigSchema.default({
           thresholdPercent: 80,
           // `default 30` because every once in a while (likely due to dynamic port allocation),

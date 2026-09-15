@@ -27,6 +27,7 @@ data-dependencies:
   - ../dars/splice-api-featured-app-v2-1.0.0.dar
   - ../splice-api-reward-assignment-v1/.daml/dist/splice-api-reward-assignment-v1-current.dar
 build-options:
+  - --explicit-serializable=yes
   - --ghc-option=-Wunused-binds
   - --ghc-option=-Wunused-matches
   - --target=2.1

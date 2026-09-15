@@ -12,6 +12,7 @@ data-dependencies:
 - ../splice-wallet-payments/.daml/dist/splice-wallet-payments-current.dar
 - ../../token-standard/splice-token-standard-utils/.daml/dist/splice-token-standard-utils-current.dar
 build-options:
+  - --explicit-serializable=yes
   - --ghc-option=-Wunused-binds
   - --ghc-option=-Wunused-matches
   - -Wno-deprecated-exceptions

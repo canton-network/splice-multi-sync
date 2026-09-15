@@ -7,26 +7,37 @@
 
 release-notes:: Upcoming
 
-    - Deployment
-
-        - All Splice Helm charts now set ``automountServiceAccountToken: false`` on the pods they
-          deploy. Splice components do not use the Kubernetes API, so pods no longer receive an
-          API-server credential by default; this reduces the impact of a compromised pod in
-          clusters where permissions are bound to the namespace's ``default`` service account.
-          If your deployment relies on the mounted token, for example through a custom service
-          account set via ``serviceAccountName``, you can restore the previous behavior by setting
-          the new ``automountServiceAccountToken`` Helm value to ``true``.
-
     - SV App
 
-        - The public ``/v0/dso`` endpoint is deprecated and will be removed in 0.9.0
-          (see also the release notes for 0.5.5 for the original deprecation notice).
-          Use the public ``/v0/dso`` endpoint in the scan app if you need to fetch DSO info
-          without SV operator credentials.
-          A new ``/v1/dso`` endpoint has been added that returns the same response as ``/v0/dso``
-          but requires authorization as SV operator.
+        - The deprecated (in 0.8.0) public ``/v0/dso`` endpoint has been removed.
+          Use the public ``/v0/dso`` endpoint in the scan app if you need to fetch DSO info without SV operator credentials.
 
         - Joining SVs now fetch DSO info during onboarding from a scan instance
           (typically the sponsor's) instead of the sponsor SV app's deprecated public
           ``/v0/dso`` endpoint. The scan is configured via the new ``.joinWithKeyOnboarding.sponsorScanUrl`` Helm value.
           SVs who set the ``.joinWithKeyOnboarding`` key config must set it before upgrading.
+
+    - Docker Compose
+
+        - The validator deployment can now also deploy the Canton Wallet Gateway and the Portfolio UI with the new ``-g`` flag of ``start.sh``.
+
+    - Helm
+
+        - The deprecated `splice-domain` Helm chart has been removed.
+
+    - Scan App
+
+        - Added a new public ``/v0/events/latest-record-time`` endpoint that returns the latest
+          record time for which ``/v0/events`` will be able to return events.
+
+        - Added an automation to prune the DB tables having the temporary data used
+          by the verdict ingestion service and the traffic-based app reward calculations.
+
+          The default retention period is 1 week for this automation, after which the data will be removed from the DB.
+
+    - Validator App
+
+        - The minting-delegation reward collection for external parties now also collects
+          ``SvRewardCoupon`` rewards. An external party that is a beneficiary of SV rewards
+          will have those coupons minted on its behalf by its delegate, alongside the other
+          reward-coupon types.
