@@ -81,86 +81,54 @@ trait ParticipantAdminDarsConnection {
       TopologyAdminConnection.TopologyTransactionType.AuthorizedState,
     ).flatMap {
       case None =>
-        // A pending authorized mapping that has not reached this synchronizer yet is extended, not
-        // proposed again.
-        lookupVettingState(
-          None,
-          TopologyAdminConnection.TopologyTransactionType.AuthorizedState,
-        ).flatMap {
-          case None =>
-            for {
-              participantId <- getParticipantId()
-              _ <- ensureInitialMapping(
-                Right(
-                  addDarsToVettingState(
-                    dars,
-                    cantonFromDate,
-                    VettedPackages.tryCreate(
-                      participantId,
-                      Seq.empty,
-                    ),
-                  )
-                )
+        for {
+          participantId <- getParticipantId()
+          _ <- ensureInitialMapping(
+            Right(
+              addDarsToVettingState(
+                dars,
+                cantonFromDate,
+                VettedPackages.tryCreate(
+                  participantId,
+                  Seq.empty,
+                ),
               )
-            } yield ()
-          case Some(_) =>
-            ensureDarsVetted(
-              TopologyStoreId.Authorized,
-              None,
-              s"dars ${dars.map(_.packageId)} are in the authorized vetting pending for $synchronizerId from $fromDate",
-              dars,
-              cantonFromDate,
-              maxVettingDelay,
             )
-        }
+          )
+        } yield ()
       case Some(_) =>
-        ensureDarsVetted(
+        ensureTopologyMapping[VettedPackages](
           TopologyStoreId.Synchronizer(synchronizerId),
-          Some(synchronizerId),
           s"dars ${dars.map(_.packageId)} are vetted on $synchronizerId from $fromDate",
-          dars,
-          cantonFromDate,
-          maxVettingDelay,
-        )
+          topologyTransactionType =>
+            EitherT(
+              getVettingState(synchronizerId, topologyTransactionType).map { vettedPackages =>
+                if (
+                  dars
+                    .forall(dar =>
+                      vettedPackages.mapping.packages.exists(_.packageId == dar.packageId)
+                    )
+                ) {
+                  // we don't check the validFrom value, we assume that once it's part of the vetting state it can no longer be updated
+                  Right(vettedPackages)
+                } else {
+                  Left(vettedPackages)
+                }
+              }
+            ),
+          currentVettingState =>
+            Right(
+              addDarsToVettingState(
+                dars = dars,
+                packageValidFrom = cantonFromDate,
+                currentVetting = currentVettingState,
+              )
+            ),
+          RetryFor.Automation,
+          maxSubmissionDelay = maxVettingDelay,
+        ).map(_ => ())
     }
   }
-
-  private def ensureDarsVetted(
-      store: TopologyStoreId,
-      synchronizerId: Option[SynchronizerId],
-      description: String,
-      dars: Seq[DarResource],
-      cantonFromDate: Option[CantonTimestamp],
-      maxVettingDelay: Option[(Clock, NonNegativeFiniteDuration)],
-  )(implicit tc: TraceContext): Future[Unit] =
-    ensureTopologyMapping[VettedPackages](
-      store,
-      description,
-      topologyTransactionType =>
-        EitherT(
-          getVettingState(synchronizerId, topologyTransactionType).map { vettedPackages =>
-            if (
-              dars
-                .forall(dar => vettedPackages.mapping.packages.exists(_.packageId == dar.packageId))
-            ) {
-              // we don't check the validFrom value, we assume that once it's part of the vetting state it can no longer be updated
-              Right(vettedPackages)
-            } else {
-              Left(vettedPackages)
-            }
-          }
-        ),
-      currentVettingState =>
-        Right(
-          addDarsToVettingState(
-            dars = dars,
-            packageValidFrom = cantonFromDate,
-            currentVetting = currentVettingState,
-          )
-        ),
-      RetryFor.Automation,
-      maxSubmissionDelay = maxVettingDelay,
-    ).map(_ => ())
 
   // TODO(DACH-NY/splice#4803): unvet dependencies
   def unvetDars(

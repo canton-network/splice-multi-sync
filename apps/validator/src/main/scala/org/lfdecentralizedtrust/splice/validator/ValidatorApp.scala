@@ -6,7 +6,6 @@ package org.lfdecentralizedtrust.splice.validator
 import cats.implicits.{catsSyntaxApplicativeByValue as _, *}
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.javaapi.data.User
-import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -234,15 +233,6 @@ class ValidatorApp(
                 globalSynchronizerId: SynchronizerId <- scanConnection.getAmuletRulesDomain()(
                   traceContext
                 )
-                // vet on extra synchronizers as well
-                // TODO(#2742) make sure we also vet on later connection + on upgrades (and maybe move below logic)
-                extraSynchronizerAliases: Set[SynchronizerAlias] = config.domains.extra
-                  .map(_.alias)
-                  .toSet
-                allConnectedSynchronizers <- participantAdminConnection.listConnectedSynchronizers()
-                extraSynchronizerIds: Seq[SynchronizerId] = allConnectedSynchronizers
-                  .filter(result => extraSynchronizerAliases.contains(result.synchronizerAlias))
-                  .map(_.physicalSynchronizerId.logical)
                 packageVetting = new PackageVetting(
                   ValidatorPackageVettingTrigger.packages,
                   clock,
@@ -251,15 +241,13 @@ class ValidatorApp(
                   config.latestPackagesOnly,
                   config.parameters.enabledFeatures.enableUnsupportedDarsUnvetting,
                 )
-                _ <-
-                  MonadUtil.sequentialTraverse_(Seq(globalSynchronizerId) ++ extraSynchronizerIds) {
-                    synchronizerId =>
-                      packageVetting.vetCurrentPackages(
-                        synchronizerId,
-                        amuletRules,
-                        config.additionalPackagesToUnvet,
-                      )
-                  }
+                // Splice packages are only used on the global synchronizer, so extra synchronizers
+                // are not vetted.
+                _ <- packageVetting.vetCurrentPackages(
+                  globalSynchronizerId,
+                  amuletRules,
+                  config.additionalPackagesToUnvet,
+                )
               } yield ()
             }
             _ <- (config.migrateValidatorParty, config.participantBootstrappingDump) match {
