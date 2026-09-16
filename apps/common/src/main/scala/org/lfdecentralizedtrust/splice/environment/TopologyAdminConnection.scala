@@ -745,7 +745,7 @@ abstract class TopologyAdminConnection(
             isProposal = false,
           )
         }) { existingTxWithSameUniqueCode =>
-          if (existingTxWithSameUniqueCode.mapping == mapping) {
+          if (existingTxWithSameUniqueCode == mapping) {
             logger.info(
               s"Existing mapping found for ${mapping.code}: $mapping, returning existing transaction with serial ${existingTxWithSameUniqueCode.serial}"
             )
