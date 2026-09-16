@@ -130,6 +130,7 @@ class SyncOperatorTrafficIntegrationTest
               .exerciseDsoRules_RegisterSynchronizer(
                 synchronizerId.toProtoPrimitive,
                 operatorParty.toProtoPrimitive,
+                java.util.Optional.empty(),
               )
               .commands
               .asScala

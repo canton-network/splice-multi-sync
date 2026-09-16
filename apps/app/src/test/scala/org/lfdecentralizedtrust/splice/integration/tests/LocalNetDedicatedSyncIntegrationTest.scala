@@ -136,6 +136,7 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
               new DsoRules_RegisterSynchronizer(
                 appSynchronizerId.toProtoPrimitive,
                 operatorParty.toProtoPrimitive,
+                java.util.Optional.empty(),
               )
             )
           ),
