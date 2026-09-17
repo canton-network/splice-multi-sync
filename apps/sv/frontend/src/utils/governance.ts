@@ -31,6 +31,7 @@ import type {
   UnclaimedActivityRecordProposal,
   UnfeatureAppProposal,
   UpdateFeatureAppProposal,
+  RegisterSynchronizerProposal,
   UpdateSvRewardWeightProposal,
   YourVoteStatus,
 } from '../utils/types';
@@ -49,6 +50,7 @@ export const actionTagToTitle = (amuletName: string): Record<SupportedActionTag,
   SRARC_CreateUnallocatedUnclaimedActivityRecord: 'Create Unclaimed Activity Record',
   SRARC_SetConfig: 'Set Decentralized Synchronizer Operations (DSO) Rules Configuration',
   SRARC_UpdateSvRewardWeight: 'Update Super Validator Reward Weight',
+  SRARC_RegisterSynchronizer: 'Register Dedicated Synchronizer',
   SRARC_UpdateFeaturedAppRight: 'Update Featured Application',
 });
 
@@ -185,6 +187,12 @@ export function buildProposal(action: ActionRequiringConfirmation, dsoInfo?: Dso
     switch (dsoAction.tag) {
       case 'SRARC_OffboardSv':
         return createOffboardMemberProposal(dsoAction.value.sv);
+      case 'SRARC_RegisterSynchronizer':
+        return createRegisterSynchronizerProposal(
+          dsoAction.value.synchronizerId,
+          dsoAction.value.operator,
+          dsoAction.value.governanceParameters?.discountFactor
+        );
       case 'SRARC_UpdateSvRewardWeight': {
         const allSvInfos = dsoInfo?.dsoRules.payload.svs.entriesArray() || [];
         const svToUpdate = dsoAction.value.svParty;
@@ -253,6 +261,18 @@ function createUpdateFeatureAppProposal(
 function createRevokeFeatureAppProposal(rightContractId: string): UnfeatureAppProposal {
   return {
     rightContractId: rightContractId,
+  };
+}
+
+function createRegisterSynchronizerProposal(
+  synchronizerId: string,
+  operator: string,
+  discountFactor?: string
+): RegisterSynchronizerProposal {
+  return {
+    synchronizerId: synchronizerId,
+    operator: operator,
+    discountFactor: discountFactor,
   };
 }
 
