@@ -27,7 +27,7 @@ import org.lfdecentralizedtrust.splice.util.{
 import org.lfdecentralizedtrust.splice.wallet.store.UserWalletStore
 import org.lfdecentralizedtrust.splice.wallet.treasury.TreasuryService
 import org.lfdecentralizedtrust.splice.wallet.util.TopupUtil
-import org.lfdecentralizedtrust.splice.wallet.util.TopupUtil.TrafficAuthorization
+import org.lfdecentralizedtrust.splice.wallet.util.TopupUtil.TrafficSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
@@ -70,7 +70,7 @@ class CompleteBuyTrafficRequestTrigger(
       val synchronizerId = trafficRequest.contract.payload.synchronizerId
       for {
         amuletRules <- scanConnection.getAmuletRulesWithState()
-        authorization <- TopupUtil.trafficAuthorization(
+        trafficSynchronizer <- TopupUtil.trafficSynchronizer(
           scanConnection,
           AmuletConfigSchedule(amuletRules)
             .getConfigAsOf(context.clock.now)
@@ -78,18 +78,18 @@ class CompleteBuyTrafficRequestTrigger(
           synchronizerId,
         )
         // A cancelled request could not have succeeded on-ledger; cancelling names the reason.
-        outcome <- authorization match {
-          case TrafficAuthorization.Required =>
+        outcome <- trafficSynchronizer match {
+          case TrafficSynchronizer.Required =>
             completeTrafficRequest(trafficRequest, None)
-          case TrafficAuthorization.Registered(_)
+          case TrafficSynchronizer.Registered(_)
               if trafficRequest.contract.payload.migrationId != 0L =>
             cancelTrafficRequest(
               trafficRequest,
               s"registered synchronizer $synchronizerId requires migration id 0",
             )
-          case TrafficAuthorization.Registered(registration) =>
+          case TrafficSynchronizer.Registered(registration) =>
             completeTrafficRequest(trafficRequest, Some(registration))
-          case TrafficAuthorization.Unknown =>
+          case TrafficSynchronizer.Unknown =>
             cancelTrafficRequest(trafficRequest, s"synchronizer $synchronizerId is not registered")
         }
       } yield outcome

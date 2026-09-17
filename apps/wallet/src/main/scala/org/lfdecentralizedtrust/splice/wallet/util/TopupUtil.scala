@@ -85,35 +85,35 @@ object TopupUtil {
     }
   }
 
-  /** How AmuletRules authorizes a traffic purchase on a synchronizer. */
-  sealed trait TrafficAuthorization
-  object TrafficAuthorization {
+  /** The synchronizer a traffic purchase is for, as AmuletRules knows it. */
+  sealed trait TrafficSynchronizer
+  object TrafficSynchronizer {
 
     /** Listed in `requiredSynchronizers`: bought at the validator's migration id, without a
       * registration.
       */
-    case object Required extends TrafficAuthorization
+    case object Required extends TrafficSynchronizer
 
     /** Authorized by a `RegisteredSynchronizer` disclosed with the purchase, at migration id 0. */
     final case class Registered(
         registration: ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
-    ) extends TrafficAuthorization
+    ) extends TrafficSynchronizer
 
     /** Neither required nor registered: no purchase can succeed. */
-    case object Unknown extends TrafficAuthorization
+    case object Unknown extends TrafficSynchronizer
   }
 
-  def trafficAuthorization(
+  def trafficSynchronizer(
       scanConnection: ScanConnection,
       decentralizedSynchronizerConfig: AmuletDecentralizedSynchronizerConfig,
       synchronizerId: String,
-  )(implicit tc: TraceContext, ec: ExecutionContext): Future[TrafficAuthorization] =
+  )(implicit tc: TraceContext, ec: ExecutionContext): Future[TrafficSynchronizer] =
     if (decentralizedSynchronizerConfig.requiredSynchronizers.map.containsKey(synchronizerId))
-      Future.successful(TrafficAuthorization.Required)
+      Future.successful(TrafficSynchronizer.Required)
     else
       scanConnection.lookupSynchronizerRegistration(synchronizerId).map {
-        case Some(registration) => TrafficAuthorization.Registered(registration)
-        case None => TrafficAuthorization.Unknown
+        case Some(registration) => TrafficSynchronizer.Registered(registration)
+        case None => TrafficSynchronizer.Unknown
       }
 
 }

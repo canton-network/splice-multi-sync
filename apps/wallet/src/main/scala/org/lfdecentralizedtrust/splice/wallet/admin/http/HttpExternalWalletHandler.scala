@@ -20,7 +20,7 @@ import org.lfdecentralizedtrust.splice.util.{AmuletConfigSchedule, Codec}
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.BftScanConnection
 import org.lfdecentralizedtrust.splice.wallet.UserWalletManager
 import org.lfdecentralizedtrust.splice.wallet.util.TopupUtil
-import org.lfdecentralizedtrust.splice.wallet.util.TopupUtil.TrafficAuthorization
+import org.lfdecentralizedtrust.splice.wallet.util.TopupUtil.TrafficSynchronizer
 import com.digitalasset.canton.config.RequireTypes.PositiveLong
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.time.Clock
@@ -172,16 +172,16 @@ class HttpExternalWalletHandler(
         decentralizedSynchronizerConfig = AmuletConfigSchedule(amuletRules)
           .getConfigAsOf(clock.now)
           .decentralizedSynchronizer
-        authorization <- TopupUtil.trafficAuthorization(
+        trafficSynchronizer <- TopupUtil.trafficSynchronizer(
           scanConnection,
           decentralizedSynchronizerConfig,
           synchronizerId.toProtoPrimitive,
         )
-        migrationId = authorization match {
-          case TrafficAuthorization.Required => domainMigrationId
+        migrationId = trafficSynchronizer match {
+          case TrafficSynchronizer.Required => domainMigrationId
           // AmuletRules pins a registered synchronizer to migration id 0.
-          case TrafficAuthorization.Registered(_) => 0L
-          case TrafficAuthorization.Unknown =>
+          case TrafficSynchronizer.Registered(_) => 0L
+          case TrafficSynchronizer.Unknown =>
             throw io.grpc.Status.INVALID_ARGUMENT
               .withDescription(s"Synchronizer ${synchronizerId} is not registered")
               .asRuntimeException()
