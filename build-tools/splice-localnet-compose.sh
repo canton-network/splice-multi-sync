@@ -29,13 +29,17 @@ ACTION=""
 MULTI_SYNC_PROFILE=()
 DOWN_COMMAND=( stop )
 ALPHA_PROTOCOL_VERSION_ENV=""
+# The sync operator serves the app-synchronizer, so it runs with the multi-sync profile.
+SYNC_OPERATOR_PROFILE=off
+export SYNC_OPERATOR_PROFILE
 
 function usage() {
-    echo "Usage: $SCRIPTNAME <start|stop> [-D] [-M] [-u] [-p <protocol_version>]"
+    echo "Usage: $SCRIPTNAME <start|stop> [-D] [-M] [-O] [-u] [-p <protocol_version>]"
     echo ""
     echo "Options:"
     echo "  -D                        Completely tear down the localnet (using 'docker compose down') instead of just stopping the containers (using 'docker compose stop')"
     echo "  -M                        Start the localnet with the 'multi-sync' profile enabled"
+    echo "  -O                        Run the sync operator, serving the app-synchronizer as a dedicated synchronizer. Implies -M."
     echo "  -u                        Enable unstable Canton protocol versions. WARNING: This should be used only for temporary test environments that be be reset often."
     echo "  -p <protocol_version>     Set the PROTOCOL_VERSION environment variable to the specified value (e.g. 35)"
 }
@@ -64,6 +68,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -M)
             MULTI_SYNC_PROFILE=( --profile multi-sync )
+            ;;
+        -O)
+            MULTI_SYNC_PROFILE=( --profile multi-sync )
+            SYNC_OPERATOR_PROFILE=on
             ;;
         -p)
             shift
