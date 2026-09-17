@@ -16,10 +16,15 @@ import org.lfdecentralizedtrust.splice.environment.ledger.api.DedupOffset
 import org.lfdecentralizedtrust.splice.http.v0.external.wallet.WalletResource as r0
 import org.lfdecentralizedtrust.splice.http.v0.{external, definitions as d0}
 import org.lfdecentralizedtrust.splice.store.MultiDomainAcsStore.QueryResult
-import org.lfdecentralizedtrust.splice.util.Codec
+import org.lfdecentralizedtrust.splice.util.{AmuletConfigSchedule, Codec}
+import org.lfdecentralizedtrust.splice.scan.admin.api.client.BftScanConnection
 import org.lfdecentralizedtrust.splice.wallet.UserWalletManager
+import org.lfdecentralizedtrust.splice.wallet.util.TopupUtil
+import org.lfdecentralizedtrust.splice.wallet.util.TopupUtil.TrafficSynchronizer
 import com.digitalasset.canton.config.RequireTypes.PositiveLong
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.{ExceptionRetryPolicy, ErrorKind}
 import io.grpc.Status
@@ -32,10 +37,12 @@ import scala.concurrent.{ExecutionContext, Future}
 
 class HttpExternalWalletHandler(
     override protected val walletManager: UserWalletManager,
+    scanConnection: BftScanConnection,
     protected val loggerFactory: NamedLoggerFactory,
     retryProvider: RetryProvider,
     participantAdminConnection: ParticipantAdminConnection,
     domainMigrationId: Long,
+    clock: Clock,
 )(implicit
     ec: ExecutionContext,
     tracer: Tracer,
@@ -161,9 +168,32 @@ class HttpExternalWalletHandler(
             .asRuntimeException()
         )
       for {
+        amuletRules <- scanConnection.getAmuletRulesWithState()
+        decentralizedSynchronizerConfig = AmuletConfigSchedule(amuletRules)
+          .getConfigAsOf(clock.now)
+          .decentralizedSynchronizer
+        trafficSynchronizer <- TopupUtil.trafficSynchronizer(
+          scanConnection,
+          decentralizedSynchronizerConfig,
+          synchronizerId.toProtoPrimitive,
+        )
+        migrationId = trafficSynchronizer match {
+          case TrafficSynchronizer.Required => domainMigrationId
+          // AmuletRules pins a registered synchronizer to migration id 0.
+          case TrafficSynchronizer.Registered(_) => 0L
+          case TrafficSynchronizer.Unknown =>
+            throw io.grpc.Status.INVALID_ARGUMENT
+              .withDescription(s"Synchronizer ${synchronizerId} is not registered")
+              .asRuntimeException()
+        }
+        // The participant id is the same on every synchronizer, and a dedicated one with a zero
+        // base rate may not carry the party until this purchase is granted.
+        activeSynchronizerId = SynchronizerId.tryFromString(
+          decentralizedSynchronizerConfig.activeSynchronizer
+        )
         participantId <- participantAdminConnection
           .getPartyToParticipant(
-            synchronizerId,
+            activeSynchronizerId,
             receivingValidator,
             topologySnapshot = TopologySnapshot.Effective,
             // Follow the usual Canton APIs to use the effective state although for the currently short delay we have it doesn't really matter.
@@ -177,7 +207,7 @@ class HttpExternalWalletHandler(
                   if ex.getStatus.getCode == io.grpc.Status.Code.NOT_FOUND =>
                 throw io.grpc.Status.INVALID_ARGUMENT
                   .withDescription(
-                    s"Could not find participant hosting ${receivingValidator} on domain ${synchronizerId}"
+                    s"Could not find participant hosting ${receivingValidator} on domain ${activeSynchronizerId}"
                   )
                   .asRuntimeException()
               case other => other
@@ -187,7 +217,7 @@ class HttpExternalWalletHandler(
             case Seq() =>
               throw io.grpc.Status.INVALID_ARGUMENT
                 .withDescription(
-                  s"Could not find participant hosting ${receivingValidator} on domain ${synchronizerId}"
+                  s"Could not find participant hosting ${receivingValidator} on domain ${activeSynchronizerId}"
                 )
                 .asRuntimeException()
             case Seq(participantId) => participantId
@@ -223,7 +253,7 @@ class HttpExternalWalletHandler(
                         .exerciseWalletAppInstall_CreateBuyTrafficRequest(
                           participantId.toProtoPrimitive,
                           synchronizerId.toProtoPrimitive,
-                          domainMigrationId,
+                          migrationId,
                           trafficAmount.value,
                           expiresAt.toInstant,
                           request.trackingId,

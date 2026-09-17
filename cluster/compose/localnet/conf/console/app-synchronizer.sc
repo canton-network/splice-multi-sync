@@ -65,3 +65,65 @@ utils.retry_until_true {
     }
   }
 }
+
+// With the sync operator serving it (-O), the app-synchronizer runs traffic control with a zero
+// base rate, so members transact only against traffic they buy. Without it nothing is changed.
+if (sys.env.get("SYNC_OPERATOR_PROFILE").contains("on")) {
+  `app-sequencer`.topology.synchronizer_parameters.propose_update(
+    appSynchronizerId.logical,
+    // The console TrafficControlParameters has no defaults, so every field is given.
+    _.update(trafficControl =
+      Some(
+        TrafficControlParameters(
+          maxBaseTrafficAmount = NonNegativeLong.zero,
+          readVsWriteScalingFactor = PositiveInt.tryCreate(200),
+          maxBaseTrafficAccumulationDuration = PositiveFiniteDuration.ofMinutes(10),
+          setBalanceRequestSubmissionWindowSize = PositiveFiniteDuration.ofMinutes(5),
+          enforceRateLimiting = true,
+          baseEventCost = NonNegativeLong.zero,
+          freeConfirmationResponses = false,
+        )
+      )
+    ),
+    signedBy = Some(`app-sequencer`.id.uid.namespace.fingerprint),
+  )
+
+  // Wait for the change to become effective before the console exits.
+  utils.retry_until_true {
+    `app-sequencer`.topology.synchronizer_parameters
+      .get_dynamic_synchronizer_parameters(appSynchronizerId.logical)
+      .trafficControl
+      .isDefined
+  }
+}
+
+// The app-synchronizer only admits participants its owner has permissioned. The permissions go on
+// before the restriction, so the participants already connected keep their access.
+multiSyncParticipants.foreach { participant =>
+  `app-sequencer`.topology.participant_synchronizer_permissions.propose(
+    appSynchronizerId.logical,
+    participant.id,
+    ParticipantPermission.Submission,
+  )
+}
+
+utils.retry_until_true {
+  multiSyncParticipants.forall(participant =>
+    `app-sequencer`.topology.participant_synchronizer_permissions
+      .find(appSynchronizerId.logical, participant.id)
+      .isDefined
+  )
+}
+
+`app-sequencer`.topology.synchronizer_parameters.propose_update(
+  appSynchronizerId.logical,
+  _.update(onboardingRestriction = OnboardingRestriction.RestrictedOpen),
+  signedBy = Some(`app-sequencer`.id.uid.namespace.fingerprint),
+)
+
+// Wait for the restriction to become effective before the console exits.
+utils.retry_until_true {
+  `app-sequencer`.topology.synchronizer_parameters
+    .get_dynamic_synchronizer_parameters(appSynchronizerId.logical)
+    .onboardingRestriction == OnboardingRestriction.RestrictedOpen
+}
