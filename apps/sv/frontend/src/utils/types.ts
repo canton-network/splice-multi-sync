@@ -15,6 +15,7 @@ import type { OffboardSvFormData } from '../components/forms/OffboardSvForm';
 import type { SetAmuletConfigCompleteFormData } from '../components/forms/SetAmuletConfigRulesForm';
 import type { SetDsoConfigCompleteFormData } from '../components/forms/SetDsoConfigRulesForm';
 import type { UpdateSvRewardWeightFormData } from '../components/forms/UpdateSvRewardWeightForm';
+import type { RegisterSynchronizerFormData } from '../components/forms/RegisterSynchronizerForm';
 
 export interface OffBoardMemberProposal {
   memberToOffboard: string;
@@ -234,6 +235,7 @@ export interface UpdateFeatureAppFormData extends CommonProposalFormData {
 
 export type NonConfigProposalFormData =
   | UpdateSvRewardWeightFormData
+  | RegisterSynchronizerFormData
   | OffboardSvFormData
   | GrantRevokeFeaturedAppFormData
   | CreateUnallocatedUnclaimedActivityRecordFormData
