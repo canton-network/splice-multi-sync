@@ -8,6 +8,7 @@ import Splice.Api.Token.MetadataV1 as Api.Token.MetadataV1
 import DA.Action (void)
 import DA.Time
 import DA.Foldable (forA_)
+import DA.Traversable (forA)
 import DA.Optional (isSome)
 
 
@@ -178,7 +179,10 @@ executeAmuletOperationRec executionContext inputs prevResults (operation::remain
         if (amuletRules.isDevNet && isSome topupStateCidO)
           then do
             -- Calculate Amulet required to buy extra traffic
-            (trafficCostAmulet, _) <- computeSynchronizerFees executionContext.dso executionContext.validator trafficAmount amuletRules context.context
+            optRegistered <- forA optRegisteredSynchronizer $ \registeredCid ->
+              fetchPublicReferenceData (ForDso with dso = executionContext.dso) registeredCid
+                (RegisteredSynchronizer_Fetch executionContext.validator)
+            (trafficCostAmulet, _) <- computeSynchronizerFees executionContext.dso executionContext.validator trafficAmount optRegistered amuletRules context.context
             -- Tap enough Amulet to cover extra traffic purchase
             result <- exercise amuletRulesCid (AmuletRules_DevNet_Tap executionContext.validator trafficCostAmulet context.context.openMiningRound)
             -- Use only the newly created amulet as input to avoid amulet merges and having to pay for a new change amulet

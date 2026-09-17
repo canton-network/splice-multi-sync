@@ -4,6 +4,7 @@ import org.lfdecentralizedtrust.splice.auth.AuthUtil
 import org.lfdecentralizedtrust.splice.codegen.java.splice.amulet as amuletCodegen
 import org.lfdecentralizedtrust.splice.codegen.java.splice.wallet.payment as walletCodegen
 import org.lfdecentralizedtrust.splice.codegen.java.splice.wallet.transferpreapproval.TransferPreapprovalProposal
+import org.lfdecentralizedtrust.splice.config.ConfigTransforms
 import org.lfdecentralizedtrust.splice.http.v0.definitions.TapRequest
 import org.lfdecentralizedtrust.splice.http.v0.wallet.WalletClient
 import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.IntegrationTest
@@ -51,6 +52,12 @@ class WalletIntegrationTest
       .simpleTopology1Sv(this.getClass.getSimpleName)
       // TODO(#979) Consider removing this once domain config updates are less disruptive to carefully-timed batching tests.
       .withSequencerConnectionsFromScanDisabled()
+      // Payment requests are created on the splitwell synchronizer.
+      .addConfigTransforms((_, conf) =>
+        ConfigTransforms.updateAllValidatorAppConfigs_(c =>
+          c.copy(vetSplicePackagesOnExtraSynchronizers = true)
+        )(conf)
+      )
   }
 
   "A wallet" should {
