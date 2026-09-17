@@ -228,6 +228,8 @@ case class ValidatorAppBackendConfig(
     maxVettingDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofHours(24),
     // `latestPackagesOnly=true` is intended for LocalNet testing only and is not supported in production
     latestPackagesOnly: Boolean = false,
+    // Vet the Splice packages on the extra synchronizers.
+    vetSplicePackagesOnExtraSynchronizers: Boolean = false,
     acsStoreDescriptorUserVersion: Option[Long] = None,
     additionalPackagesToUnvet: Map[PackageName, Set[PackageVersion]] = Map.empty,
     // Set to false to disable the DB-level exclusive lock that prevents two validator instances
