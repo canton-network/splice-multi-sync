@@ -1,5 +1,6 @@
 package org.lfdecentralizedtrust.splice.integration.tests
 
+import com.digitalasset.canton.admin.api.client.data.OnboardingRestriction
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import monocle.Monocle.toAppliedFocusOps
@@ -24,8 +25,8 @@ import scala.jdk.OptionConverters.*
 import scala.sys.process.*
 
 /** Verifies that the sync operator serves the app-synchronizer as a dedicated synchronizer: it is
-  * bootstrapped with a zero base rate, the DSO registers it to the operator, and a member transacts
-  * on it only against traffic it has bought.
+  * bootstrapped with a zero base rate and admits only permissioned participants, the DSO registers
+  * it to the operator, and a member transacts on it only against traffic it has bought.
   *
   * This spins up the docker-compose localnet with the sync operator enabled (-O)
   */
@@ -99,15 +100,22 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
       val participant = participantClient("app-provider")
       val appSynchronizerId = synchronizerId(participant, "app-synchronizer")
 
-      def trafficControl() =
+      def dynamicParameters() =
         participant.topology.synchronizer_parameters
           .get_dynamic_synchronizer_parameters(appSynchronizerId)
-          .trafficControl
+
+      def trafficControl() = dynamicParameters().trafficControl
 
       def trafficState() = participant.traffic_control.traffic_state(appSynchronizerId)
 
       clue("the synchronizer is bootstrapped with traffic control at a zero base rate") {
         trafficControl().value.maxBaseTrafficAmount shouldBe NonNegativeLong.zero
+      }
+
+      clue("the synchronizer admits only permissioned participants, and this one is permissioned") {
+        dynamicParameters().onboardingRestriction shouldBe OnboardingRestriction.RestrictedOpen
+        participant.topology.participant_synchronizer_permissions
+          .find(appSynchronizerId, participant.id) should not be empty
       }
 
       // The operator acts as the primary party of its ledger API user, onboarded by the
