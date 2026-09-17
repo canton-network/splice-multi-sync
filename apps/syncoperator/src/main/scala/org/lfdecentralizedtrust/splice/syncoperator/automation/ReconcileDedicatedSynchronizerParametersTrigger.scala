@@ -36,15 +36,10 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
 
   private val synchronizerId = store.key.synchronizerId
 
-  // Members onboard with charged topology transactions, and traffic cannot be bought for this
-  // synchronizer until the DSO has registered it.
   override protected def retrieveTasks()(implicit
       tc: TraceContext
   ): Future[Seq[Task]] =
-    store.lookupRegistration().flatMap {
-      case None => Future.successful(Seq.empty)
-      case Some(_) => isReconciled().map(if (_) Seq.empty else Seq(Task(synchronizerId)))
-    }
+    isReconciled().map(if (_) Seq.empty else Seq(Task(synchronizerId)))
 
   override protected def completeTask(task: Task)(implicit
       tc: TraceContext

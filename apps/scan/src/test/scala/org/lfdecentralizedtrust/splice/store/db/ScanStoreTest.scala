@@ -1761,6 +1761,7 @@ trait AmuletTransferUtil { self: StoreTestBase =>
         dsoParty.toProtoPrimitive,
         synchronizerId,
         operator.toProtoPrimitive,
+        java.util.Optional.empty(),
       ),
     )
 
