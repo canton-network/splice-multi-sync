@@ -72,6 +72,7 @@ export const createProposalActions: {
   },
   { name: 'Set Amulet Rules Configuration', value: 'CRARC_SetConfig' },
   { name: 'Update Super Validator Reward Weight', value: 'SRARC_UpdateSvRewardWeight' },
+  { name: 'Register Dedicated Synchronizer', value: 'SRARC_RegisterSynchronizer' },
 ];
 
 export const getVoteResultStatus = (

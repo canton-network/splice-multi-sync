@@ -75,6 +75,12 @@ type ProposalSummaryProps = BaseProposalSummaryProps &
         expiresAt: string;
       }
     | {
+        formType: 'register-synchronizer';
+        synchronizerId: string;
+        operator: string;
+        discountFactor: string | undefined;
+      }
+    | {
         formType: 'update-right-weight';
         providerPartyId: string;
         rightCid: string;
@@ -235,6 +241,26 @@ export const ProposalSummary: React.FC<ProposalSummaryProps> = props => {
               <ReviewPartyId partyId={props.offboardMember} data-testid="offboardMember-party-id" />
             }
           />
+        )}
+
+        {formType === 'register-synchronizer' && (
+          <>
+            <ProposalReviewField
+              id="synchronizerId"
+              label="Synchronizer ID"
+              value={props.synchronizerId}
+            />
+            <ProposalReviewField
+              id="operator"
+              label="Synchronizer Operator"
+              value={<ReviewPartyId partyId={props.operator} data-testid="operator-party-id" />}
+            />
+            <ProposalReviewField
+              id="discountFactor"
+              label="Traffic Discount"
+              value={props.discountFactor ?? 'None, registered at the full price'}
+            />
+          </>
         )}
 
         {formType === 'create-unallocated-unclaimed-activity-record' && (
