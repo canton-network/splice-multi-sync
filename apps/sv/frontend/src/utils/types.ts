@@ -73,6 +73,13 @@ export interface ConfigChange {
   description?: string;
 }
 
+export interface RegisterSynchronizerProposal {
+  synchronizerId: string;
+  operator: string;
+  /** The discount factor the registration would be created with, or undefined for the default. */
+  discountFactor?: string;
+}
+
 export interface UpdateSvRewardWeightProposal {
   svToUpdate: string;
   currentWeight: string;
@@ -96,6 +103,7 @@ export type Proposal =
   | FeatureAppProposal
   | UnfeatureAppProposal
   | UpdateSvRewardWeightProposal
+  | RegisterSynchronizerProposal
   | UnclaimedActivityRecordProposal
   | AmuletRulesConfigProposal
   | DsoRulesConfigProposal
@@ -107,6 +115,7 @@ export type ProposalActionMap = {
   SRARC_GrantFeaturedAppRight: FeatureAppProposal;
   SRARC_RevokeFeaturedAppRight: UnfeatureAppProposal;
   SRARC_UpdateSvRewardWeight: UpdateSvRewardWeightProposal;
+  SRARC_RegisterSynchronizer: RegisterSynchronizerProposal;
   SRARC_CreateUnallocatedUnclaimedActivityRecord: UnclaimedActivityRecordProposal;
   CRARC_SetConfig: AmuletRulesConfigProposal;
   SRARC_SetConfig: DsoRulesConfigProposal;
@@ -149,6 +158,7 @@ export type SupportedActionTag =
   | 'SRARC_RevokeFeaturedAppRight'
   | 'SRARC_SetConfig'
   | 'SRARC_UpdateSvRewardWeight'
+  | 'SRARC_RegisterSynchronizer'
   | 'SRARC_CreateUnallocatedUnclaimedActivityRecord'
   | 'SRARC_UpdateFeaturedAppRight';
 
