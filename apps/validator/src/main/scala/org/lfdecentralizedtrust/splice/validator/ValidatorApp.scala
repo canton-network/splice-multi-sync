@@ -895,10 +895,12 @@ class ValidatorApp(
         (
           new HttpExternalWalletHandler(
             walletManager,
+            scanConnection,
             loggerFactory,
             retryProvider,
             participantAdminConnection,
             domainMigrationId,
+            clock,
           ),
           walletManager,
         )

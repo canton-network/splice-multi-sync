@@ -79,7 +79,7 @@ class WalletBuyTrafficRequestIntegrationTest
         val badSynchronizerId = SynchronizerId.tryFromString("dummy::domain")
         val errorString = {
           s"HTTP 400 Bad Request POST at '/api/validator/v0/wallet/buy-traffic-requests' on 127.0.0.1:5503. " +
-            s"Command failed, message: Could not find participant hosting $aliceValidatorParty on domain $badSynchronizerId"
+            s"Command failed, message: Synchronizer $badSynchronizerId is not registered"
         }
         failCreatingInvalidTrafficRequest(
           aliceWalletClient,
