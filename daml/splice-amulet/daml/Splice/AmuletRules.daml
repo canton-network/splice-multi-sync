@@ -326,7 +326,7 @@ template AmuletRules
           Left failureStatus -> failWithStatus failureStatus
           Right _ -> pure ()
         let optOperator = fmap (\registered -> registered.operator) optRegistered
-        (trafficCostAmulet, trafficCostUsd) <- computeSynchronizerFees dso provider trafficAmount this context
+        (trafficCostAmulet, trafficCostUsd) <- computeSynchronizerFees dso provider trafficAmount optRegistered this context
         (transferResult, meta) <- splitAndBurn (toInterfaceContractId self) provider trafficCostAmulet inputs context dso
           (getDevelopmentFundManagerBlacklist configUsd) "traffic purchase"
         -- create a new MemberTraffic contract for the purchased traffic
@@ -1901,14 +1901,16 @@ validateBuyMemberTrafficInputs configUsd optRegistered synchronizerId migrationI
       | otherwise = Right ()
 
 -- | Computing synchronizer fees
-computeSynchronizerFees : Party -> Party -> Int -> AmuletRules -> TransferContext -> Update (Decimal, Decimal)
-computeSynchronizerFees dso validator trafficAmount amuletRules context = do
+computeSynchronizerFees : Party -> Party -> Int -> Optional RegisteredSynchronizer -> AmuletRules -> TransferContext -> Update (Decimal, Decimal)
+computeSynchronizerFees dso validator trafficAmount optRegistered amuletRules context = do
   contextMiningRound <- fetchPublicReferenceData (ForDso dso) context.openMiningRound (OpenMiningRound_Fetch validator)
   -- compute traffic cost in USD
   configUsd <- getValueAsOfLedgerTime amuletRules.configSchedule
-  let extraTrafficPrice =
+  -- Multiplies the price, not the cost: the two differ under Numeric past four decimal places.
+  let effectiveTrafficPrice =
         fromOptional (configUsd.decentralizedSynchronizer.fees.extraTrafficPrice) contextMiningRound.trafficPrice
-  let trafficCostUsd = intToDecimal trafficAmount / 1e6 * extraTrafficPrice
+          * optional defaultDiscountFactor getDiscountFactor optRegistered
+  let trafficCostUsd = intToDecimal trafficAmount / 1e6 * effectiveTrafficPrice
   -- compute traffic cost in Amulet
   let trafficCostAmulet = trafficCostUsd / contextMiningRound.amuletPrice
   pure (trafficCostAmulet, trafficCostUsd)

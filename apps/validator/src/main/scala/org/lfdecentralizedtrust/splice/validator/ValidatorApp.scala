@@ -236,15 +236,19 @@ class ValidatorApp(
                 globalSynchronizerId: SynchronizerId <- scanConnection.getAmuletRulesDomain()(
                   traceContext
                 )
-                // vet on extra synchronizers as well
-                // TODO(#2742) make sure we also vet on later connection + on upgrades (and maybe move below logic)
-                extraSynchronizerAliases: Set[SynchronizerAlias] = config.domains.extra
-                  .map(_.alias)
-                  .toSet
-                allConnectedSynchronizers <- participantAdminConnection.listConnectedSynchronizers()
-                extraSynchronizerIds: Seq[SynchronizerId] = allConnectedSynchronizers
-                  .filter(result => extraSynchronizerAliases.contains(result.synchronizerAlias))
-                  .map(_.physicalSynchronizerId.logical)
+                extraSynchronizerIds: Seq[SynchronizerId] <-
+                  if (config.vetSplicePackagesOnExtraSynchronizers) {
+                    val extraSynchronizerAliases: Set[SynchronizerAlias] = config.domains.extra
+                      .map(_.alias)
+                      .toSet
+                    participantAdminConnection.listConnectedSynchronizers().map { connected =>
+                      connected
+                        .filter(result =>
+                          extraSynchronizerAliases.contains(result.synchronizerAlias)
+                        )
+                        .map(_.physicalSynchronizerId.logical)
+                    }
+                  } else Future.successful(Seq.empty)
                 packageVetting = new PackageVetting(
                   ValidatorPackageVettingTrigger.packages,
                   clock,
@@ -891,10 +895,12 @@ class ValidatorApp(
         (
           new HttpExternalWalletHandler(
             walletManager,
+            scanConnection,
             loggerFactory,
             retryProvider,
             participantAdminConnection,
             domainMigrationId,
+            clock,
           ),
           walletManager,
         )

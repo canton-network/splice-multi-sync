@@ -215,12 +215,28 @@ case class EnvironmentDefinition(
                   s"Expected exactly one trust certificate for ${validator.participantClient.id} on ${sync.synchronizerId} but got $existingEntries"
                 )
             }
+            // A certificate the participant has authorized but the synchronizer has not received
+            // yet, for example while the participant has no traffic on it.
+            val pending = validator.participantClient.topology.synchronizer_trust_certificates
+              .list(
+                Some(TopologyStoreId.Authorized),
+                filterUid = validator.participantClient.id.filterString,
+              )
+              .exists(cert =>
+                cert.item.synchronizerId == sync.synchronizerId &&
+                  cert.item.featureFlags
+                    .contains(ParticipantTopologyFeatureFlag.EnableMultiSynchronizer)
+              )
             if (
               existing.item.featureFlags
                 .contains(ParticipantTopologyFeatureFlag.EnableMultiSynchronizer)
             ) {
               logger.info(
                 s"Participant ${validator.participantClient.id} already has multi synchronizer feature flag enabled for ${sync.synchronizerId}"
+              )(TraceContext.empty)
+            } else if (pending) {
+              logger.info(
+                s"Participant ${validator.participantClient.id} has already proposed the multi synchronizer feature flag for ${sync.synchronizerId}, waiting for it to land"
               )(TraceContext.empty)
             } else {
               logger.info(

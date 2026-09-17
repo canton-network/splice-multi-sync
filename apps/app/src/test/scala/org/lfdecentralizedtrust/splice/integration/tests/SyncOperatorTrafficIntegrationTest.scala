@@ -17,6 +17,7 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.types.Round
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
 import org.lfdecentralizedtrust.splice.config.ConfigTransforms
+import org.lfdecentralizedtrust.splice.http.v0.definitions as d0
 import org.lfdecentralizedtrust.splice.integration.EnvironmentDefinition
 import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   IntegrationTest,
@@ -30,6 +31,7 @@ import org.lfdecentralizedtrust.splice.util.{
   WalletTestUtil,
 }
 import org.lfdecentralizedtrust.splice.validator.automation.TopupMemberTrafficTrigger
+import org.lfdecentralizedtrust.splice.wallet.store.TxLogEntry
 
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
@@ -46,6 +48,7 @@ class SyncOperatorTrafficIntegrationTest
 
   private val firstPurchase = 1_000_000L
   private val secondPurchase = 2_000_000L
+  private val walletRequestPurchase = 3_000_000L
   private val splitwellAlias = SynchronizerAlias.tryCreate("splitwell")
 
   override def environmentDefinition: SpliceEnvironmentDefinition =
@@ -142,6 +145,13 @@ class SyncOperatorTrafficIntegrationTest
         sv1ScanBackend.lookupSynchronizerRegistration(synchronizerId.toProtoPrimitive).value
       }
 
+      clue("the validator serves the registration to its wallet clients through the scan proxy") {
+        aliceValidatorBackend.scanProxy
+          .lookupSynchronizerRegistration(synchronizerId.toProtoPrimitive)
+          .value
+          .contractId shouldBe registration.contractId
+      }
+
       val aliceParty = onboardWalletUser(aliceWalletClient, aliceValidatorBackend)
       aliceWalletClient.tap(walletUsdToAmulet(200.0))
 
@@ -176,6 +186,30 @@ class SyncOperatorTrafficIntegrationTest
         _ => extraTrafficLimit(member) shouldBe (firstPurchase + secondPurchase),
       )
 
+      // The end-user path: the wallet resolves and discloses the registration itself.
+      val manualAndWalletPurchases = firstPurchase + secondPurchase + walletRequestPurchase
+      actAndCheck(
+        "alice requests traffic for splitwell through her wallet",
+        aliceWalletClient.createBuyTrafficRequest(
+          aliceValidatorBackend.getValidatorPartyId(),
+          synchronizerId,
+          walletRequestPurchase,
+          "splitwell-request",
+          env.environment.clock.now.plus(java.time.Duration.ofMinutes(1)),
+        ),
+      )(
+        "the request completes and is granted on the splitwell sequencer",
+        _ => {
+          inside(aliceWalletClient.getTrafficRequestStatus("splitwell-request")) {
+            case d0.GetBuyTrafficRequestStatusResponse.members.BuyTrafficRequestCompletedResponse(
+                  d0.BuyTrafficRequestCompletedResponse(status, _)
+                ) =>
+              status shouldBe TxLogEntry.Http.BuyTrafficRequestStatus.Completed
+          }
+          extraTrafficLimit(member) shouldBe manualAndWalletPurchases
+        },
+      )
+
       // The validator's own top-up trigger does the same buy unattended, on splitwell only:
       // alice's global target is zero, so the fan-out is the only reason it runs at all.
       val topupTrigger = aliceValidatorBackend.appState.automation
@@ -183,7 +217,7 @@ class SyncOperatorTrafficIntegrationTest
       setTriggersWithin(triggersToResumeAtStart = Seq(topupTrigger)) {
         clue("the trigger tops up splitwell on its own") {
           eventually(2.minutes) {
-            extraTrafficLimit(member) should be > (firstPurchase + secondPurchase)
+            extraTrafficLimit(member) should be > manualAndWalletPurchases
           }
         }
         clue("it holds a top-up state for splitwell, which only the fan-out creates") {
