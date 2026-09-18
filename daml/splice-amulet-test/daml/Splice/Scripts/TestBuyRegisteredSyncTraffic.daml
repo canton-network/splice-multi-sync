@@ -276,6 +276,37 @@ test_RegisteredSynchronizer_ensureNonEmpty = do
     operator
     governanceParameters = None
 
+-- | Negative: a registration for a synchronizer the config already requires is refused, so a
+--   discount cannot reach it.
+test_BuyRegisteredSyncTraffic_requiredSynchronizer : Script ()
+test_BuyRegisteredSyncTraffic_requiredSynchronizer = do
+  d <- setupDefaultAppWithUsers
+  let app = d.app
+      provider = d.provider1
+  operator <- allocateParty "registeredSyncOperator"
+
+  registeredCid <- submit app.dso $ createCmd RegisteredSynchronizer with
+    dso = app.dso
+    synchronizerId = decentralizedSyncId
+    operator
+    governanceParameters = Some GovernanceParameters with discountFactor = 0.5
+
+  amuletCid <- tap app provider 1_000_000.0
+  context <- getTransferContext app provider None
+  (amuletRulesCid, _) <- fetchAmuletRulesByKey app.dso
+
+  submitMustFail (actAs provider.primaryParty <> readAs app.dso) $
+    exerciseCmd amuletRulesCid AmuletRules_BuyMemberTraffic with
+      inputs = [InputAmulet amuletCid]
+      context
+      provider = provider.primaryParty
+      memberId = "PAR::participant::1220abababababababababababababababababababababababababababababab"
+      synchronizerId = decentralizedSyncId
+      migrationId = 0
+      trafficAmount = 1_000_000
+      expectedDso = Some app.dso
+      optRegisteredSynchronizer = Some registeredCid
+
 -- | A discounted registration prices the same traffic lower.
 test_BuyRegisteredSyncTraffic_discounted : Script ()
 test_BuyRegisteredSyncTraffic_discounted = do
