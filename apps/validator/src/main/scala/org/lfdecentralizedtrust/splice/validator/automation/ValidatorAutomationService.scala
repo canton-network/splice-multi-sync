@@ -75,7 +75,6 @@ class ValidatorAutomationService(
     latestPackagesOnly: Boolean,
     enabledFeatures: EnabledFeaturesConfig,
     additionalPackagesToUnvet: Map[PackageName, Set[PackageVersion]],
-    enableDeprecatedTransferCommandSupport: Boolean,
     override protected val loggerFactory: NamedLoggerFactory,
     packageVersionSupport: PackageVersionSupport,
 )(implicit
@@ -195,18 +194,6 @@ class ValidatorAutomationService(
           walletManager,
           scanConnection,
           domainMigrationId,
-        )
-      )
-    }
-
-    if (enableDeprecatedTransferCommandSupport) {
-      registerTrigger(
-        new TransferCommandSendTrigger(
-          triggerContext,
-          scanConnection,
-          store,
-          walletManager.externalPartyWalletManager,
-          connection(SpliceLedgerConnectionPriority.Medium),
         )
       )
     }

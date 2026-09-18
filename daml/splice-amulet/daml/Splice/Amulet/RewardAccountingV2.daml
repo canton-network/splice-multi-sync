@@ -46,7 +46,7 @@ template CalculateRewardsV2 with
 data MintingAllowance = MintingAllowance with
     provider : Party
     amount : Decimal
-  deriving (Eq, Show)
+  deriving (Eq, Show, Serializable)
 
 type MintingAllowances = [MintingAllowance]
 
@@ -56,7 +56,7 @@ type MintingAllowances = [MintingAllowance]
 data WeightedBatchRef = WeightedBatchRef with
     batchHash : CryptoHash.Hash
     weight : Decimal
-  deriving (Eq, Show)
+  deriving (Eq, Show, Serializable)
 
 data Batch
   = BatchOfBatches [CryptoHash.Hash]
@@ -68,10 +68,10 @@ data Batch
     -- exactly this contract's budget and endows each child with its declared weight, pinning
     -- the whole tree's minting to the round total (activity records exist only for
     -- reward-eligible providers, so the tree accounts for the full total).
-  deriving (Eq, Show)
+  deriving (Eq, Show, Serializable)
 
 data ProcessRewardsV2_ProcessBatchResult = ProcessRewardsV2_ProcessBatchResult {}
-  deriving (Eq, Show)
+  deriving (Eq, Show, Serializable)
 
 -- | State contract tracking outstanding processing of rewards for a given round and batch hash.
 template ProcessRewardsV2 with
