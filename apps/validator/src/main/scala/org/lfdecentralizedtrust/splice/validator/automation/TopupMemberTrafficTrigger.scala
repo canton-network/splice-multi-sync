@@ -167,7 +167,12 @@ class TopupMemberTrafficTrigger(
               else
                 TopupUtil
                   // The cost is derived from this target's throughput and interval.
-                  .minWalletBalanceForTopup(scanConnection, target.topupConfig, clock)
+                  .minWalletBalanceForTopup(
+                    scanConnection,
+                    target.topupConfig,
+                    clock,
+                    registration,
+                  )
                   .map(Some(_))
           } yield cost.map(
             TopupMemberTrafficTrigger.Task(

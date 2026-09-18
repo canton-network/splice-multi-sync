@@ -15,12 +15,29 @@ import com.digitalasset.canton.tracing.TraceContext
 import org.apache.pekko.stream.Materializer
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.jdk.OptionConverters.*
 
 object TopupUtil {
+
+  /** The registration's discount factor, or 1.0 where there is none, mirroring
+    * `getDiscountFactor` in Daml.
+    */
+  def discountFactor(
+      registration: Option[
+        ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
+      ]
+  ): BigDecimal =
+    registration
+      .flatMap(_.payload.governanceParameters.toScala)
+      .fold(BigDecimal(1))(p => BigDecimal(p.discountFactor))
+
   def minWalletBalanceForTopup(
       scanConnection: ScanConnection,
       validatorTopupConfig: ValidatorTopupConfig,
       clock: Clock,
+      registration: Option[
+        ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
+      ],
   )(implicit tc: TraceContext, ec: ExecutionContext, mat: Materializer): Future[BigDecimal] = for {
     amuletRules <- scanConnection.getAmuletRulesWithState()
     synchronizerFeesConfig = AmuletConfigSchedule(amuletRules)
@@ -37,7 +54,12 @@ object TopupUtil {
     amuletPrice = latestRound.payload.amuletPrice
     extraTrafficPrice = BigDecimal(synchronizerFeesConfig.extraTrafficPrice)
   } yield SpliceUtil
-    .synchronizerFees(topupParameters.topupAmount, extraTrafficPrice, amuletPrice)
+    .synchronizerFees(
+      topupParameters.topupAmount,
+      extraTrafficPrice,
+      amuletPrice,
+      discountFactor(registration),
+    )
     ._2
 
   private def currentWalletBalance(scanConnection: ScanConnection, store: UserWalletStore)(implicit
@@ -80,7 +102,7 @@ object TopupUtil {
     topupBudget(scanConnection, validatorWalletStore).flatMap {
       case None => Future.successful(true)
       case Some(walletBalance) =>
-        minWalletBalanceForTopup(scanConnection, validatorTopupConfig, clock)
+        minWalletBalanceForTopup(scanConnection, validatorTopupConfig, clock, None)
           .map(walletBalance >= _)
     }
   }
