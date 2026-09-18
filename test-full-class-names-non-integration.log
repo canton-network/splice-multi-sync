@@ -51,6 +51,7 @@ org.lfdecentralizedtrust.splice.store.db.DbSvSvStoreTest
 org.lfdecentralizedtrust.splice.store.db.DbSyncOperatorStoreTest
 org.lfdecentralizedtrust.splice.store.db.DbTcsStoreTest
 org.lfdecentralizedtrust.splice.store.db.DbUserWalletStoreTest
+org.lfdecentralizedtrust.splice.store.db.InternedStringStoreTest
 org.lfdecentralizedtrust.splice.store.db.SpliceStorageMultiLockTest
 org.lfdecentralizedtrust.splice.sv.automation.VoteRequestMetricsTriggerTest
 org.lfdecentralizedtrust.splice.sv.cometbft.CometBftNodeTest
@@ -61,6 +62,7 @@ org.lfdecentralizedtrust.splice.sv.util.WeightDistributionForSvTest
 org.lfdecentralizedtrust.splice.unit.http.HttpClientProxyTest
 org.lfdecentralizedtrust.splice.unit.store.db.AcsJdbcTypesTest
 org.lfdecentralizedtrust.splice.util.AmuletConfigScheduleTest
+org.lfdecentralizedtrust.splice.util.IpCidrRateLimitsTest
 org.lfdecentralizedtrust.splice.util.PolicyTest
 org.lfdecentralizedtrust.splice.util.SpliceCircuitBreakerTest
 org.lfdecentralizedtrust.splice.util.SpliceRateLimiterTest

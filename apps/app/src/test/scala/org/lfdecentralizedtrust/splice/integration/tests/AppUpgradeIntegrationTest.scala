@@ -26,7 +26,6 @@ import org.lfdecentralizedtrust.splice.wallet.store.BalanceChangeTxLogEntry
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.store.TimeQuery.HeadState
 import monocle.macros.syntax.lens.*
@@ -35,8 +34,6 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.amuletrules.AmuletRul
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dsorules.amuletrules_actionrequiringconfirmation.CRARC_SetConfig
 
 import scala.jdk.CollectionConverters.*
-import java.time.Instant
-import java.time.temporal.ChronoUnit
 import scala.util.Using
 import scala.util.Using.Releasable
 import scala.concurrent.duration.*
@@ -209,13 +206,10 @@ class AppUpgradeIntegrationTest
             sv2Wallet.tap(1003)
             sv2Wallet.balance().unlockedQty should be > BigDecimal(2000)
             // p2p transfer between an upgraded validator (alice's) and a non-upgraded (sv-1's).
-            // Note: we cannot use sv1's (authenticated, current-version) /v1/dso to look up its
-            // party here, as sv1 is still running the old release at this point.
-            // TODO(DACH-NY/canton-network-internal#2106) clean this up once the old release is new enough
             p2pTransfer(
               bobValidatorWalletClient,
               sv1WalletClient,
-              PartyId.tryFromProtoPrimitive(sv1WalletClient.userStatus().party),
+              sv1Client.getDsoInfo().svParty,
               501,
             )
             sv1WalletClient.balance().unlockedQty should be > BigDecimal(400)
@@ -234,12 +228,6 @@ class AppUpgradeIntegrationTest
 
           val amuletRules = sv2ScanBackend.getAmuletRules()
           val amuletConfig = amuletRules.payload.configSchedule.initialValue
-          // Ideally we'd like the config to take effect immediately. However, we
-          // can only schedule configs in the future and this is enforced at the Daml level.
-          // So we pick a date that is far enough in the future that we can complete the voting process
-          // before it is reached but close enough that we don't need to wait for long.
-          // 12 seconds seems to work well empirically.
-          val scheduledTime = Instant.now().plus(12, ChronoUnit.SECONDS)
           val newAmuletConfig = new splice.amuletconfig.AmuletConfig(
             SpliceUtil.defaultTransferConfig(
               amuletConfig.transferConfig.maxNumInputs,
@@ -262,6 +250,9 @@ class AppUpgradeIntegrationTest
             amuletConfig.externalPartyConfigStateTickDuration,
             amuletConfig.rewardConfig,
             amuletConfig.transferPreapprovalBaseDuration,
+            amuletConfig.developmentFundManagerBlacklist,
+            amuletConfig.minDevelopmentFundMintingDelay,
+            amuletConfig.amuletSwitchOverTimes,
           )
           val upgradeAction = new ARC_AmuletRules(
             new CRARC_SetConfig(
@@ -309,15 +300,19 @@ class AppUpgradeIntegrationTest
             },
           )
 
-          // Ensure that the code below really uses the new version. Locally things can be sufficiently
-          // fast that you otherwise still end up using the old version.
-          env.environment.clock
-            .scheduleAt(
-              _ => (),
-              CantonTimestamp.assertFromInstant(scheduledTime.plus(500, ChronoUnit.MILLIS)),
-            )
-            .unwrap
-            .futureValue
+          clue("SVs have vetted new dso governance version") {
+            eventually() {
+              // dso party vetting only changes once all SVs vetted the package.
+              val preferredPackages =
+                sv1Backend.participantClientWithAdminToken.ledger_api.interactive_submission
+                  .preferred_packages(
+                    Map(DarResources.dsoGovernance_current.metadata.name -> Set(dsoParty))
+                  )
+              val dsoGovernancePackage = preferredPackages.packageReferences.loneElement
+              dsoGovernancePackage.packageName shouldBe DarResources.dsoGovernance_current.metadata.name.toString
+              dsoGovernancePackage.packageVersion shouldBe DarResources.dsoGovernance_current.metadata.version.toString
+            }
+          }
 
           // Vote on a dummy change on amulet rules to ensure it is archived and recreated
           // which indicates the new choice is being used.

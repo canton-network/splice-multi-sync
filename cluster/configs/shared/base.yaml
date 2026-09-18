@@ -18,18 +18,22 @@ infra:
     storageSize: "2Ti"
   gkeGateway:
     # swapping this comes with ~5min of downtime
-    # when changing true->false, pulumi gets delete order wrong; try
-    #   cncluster pulumi infra up --target urn:pulumi:infra.$GCP_CLUSTER_BASENAME::infra::kubernetes:gateway.networking.k8s.io/v1:Gateway::cn-gke-l7-gateway --target-dependents
-    # before normal update
+    # note: if you want to use cloud armor, you need to set this to true
     proxyForIstioHttp: false
   istio:
     enableIngressAccessLogging: true
     enablePublicTokenRegistry: true
-    sequencerFlowControl:
+    flowControl:
       # See https://github.com/DACH-NY/canton-network-internal/issues/4901
       # The values are somewhat arbitrary so more fine tuning may be appropriate.
-      initialStreamWindowSize: 524288        # 512 KiB max per stream
-      initialConnectionWindowSize: 52428800  # 50 MiB max per connection
+      public:
+        initialStreamWindowSize: 524288        # 512 KiB max per stream
+        initialConnectionWindowSize: 52428800  # 50 MiB max per connection
+        ports: [5008, 5010]                    # sequencer public api, canton bft
+      internal:
+        initialStreamWindowSize: 1048576        # 1 MiB max per stream
+        initialConnectionWindowSize: 104857600  # 100 MiB max per connection
+        ports: [5001, 5002, 5007, 5009]         #  ledger API, participant admin API, mediator admin API, sequencer admin API
 # configs specific for the pulumi project
 # will be applied to all the stacks in the project
 pulumiProjectConfig:
@@ -83,10 +87,12 @@ validator1:
   participant:
     additionalEnvVars:
       - !include(./participant_pruning.yaml)
+  walletGateway: !include(./wallet_gateway.yaml) {}
 splitwell:
   participant:
     additionalEnvVars:
       - !include(./participant_pruning.yaml)
+  walletGateway: !include(./wallet_gateway.yaml) {}
 # initial round used only on fresh initialization or resets
 # first SV bootstraps the network with it, other SVs learn it via their sponsors
 initialRound: 0
@@ -184,6 +190,10 @@ monitoring:
         # Fire when TPS (approved confirmation requests per second) over the last
         # 30m drops below this fraction of the previous 30m.
         tpsDropThreshold: 0.5
+      cloudArmor:
+        # Number of requests denied by Cloud Armor within a 5 minute window above which
+        # the alert fires. Only used if cloudArmor.enabled is true.
+        deniedRequestsThreshold: 0
       gcpQuotas:
         # Quota metric names to exclude from all GCP quota alerts.
         # Each entry is matched exactly for quota exceeded.
@@ -236,16 +246,27 @@ cloudArmor:
   allRulesPreviewOnly: true
   publicEndpoints:
     publicScan:
-      hostname: scan.sv-2.scratcha.global.canton.network.digitalasset.com
+      hostPrefixRegex: scan
       pathPrefix: /api/scan
-      throttleAcrossAllEndpointsAllIps:
+      throttleAcrossAllEndpointsPerIp:
         withinIntervalSeconds: 60
-        maxRequestsBeforeHttp429: 0    # Keeps scan completely closed to the public
+        maxRequestsBeforeHttp429: 10000
     tokenRegistry:
+      # the token registry is served off the scan hosts
+      hostPrefixRegex: scan
       pathPrefix: /registry
-      throttleAcrossAllEndpointsAllIps:
+      throttleAcrossAllEndpointsPerIp:
         withinIntervalSeconds: 60
-        maxRequestsBeforeHttp429: 200
+        # above the largest per-endpoint envoy perIpLimits under /registry, with room for
+        # a client legitimately using several registry endpoints at once
+        maxRequestsBeforeHttp429: 10000
+    sequencer:
+      hostPrefixRegex: sequencer-[0-9]+
+      pathPrefix: /
+      restrictToRateLimitedPaths: false
+      throttleAcrossAllEndpointsPerIp:
+        withinIntervalSeconds: 60
+        maxRequestsBeforeHttp429: 20000
 multiValidator:
   postgresPvcSize: '100Gi'
   resources:
@@ -269,14 +290,22 @@ multiValidator:
 sv:
   scan:
     externalRateLimits:
-      !include(./rate-limits/v0-acs.yaml;./rate-limits/unlimited.yaml;./rate-limits/public-banned.yaml;./rate-limits/token-registry.yaml)
       globalLimits:
-        maxTokens: 2147483647
-        tokensPerFill: 2147483647
-        fillInterval: 60s
+        maxTokens: 60000
+        tokensPerFill: 10000
+        fillInterval: 10s
+      globalPerIpLimits:
+        maxTokens: 6000
+        tokensPerFill: 1000
+        fillInterval: 10s
+  synchronizer:
+    sequencer:
+      externalRateLimits:
+        !include(./rate-limits/sequencer-public-api.yaml)
 validators:
   validator-runbook:
     namespace: validator
     nodeIdentifier: 'validator-runbook'
     partyHint: 'digitalasset-testValidator-1'
     onboardingSecret: 'validatorsecret'
+    walletGateway: !include(./wallet_gateway.yaml) {}
