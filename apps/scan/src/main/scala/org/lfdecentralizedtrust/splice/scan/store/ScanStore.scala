@@ -408,8 +408,9 @@ object ScanStore {
                 _ => None,
                 Some(_),
               ),
-            memberTrafficDomain =
-              Some(SynchronizerId.tryFromString(contract.payload.synchronizerId)),
+            memberTrafficDomain = SynchronizerId
+              .fromString(contract.payload.synchronizerId)
+              .fold(_ => None, Some(_)),
             totalTrafficPurchased = Some(contract.payload.totalPurchased),
           )
         },
