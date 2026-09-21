@@ -157,6 +157,25 @@ abstract class ScanStoreTest
         } yield result shouldBe 1010L
       }
 
+      "keep ingesting when a purchase carries an unparseable synchronizer id" in {
+        val namespace = Namespace(Fingerprint.tryFromString(s"dummy"))
+        val member = ParticipantId(UniqueIdentifier.tryCreate("member", namespace))
+        for {
+          store <- mkStore()
+          // A registration only requires a non-empty synchronizer id, so a governance typo can
+          // reach the store on a purchase.
+          _ <- dummyDomain.create(
+            memberTraffic(member, domainMigrationId, 10L, synchronizerId = "not a synchronizer id")
+          )(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(memberTraffic(member, domainMigrationId, 100L))(
+            store.multiDomainAcsStore
+          )
+          result <- store.getTotalPurchasedMemberTraffic(member, dummyDomain)
+          // The unparseable row is ingested with a null synchronizer id and never matches a
+          // lookup, which takes an already parsed SynchronizerId. Ingestion itself survives.
+        } yield result shouldBe 100L
+      }
+
     }
 
     "lookupAmuletRules" should {
@@ -1731,11 +1750,12 @@ trait AmuletTransferUtil { self: StoreTestBase =>
       domainMigrationId: Long,
       totalPurchased: Long,
       operator: Option[PartyId] = None,
+      synchronizerId: String = dummyDomain.toProtoPrimitive,
   ) = {
     val template = new MemberTraffic(
       dsoParty.toProtoPrimitive,
       member.toProtoPrimitive,
-      dummyDomain.toProtoPrimitive,
+      synchronizerId,
       domainMigrationId,
       totalPurchased,
       1,
