@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { render, screen } from '@testing-library/react';
-import { describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { RegisterSynchronizerForm } from '../../../components/forms/RegisterSynchronizerForm';
 import { Wrapper } from '../../helpers';
@@ -11,8 +11,25 @@ import {
   PROPOSAL_SUMMARY_SUBTITLE,
 } from '../../../utils/constants';
 
+// The lookup needs an authenticated SV admin client, which the render wrapper does not set
+// up, so the two sources the warning reads are mocked and the component's own logic tested.
+const mockRegistration = vi.fn();
+const mockVoteRequests = vi.fn();
+vi.mock('../../../hooks/useSynchronizerRegistration', () => ({
+  useSynchronizerRegistration: (synchronizerId: string, enabled: boolean) =>
+    mockRegistration(synchronizerId, enabled),
+}));
+vi.mock('../../../hooks/useListVoteRequests', () => ({
+  useListDsoRulesVoteRequests: () => mockVoteRequests(),
+}));
+
 const validSynchronizerId = 'dedicated::1220deadbeef';
 const validOperator = 'operator::1220cafebabe';
+
+beforeEach(() => {
+  mockRegistration.mockReturnValue({ data: undefined });
+  mockVoteRequests.mockReturnValue({ data: [] });
+});
 
 describe('Register Dedicated Synchronizer Form', () => {
   test('should render all Register Dedicated Synchronizer Form components', () => {
@@ -113,5 +130,88 @@ describe('Register Dedicated Synchronizer Form', () => {
     await user.type(discountInput, '0.5');
     await user.click(screen.getByTestId('register-synchronizer-action'));
     expect(screen.queryByText('Must be greater than 0 and at most 1')).not.toBeInTheDocument();
+  });
+});
+
+describe('Register Dedicated Synchronizer Form, duplicate warning', () => {
+  const typeSynchronizerId = async (user: ReturnType<typeof userEvent.setup>) =>
+    await user.type(
+      screen.getByTestId('register-synchronizer-synchronizer-id'),
+      validSynchronizerId
+    );
+
+  test('warns when the synchronizer id is already registered', async () => {
+    mockRegistration.mockReturnValue({ data: { registration: {} } });
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <RegisterSynchronizerForm />
+      </Wrapper>
+    );
+
+    await typeSynchronizerId(user);
+
+    expect(screen.getByTestId('register-synchronizer-duplicate-warning').textContent).toContain(
+      'already registered'
+    );
+  });
+
+  test('warns when another open proposal asks for the same id', async () => {
+    mockVoteRequests.mockReturnValue({
+      data: [
+        {
+          payload: {
+            action: {
+              tag: 'ARC_DsoRules',
+              value: {
+                dsoAction: {
+                  tag: 'SRARC_RegisterSynchronizer',
+                  value: { synchronizerId: validSynchronizerId },
+                },
+              },
+            },
+          },
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <RegisterSynchronizerForm />
+      </Wrapper>
+    );
+
+    await typeSynchronizerId(user);
+
+    expect(screen.getByTestId('register-synchronizer-duplicate-warning').textContent).toContain(
+      'Another open proposal'
+    );
+  });
+
+  test('does not warn for an id that is neither registered nor proposed', async () => {
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <RegisterSynchronizerForm />
+      </Wrapper>
+    );
+
+    await typeSynchronizerId(user);
+
+    expect(screen.queryByTestId('register-synchronizer-duplicate-warning')).not.toBeInTheDocument();
+  });
+
+  test('does not look up an id that is not yet well formed', async () => {
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <RegisterSynchronizerForm />
+      </Wrapper>
+    );
+
+    await user.type(screen.getByTestId('register-synchronizer-synchronizer-id'), 'not-an-id');
+
+    // the lookup is gated on the id parsing, so it is never asked about a malformed one
+    expect(mockRegistration).toHaveBeenCalledWith('not-an-id', false);
   });
 });
