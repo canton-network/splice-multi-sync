@@ -60,7 +60,7 @@ describe('Register Dedicated Synchronizer Form', () => {
     );
     await user.type(screen.getByTestId('register-synchronizer-operator'), validOperator);
 
-    // the discount is optional, so leaving it empty must not block submission
+    // the discount is prefilled with the no-discount value, so it never blocks submission
     await user.click(screen.getByTestId('register-synchronizer-action'));
 
     expect(submitButton.getAttribute('disabled')).toBeNull();
@@ -81,6 +81,18 @@ describe('Register Dedicated Synchronizer Form', () => {
     screen.getByText('Invalid synchronizer id. Expected format: name::fingerprint');
   });
 
+  test('prefills the discount with the no-discount value', () => {
+    render(
+      <Wrapper>
+        <RegisterSynchronizerForm />
+      </Wrapper>
+    );
+
+    expect(screen.getByTestId('register-synchronizer-discount-factor').getAttribute('value')).toBe(
+      '1.0'
+    );
+  });
+
   test('bounds the discount factor to (0, 1]', async () => {
     const user = userEvent.setup();
     render(
@@ -92,6 +104,7 @@ describe('Register Dedicated Synchronizer Form', () => {
     const discountInput = screen.getByTestId('register-synchronizer-discount-factor');
 
     // the template's ensure rejects anything outside (0, 1], so the form does too
+    await user.clear(discountInput);
     await user.type(discountInput, '1.5');
     await user.click(screen.getByTestId('register-synchronizer-action'));
     screen.getByText('Must be greater than 0 and at most 1');

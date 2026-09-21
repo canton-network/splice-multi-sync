@@ -962,7 +962,7 @@ const UpdateFeatureAppSection = ({
 interface RegisterSynchronizerSectionProps {
   synchronizerId: string;
   operator: string;
-  discountFactor?: string;
+  discountFactor: string;
 }
 
 const RegisterSynchronizerSection = ({
@@ -999,9 +999,7 @@ const RegisterSynchronizerSection = ({
         label="Traffic Discount"
         value={
           <Typography variant="body1" data-testid="proposal-details-discount-factor">
-            {discountFactor
-              ? `${discountFactor} (multiplies this synchronizer's traffic price)`
-              : 'None, registered at the full price'}
+            {`${discountFactor} (multiplies this synchronizer's traffic price)`}
           </Typography>
         }
       />

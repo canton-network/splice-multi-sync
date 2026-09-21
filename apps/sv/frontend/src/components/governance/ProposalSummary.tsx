@@ -78,7 +78,7 @@ type ProposalSummaryProps = BaseProposalSummaryProps &
         formType: 'register-synchronizer';
         synchronizerId: string;
         operator: string;
-        discountFactor: string | undefined;
+        discountFactor: string;
       }
     | {
         formType: 'update-right-weight';
@@ -258,7 +258,7 @@ export const ProposalSummary: React.FC<ProposalSummaryProps> = props => {
             <ProposalReviewField
               id="discountFactor"
               label="Traffic Discount"
-              value={props.discountFactor ?? 'None, registered at the full price'}
+              value={props.discountFactor}
             />
           </>
         )}

@@ -38,11 +38,14 @@ import { FormLayout } from './FormLayout';
 interface ExtraFormField {
   synchronizerId: string;
   operator: string;
-  /** Empty registers at the default, which is no discount. */
+  /** Stated on every registration: 1 is the no-discount value, not an absent one. */
   discountFactor: string;
 }
 
 export type RegisterSynchronizerFormData = CommonProposalFormData & ExtraFormField;
+
+/** The no-discount value. A registration states its parameters rather than defaulting them. */
+const DEFAULT_DISCOUNT_FACTOR = '1.0';
 
 export const RegisterSynchronizerForm: React.FC = _ => {
   const dsoInfosQuery = useDsoInfos();
@@ -66,7 +69,7 @@ export const RegisterSynchronizerForm: React.FC = _ => {
     summary: '',
     synchronizerId: '',
     operator: '',
-    discountFactor: '',
+    discountFactor: DEFAULT_DISCOUNT_FACTOR,
   };
 
   const form = useAppForm({
@@ -84,7 +87,7 @@ export const RegisterSynchronizerForm: React.FC = _ => {
               operator: value.operator,
               // The same vote sets the parameters, so a synchronizer promised a discount is
               // never registered at the full price while a second vote is arranged.
-              governanceParameters: discountFactor ? { discountFactor } : null,
+              governanceParameters: { discountFactor },
             },
           },
         },
@@ -126,7 +129,7 @@ export const RegisterSynchronizerForm: React.FC = _ => {
           formType="register-synchronizer"
           synchronizerId={form.state.values.synchronizerId}
           operator={form.state.values.operator}
-          discountFactor={form.state.values.discountFactor.trim() || undefined}
+          discountFactor={form.state.values.discountFactor.trim()}
           onEdit={() => setShowConfirmation(false)}
           onSubmit={() => {}}
         />
@@ -176,16 +179,15 @@ export const RegisterSynchronizerForm: React.FC = _ => {
           <form.AppField
             name="discountFactor"
             validators={{
-              onBlur: ({ value }) => (value.trim() ? validateDiscountFactor(value.trim()) : false),
-              onChange: ({ value }) =>
-                value.trim() ? validateDiscountFactor(value.trim()) : false,
+              onBlur: ({ value }) => validateDiscountFactor(value.trim()),
+              onChange: ({ value }) => validateDiscountFactor(value.trim()),
             }}
           >
             {field => (
               <field.TextField
                 title="Traffic Discount"
                 id="register-synchronizer-discount-factor"
-                subtitle="Multiplies this synchronizer's traffic price, greater than 0 and at most 1. Leave empty to register at the full price."
+                subtitle="Multiplies this synchronizer's traffic price, greater than 0 and at most 1. 1 registers at the full price."
               />
             )}
           </form.AppField>

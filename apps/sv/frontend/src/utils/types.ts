@@ -77,8 +77,8 @@ export interface ConfigChange {
 export interface RegisterSynchronizerProposal {
   synchronizerId: string;
   operator: string;
-  /** The discount factor the registration would be created with, or undefined for the default. */
-  discountFactor?: string;
+  /** The discount factor the registration would be created with. */
+  discountFactor: string;
 }
 
 export interface UpdateSvRewardWeightProposal {
