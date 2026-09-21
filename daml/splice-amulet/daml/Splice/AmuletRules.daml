@@ -1199,6 +1199,15 @@ mkRegisteredSynchronizerMismatchFailure registeredId requestedId =
       <> " but the purchase names synchronizer " <> requestedId)
     (TextMap.fromList [("registeredSynchronizerId", registeredId), ("synchronizerId", requestedId)])
 
+mkRequiredSynchronizerRegistrationFailure : Text -> FailureStatus
+mkRequiredSynchronizerRegistrationFailure synchronizerId =
+  mkFailureStatus
+    (spliceErrorId "registered-required-synchronizer")
+    InvalidIndependentOfSystemState
+    ("Synchronizer " <> synchronizerId
+      <> " is in requiredSynchronizers, so its traffic must be bought without a registration")
+    (TextMap.fromList [("synchronizerId", synchronizerId)])
+
 mkNonZeroMigrationIdFailure : Int -> FailureStatus
 mkNonZeroMigrationIdFailure migrationId =
   mkFailureStatus
@@ -1892,6 +1901,10 @@ validateBuyMemberTrafficInputs configUsd optRegistered synchronizerId migrationI
       Some registered
         | registered.synchronizerId /= synchronizerId ->
             Left $ mkRegisteredSynchronizerMismatchFailure registered.synchronizerId synchronizerId
+        -- A registration is the only carrier of a discount, so refusing one keeps a required
+        -- synchronizer at the undiscounted price.
+        | synchronizerId `Set.member` configUsd.decentralizedSynchronizer.requiredSynchronizers ->
+            Left $ mkRequiredSynchronizerRegistrationFailure synchronizerId
         | migrationId /= 0 ->
             Left $ mkNonZeroMigrationIdFailure migrationId
         | otherwise -> Right ()
