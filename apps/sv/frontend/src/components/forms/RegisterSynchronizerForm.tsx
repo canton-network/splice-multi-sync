@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import dayjs from 'dayjs';
+import { Alert } from '@mui/material';
 import { useState } from 'react';
 import { dateTimeFormatISO } from '@canton-network/splice-common-frontend-utils';
 import { ActionRequiringConfirmation } from '@daml.js/splice-dso-governance/lib/Splice/DsoRules';
+import { useStore } from '@tanstack/react-form';
 
 import { useAppForm } from '../../hooks/form';
 import { useSynchronizerRegistration } from '../../hooks/useSynchronizerRegistration';
@@ -60,32 +62,6 @@ export const RegisterSynchronizerForm: React.FC = _ => {
     a => a.value === 'SRARC_RegisterSynchronizer'
   );
 
-  const [synchronizerId, setSynchronizerId] = useState('');
-  // Uniqueness is enforced off-ledger, so the warning is the enforcement: the choice only
-  // requires a non-empty id and would happily register a duplicate.
-  const wellFormedId = validateSynchronizerId(synchronizerId) === false;
-  const registrationQuery = useSynchronizerRegistration(synchronizerId, wellFormedId);
-  const voteRequestsQuery = useListDsoRulesVoteRequests();
-
-  const alreadyRegistered = wellFormedId && !!registrationQuery.data;
-  // A duplicate can also be a second proposal in flight, which no on-ledger state shows yet.
-  const proposalInFlight =
-    wellFormedId &&
-    (voteRequestsQuery.data ?? []).some(vr => {
-      const action = vr.payload.action;
-      if (action.tag !== 'ARC_DsoRules') return false;
-      const dsoAction = action.value.dsoAction;
-      return (
-        dsoAction.tag === 'SRARC_RegisterSynchronizer' &&
-        dsoAction.value.synchronizerId === synchronizerId
-      );
-    });
-  const duplicateWarning = alreadyRegistered
-    ? 'This synchronizer id is already registered. Registering it again creates a duplicate, which has to be archived by an offboard vote.'
-    : proposalInFlight
-      ? 'Another open proposal already asks to register this synchronizer id.'
-      : undefined;
-
   const defaultValues: RegisterSynchronizerFormData = {
     action: createProposalAction?.name || '',
     expiryDate: initialExpiration.format(dateTimeFormatISO),
@@ -140,6 +116,32 @@ export const RegisterSynchronizerForm: React.FC = _ => {
     },
   });
 
+  // Uniqueness is enforced off-ledger, so the warning is the enforcement: the choice only
+  // requires a non-empty id and would happily register a duplicate.
+  const synchronizerId = useStore(form.store, state => state.values.synchronizerId).trim();
+  const wellFormedId = validateSynchronizerId(synchronizerId) === false;
+  const registrationQuery = useSynchronizerRegistration(synchronizerId, wellFormedId);
+  const voteRequestsQuery = useListDsoRulesVoteRequests();
+
+  const alreadyRegistered = wellFormedId && !!registrationQuery.data;
+  // A duplicate can also be a second proposal in flight, which no on-ledger state shows yet.
+  const proposalInFlight =
+    wellFormedId &&
+    (voteRequestsQuery.data ?? []).some(vr => {
+      const action = vr.payload.action;
+      if (action.tag !== 'ARC_DsoRules') return false;
+      const dsoAction = action.value.dsoAction;
+      return (
+        dsoAction.tag === 'SRARC_RegisterSynchronizer' &&
+        dsoAction.value.synchronizerId === synchronizerId
+      );
+    });
+  const duplicateWarning = alreadyRegistered
+    ? 'This synchronizer id is already registered. Registering it again creates a duplicate, which has to be archived by an offboard vote.'
+    : proposalInFlight
+      ? 'Another open proposal already asks to register this synchronizer id.'
+      : undefined;
+
   return (
     <FormLayout
       form={form}
@@ -172,6 +174,17 @@ export const RegisterSynchronizerForm: React.FC = _ => {
             )}
           </form.AppField>
 
+          {duplicateWarning && (
+            <Alert
+              severity="info"
+              color="warning"
+              variant="outlined"
+              data-testid="register-synchronizer-duplicate-warning"
+            >
+              {duplicateWarning}
+            </Alert>
+          )}
+
           <form.AppField
             name="synchronizerId"
             validators={{
@@ -183,11 +196,7 @@ export const RegisterSynchronizerForm: React.FC = _ => {
               <field.TextField
                 title="Synchronizer ID"
                 id="register-synchronizer-synchronizer-id"
-                subtitle={
-                  duplicateWarning ??
-                  'The id of the dedicated synchronizer to register, as name::fingerprint'
-                }
-                onChange={setSynchronizerId}
+                subtitle="The id of the dedicated synchronizer to register, as name::fingerprint"
               />
             )}
           </form.AppField>
