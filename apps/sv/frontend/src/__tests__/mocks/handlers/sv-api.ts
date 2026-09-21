@@ -38,6 +38,12 @@ export const buildSvMock = (svUrl: string): HttpHandler[] => [
 
   dsoInfoHandler(svUrl, '/v1/dso'),
 
+  // Not registered is the default answer: the UI asks while someone is proposing a
+  // registration, so a 404 is the expected case rather than an error.
+  http.get(`${svUrl}/v0/admin/sv/synchronizers/:synchronizerId/registration`, () => {
+    return new HttpResponse(null, { status: 404 });
+  }),
+
   http.get(`${svUrl}/v0/admin/sv/voterequests`, () => {
     return HttpResponse.json<ListDsoRulesVoteRequestsResponse>(voteRequests);
   }),
