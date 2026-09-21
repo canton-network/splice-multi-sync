@@ -2037,6 +2037,25 @@ abstract class SvDsoStoreTest extends StoreTestBase with HasExecutionContext {
         }
       }
 
+      "keep ingesting when a purchase carries an unparseable synchronizer id" in {
+        val namespace = Namespace(Fingerprint.tryFromString(s"dummy"))
+        val member = ParticipantId("member", namespace)
+        for {
+          store <- mkStore()
+          // A registration only requires a non-empty synchronizer id, so a governance typo can
+          // reach the store on a purchase.
+          _ <- dummyDomain.create(
+            memberTrafficWithSynchronizerId(member, "not a synchronizer id", 10L)
+          )(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(memberTraffic(member, dummyDomain, 100L))(
+            store.multiDomainAcsStore
+          )
+          result <- store.getTotalPurchasedMemberTraffic(member, dummyDomain)
+          // The unparseable row is ingested with a null synchronizer id and never matches a
+          // lookup, which takes an already parsed SynchronizerId. Ingestion itself survives.
+        } yield result shouldBe 100L
+      }
+
     }
 
     "listSvRewardState" should {
@@ -2241,9 +2260,9 @@ abstract class SvDsoStoreTest extends StoreTestBase with HasExecutionContext {
     )
   }
 
-  private def memberTraffic(
+  private def memberTrafficWithSynchronizerId(
       member: Member,
-      synchronizerId: SynchronizerId,
+      synchronizerId: String,
       totalPurchased: Long,
       migrationId: Long = domainMigrationId,
       operator: Option[PartyId] = None,
@@ -2251,7 +2270,7 @@ abstract class SvDsoStoreTest extends StoreTestBase with HasExecutionContext {
     val template = new MemberTraffic(
       dsoParty.toProtoPrimitive,
       member.toProtoPrimitive,
-      synchronizerId.toProtoPrimitive,
+      synchronizerId,
       migrationId,
       totalPurchased,
       1,
@@ -2266,6 +2285,21 @@ abstract class SvDsoStoreTest extends StoreTestBase with HasExecutionContext {
       template,
     )
   }
+
+  private def memberTraffic(
+      member: Member,
+      synchronizerId: SynchronizerId,
+      totalPurchased: Long,
+      migrationId: Long = domainMigrationId,
+      operator: Option[PartyId] = None,
+  ) =
+    memberTrafficWithSynchronizerId(
+      member,
+      synchronizerId.toProtoPrimitive,
+      totalPurchased,
+      migrationId,
+      operator,
+    )
 
   private def ansEntry(
       user: PartyId,
