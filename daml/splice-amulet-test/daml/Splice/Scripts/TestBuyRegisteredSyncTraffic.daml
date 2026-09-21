@@ -289,7 +289,7 @@ test_BuyRegisteredSyncTraffic_requiredSynchronizer = do
     dso = app.dso
     synchronizerId = decentralizedSyncId
     operator
-    governanceParameters = Some GovernanceParameters with discountFactor = 0.5
+    governanceParameters = GovernanceParameters with discountFactor = 0.5
 
   amuletCid <- tap app provider 1_000_000.0
   context <- getTransferContext app provider None
