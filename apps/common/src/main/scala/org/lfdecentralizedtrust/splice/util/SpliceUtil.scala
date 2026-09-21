@@ -583,15 +583,20 @@ object SpliceUtil {
       topupAmount: Long,
       extraTrafficPrice: BigDecimal,
       amuletPrice: BigDecimal,
+      discountFactor: BigDecimal = BigDecimal(1),
   ): (BigDecimal, BigDecimal) = {
 
     def tryCompute() = for {
       extraTrafficPriceN <- Numeric.fromBigDecimal(decimalScale, extraTrafficPrice)
+      discountFactorN <- Numeric.fromBigDecimal(decimalScale, discountFactor)
       amuletPriceN <- Numeric.fromBigDecimal(decimalScale, amuletPrice)
       topupAmountN <- Numeric.fromLong(decimalScale, topupAmount)
       bytesInMB <- Numeric.fromLong(decimalScale, 1_000_000L)
       topupAmountMB <- Numeric.divide(decimalScale, topupAmountN, bytesInMB)
-      trafficCostUsd <- Numeric.multiply(decimalScale, extraTrafficPriceN, topupAmountMB)
+      // The discount multiplies the price before the byte conversion, as it does in
+      // `computeSynchronizerFees`; the orders differ under Numeric past four decimal places.
+      effectivePriceN <- Numeric.multiply(decimalScale, extraTrafficPriceN, discountFactorN)
+      trafficCostUsd <- Numeric.multiply(decimalScale, effectivePriceN, topupAmountMB)
       trafficCostAmulet <- Numeric.divide(decimalScale, trafficCostUsd, amuletPriceN)
     } yield (BigDecimal(trafficCostUsd), BigDecimal(trafficCostAmulet))
 
