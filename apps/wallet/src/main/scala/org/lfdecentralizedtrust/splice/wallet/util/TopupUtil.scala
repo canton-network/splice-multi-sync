@@ -102,6 +102,8 @@ object TopupUtil {
     topupBudget(scanConnection, validatorWalletStore).flatMap {
       case None => Future.successful(true)
       case Some(walletBalance) =>
+        // This config is the global synchronizer's, built from `domains.global` in ValidatorApp.
+        // A required synchronizer carries no registration, so there is no discount to apply.
         minWalletBalanceForTopup(scanConnection, validatorTopupConfig, clock, None)
           .map(walletBalance >= _)
     }
