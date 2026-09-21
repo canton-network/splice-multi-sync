@@ -131,7 +131,7 @@ class SyncOperatorTrafficIntegrationTest
               .exerciseDsoRules_RegisterSynchronizer(
                 synchronizerId.toProtoPrimitive,
                 operatorParty.toProtoPrimitive,
-                new GovernanceParameters(java.math.BigDecimal.ONE),
+                new GovernanceParameters(java.math.BigDecimal.ONE.setScale(10)),
               )
               .commands
               .asScala
