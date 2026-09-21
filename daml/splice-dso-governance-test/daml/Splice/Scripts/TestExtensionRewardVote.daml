@@ -39,7 +39,7 @@ test_ExtensionRewards_viaVote = do
       dsoAction = SRARC_RegisterSynchronizer DsoRules_RegisterSynchronizer with
         synchronizerId = dedicatedSyncId
         operator
-        governanceParameters = None
+        governanceParameters = defaultGovernanceParameters
 
   -- The vote-created registration authorizes reward processing below.
   [(regCid, _)] <- query @RegisteredSynchronizer operator

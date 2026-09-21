@@ -1781,10 +1781,11 @@ template DsoRules with
       with
         synchronizerId : Text -- ^ stable id of the dedicated synchronizer to register
         operator : Party -- ^ the party operating that synchronizer
-        governanceParameters : Optional GovernanceParameters
+        governanceParameters : GovernanceParameters
           -- ^ the parameters the same vote sets, so a synchronizer promised a discount is never
-          --   registered at full price while a second vote is arranged. `None` registers at the
-          --   defaults; changing them later is `DsoRules_SetSynchronizerGovernanceParameters`.
+          --   registered at full price while a second vote is arranged. Stated explicitly rather
+          --   than defaulted (`defaultGovernanceParameters` is the no-discount value); changing
+          --   them later is `DsoRules_SetSynchronizerGovernanceParameters`.
       controller dso
       do
         require "synchronizerId is non-empty" (not (T.isEmpty synchronizerId))
