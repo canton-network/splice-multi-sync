@@ -93,7 +93,7 @@ object TopupUtil {
     }
   }
 
-  def hasSufficientFundsForTopup(
+  def hasSufficientFundsForTopupOnGlobalSync(
       scanConnection: ScanConnection,
       validatorWalletStore: UserWalletStore,
       globalTopupConfig: ValidatorTopupConfig,

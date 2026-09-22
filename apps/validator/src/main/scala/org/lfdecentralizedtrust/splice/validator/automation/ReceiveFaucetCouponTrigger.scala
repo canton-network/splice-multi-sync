@@ -115,7 +115,7 @@ class ReceiveFaucetCouponTrigger(
     for {
       validatorWallet <- ValidatorUtil.getValidatorWallet(validatorStore, userWalletManager)
       commandPriority <- TopupUtil
-        .hasSufficientFundsForTopup(
+        .hasSufficientFundsForTopupOnGlobalSync(
           scanConnection,
           validatorWallet.store,
           validatorTopupConfig,
