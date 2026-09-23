@@ -85,7 +85,7 @@ class SyncOperatorAutomationService(
   )
 
   registerTrigger(
-    new ReconcileDedicatedSequencerTrafficTrigger(
+    new ReconcilePurchasedTrafficTrigger(
       triggerContext,
       store,
       sequencerConnection,

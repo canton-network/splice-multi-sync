@@ -33,10 +33,10 @@ trait SyncOperatorStore extends AppStore {
 
   override def multiDomainAcsStore: MultiDomainAcsStore
 
-  /** Total traffic purchased for `memberId` on this operator's synchronizer. */
-  def getTotalPurchasedMemberTraffic(memberId: Member)(implicit
+  /** Purchased totals for every member with a purchase on this operator's synchronizer. */
+  def getPurchasedTrafficByMember()(implicit
       tc: TraceContext
-  ): Future[Long]
+  ): Future[Map[Member, Long]]
 }
 
 object SyncOperatorStore {

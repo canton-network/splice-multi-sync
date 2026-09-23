@@ -262,6 +262,11 @@ trait AcsJdbcTypes extends JdbcTypes {
     (memberIdO: Option[Member], pp: PositionedParameters) =>
       implicitly[SetParameter[Option[String300]]].apply(memberIdO.map(_.toLengthLimitedString), pp)
 
+  protected implicit lazy val memberIdGetResult: GetResult[Member] =
+    GetResult.GetString.andThen { s =>
+      Member.fromProtoPrimitive_(s).fold(err => throw new IllegalArgumentException(err), identity)
+    }
+
   protected implicit lazy val jsonJdbcType: JdbcType[Json] = new profile.DriverJdbcType[Json]() {
     override def sqlType: Int = java.sql.Types.OTHER
 

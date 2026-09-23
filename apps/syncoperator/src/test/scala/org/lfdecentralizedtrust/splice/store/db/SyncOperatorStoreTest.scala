@@ -41,10 +41,19 @@ abstract class SyncOperatorStoreTest extends StoreTestBase with HasExecutionCont
       synchronizerId: SynchronizerId = ourSynchronizer,
       operator: Option[PartyId] = Some(operatorParty),
       migrationId: Long = 0L,
+  ): Contract[MemberTraffic.ContractId, MemberTraffic] =
+    memberTrafficFor(member.toProtoPrimitive, totalPurchased, synchronizerId, operator, migrationId)
+
+  private def memberTrafficFor(
+      memberId: String,
+      totalPurchased: Long,
+      synchronizerId: SynchronizerId,
+      operator: Option[PartyId],
+      migrationId: Long,
   ): Contract[MemberTraffic.ContractId, MemberTraffic] = {
     val template = new MemberTraffic(
       dsoParty.toProtoPrimitive,
-      member.toProtoPrimitive,
+      memberId,
       synchronizerId.toProtoPrimitive,
       migrationId,
       totalPurchased,
@@ -79,48 +88,39 @@ abstract class SyncOperatorStoreTest extends StoreTestBase with HasExecutionCont
 
   "SyncOperatorStore" should {
 
-    "sum the purchases made for this synchronizer" in {
+    "sum the purchases made for this synchronizer, per member" in {
       for {
         store <- mkStore()
-        _ <- ingest(store, Seq(memberTraffic(alice, 100L), memberTraffic(alice, 250L)))
-        total <- store.getTotalPurchasedMemberTraffic(alice)
-      } yield total shouldBe 350L
-    }
-
-    "keep members apart" in {
-      for {
-        store <- mkStore()
-        _ <- ingest(store, Seq(memberTraffic(alice, 100L), memberTraffic(bob, 700L)))
-        aliceTotal <- store.getTotalPurchasedMemberTraffic(alice)
-        bobTotal <- store.getTotalPurchasedMemberTraffic(bob)
-      } yield {
-        aliceTotal shouldBe 100L
-        bobTotal shouldBe 700L
-      }
+        _ <- ingest(
+          store,
+          Seq(memberTraffic(alice, 100L), memberTraffic(alice, 250L), memberTraffic(bob, 700L)),
+        )
+        byMember <- store.getPurchasedTrafficByMember()
+      } yield byMember shouldBe Map(alice -> 350L, bob -> 700L)
     }
 
     "ignore purchases for another synchronizer" in {
       for {
         store <- mkStore()
         _ <- ingest(store, Seq(memberTraffic(alice, 100L, synchronizerId = foreignSynchronizer)))
-        total <- store.getTotalPurchasedMemberTraffic(alice)
-      } yield total shouldBe 0L
+        byMember <- store.getPurchasedTrafficByMember()
+      } yield byMember shouldBe empty
     }
 
     "ignore purchases observed by another operator" in {
       for {
         store <- mkStore()
         _ <- ingest(store, Seq(memberTraffic(alice, 100L, operator = Some(otherOperator))))
-        total <- store.getTotalPurchasedMemberTraffic(alice)
-      } yield total shouldBe 0L
+        byMember <- store.getPurchasedTrafficByMember()
+      } yield byMember shouldBe empty
     }
 
     "ignore purchases with no operator, which are decentralized-synchronizer traffic" in {
       for {
         store <- mkStore()
         _ <- ingest(store, Seq(memberTraffic(alice, 100L, operator = None)))
-        total <- store.getTotalPurchasedMemberTraffic(alice)
-      } yield total shouldBe 0L
+        byMember <- store.getPurchasedTrafficByMember()
+      } yield byMember shouldBe empty
     }
 
     // A registered synchronizer is pinned to migration id 0, so anything else is not ours even if
@@ -129,17 +129,39 @@ abstract class SyncOperatorStoreTest extends StoreTestBase with HasExecutionCont
       for {
         store <- mkStore()
         _ <- ingest(store, Seq(memberTraffic(alice, 100L, migrationId = 1L)))
-        total <- store.getTotalPurchasedMemberTraffic(alice)
-      } yield total shouldBe 0L
+        byMember <- store.getPurchasedTrafficByMember()
+      } yield byMember shouldBe empty
     }
 
-    "report zero for a member that has never purchased" in {
+    // A member id is plain Text on-ledger, so a purchase can name one that does not parse. Ingestion
+    // records such a contract with no member, and this query has to leave it out.
+    "skip a purchase whose member id does not parse" in {
+      for {
+        store <- mkStore()
+        _ <- ingest(
+          store,
+          Seq(
+            memberTraffic(alice, 100L),
+            memberTrafficFor(
+              memberId = "not-a-member-id",
+              totalPurchased = 700L,
+              synchronizerId = ourSynchronizer,
+              operator = Some(operatorParty),
+              migrationId = 0L,
+            ),
+          ),
+        )
+        byMember <- store.getPurchasedTrafficByMember()
+      } yield byMember shouldBe Map(alice -> 100L)
+    }
+
+    "report no members when nothing has been purchased" in {
       for {
         store <- mkStore()
         // queries wait on ACS ingestion, so the empty ACS still has to be ingested
         _ <- ingest(store, Seq.empty)
-        total <- store.getTotalPurchasedMemberTraffic(alice)
-      } yield total shouldBe 0L
+        byMember <- store.getPurchasedTrafficByMember()
+      } yield byMember shouldBe empty
     }
   }
 }

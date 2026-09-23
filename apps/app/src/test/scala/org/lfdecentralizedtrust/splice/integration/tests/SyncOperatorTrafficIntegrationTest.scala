@@ -4,6 +4,7 @@
 package org.lfdecentralizedtrust.splice.integration.tests
 
 import com.digitalasset.canton.SynchronizerAlias
+import com.digitalasset.canton.admin.api.client.data.GrpcSequencerConnection
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, NonNegativeNumeric}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -23,6 +24,7 @@ import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   IntegrationTest,
   SpliceTestConsoleEnvironment,
 }
+import org.lfdecentralizedtrust.splice.syncoperator.automation.ReconcilePurchasedTrafficTrigger
 import org.lfdecentralizedtrust.splice.util.{
   ContractWithState,
   DisclosedContracts,
@@ -39,6 +41,8 @@ import scala.jdk.OptionConverters.*
 
 /** Buys traffic for a registered synchronizer via `AmuletRules_BuyMemberTraffic` with the
   * registration disclosed, and checks the operator grants it on that synchronizer's sequencer.
+  * Ends on a purchase made for a member that has not joined yet, which the operator grants once it
+  * does.
   */
 class SyncOperatorTrafficIntegrationTest
     extends IntegrationTest
@@ -49,6 +53,7 @@ class SyncOperatorTrafficIntegrationTest
   private val firstPurchase = 1_000_000L
   private val secondPurchase = 2_000_000L
   private val walletRequestPurchase = 3_000_000L
+  private val purchaseBeforeJoining = 1_500_000L
   private val splitwellAlias = SynchronizerAlias.tryCreate("splitwell")
 
   override def environmentDefinition: SpliceEnvironmentDefinition =
@@ -231,6 +236,78 @@ class SyncOperatorTrafficIntegrationTest
           }
         }
       }
+
+      // Bob's validator is not configured to connect to splitwell, so its participant is a member
+      // traffic can be bought for but not yet granted on.
+      val bobMember = bobValidatorBackend.participantClient.id
+      clue("bob's participant has not joined splitwell") {
+        trafficState(bobMember) shouldBe None
+      }
+
+      // Her earlier purchases and the top-up trigger have eaten into the first tap, and the buy
+      // runs as soon as her wallet has ingested this one.
+      aliceWalletClient.tap(walletUsdToAmulet(200.0))
+      actAndCheck(
+        "alice buys traffic for bob's participant",
+        eventuallySucceeds() {
+          buyTraffic(
+            aliceParty,
+            bobMember,
+            synchronizerId,
+            registration,
+            dsoParty,
+            purchaseBeforeJoining,
+          )
+        },
+      )(
+        "the operator records the purchase and has nowhere to grant it",
+        _ => {
+          syncOperatorBackend.appState.store
+            .getPurchasedTrafficByMember()
+            .futureValue
+            .get(bobMember) shouldBe Some(purchaseBeforeJoining)
+          trafficState(bobMember) shouldBe None
+        },
+      )
+
+      val reconcilePurchasedTrigger = syncOperatorBackend.appState.automation
+        .trigger[ReconcilePurchasedTrafficTrigger]
+      setTriggersWithin(triggersToPauseAtStart = Seq(reconcilePurchasedTrigger)) {
+        actAndCheck(
+          "bob's participant joins splitwell",
+          bobValidatorBackend.participantClient.synchronizers
+            .connect(splitwellAlias, splitwellSequencerUrl),
+        )(
+          "the sequencer now holds a traffic state for it",
+          _ => trafficState(bobMember).map(_.extraTrafficLimit.value) shouldBe Some(0L),
+        )
+        clue("joining alone grants nothing") {
+          always(durationOfSuccess = 5.seconds, pollIntervalMs = 500) {
+            extraTrafficLimit(bobMember) shouldBe 0L
+          }
+        }
+      }
+
+      clue("the resumed poll grants the earlier purchase, without a second one") {
+        eventually() {
+          extraTrafficLimit(bobMember) shouldBe purchaseBeforeJoining
+        }
+        syncOperatorBackend.appState.store
+          .getPurchasedTrafficByMember()
+          .futureValue
+          .get(bobMember) shouldBe Some(purchaseBeforeJoining)
+      }
+    }
+  }
+
+  /** The splitwell sequencer's url, read off the one validator configured to connect to it. */
+  private def splitwellSequencerUrl(implicit env: SpliceTestConsoleEnvironment): String = {
+    val splitwellConfig = aliceValidatorBackend.participantClientWithAdminToken.synchronizers
+      .config(splitwellAlias)
+      .value
+    inside(splitwellConfig.sequencerConnections.connections.forgetNE) {
+      case Seq(GrpcSequencerConnection(endpoints, _, _, _, _)) =>
+        endpoints.head.toURI(false).toString
     }
   }
 

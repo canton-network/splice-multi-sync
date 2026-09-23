@@ -82,15 +82,14 @@ class DbSyncOperatorStore(
 
   private def acsStoreId: AcsStoreId = multiDomainAcsStore.acsStoreId
 
-  override def getTotalPurchasedMemberTraffic(memberId: Member)(implicit
+  override def getPurchasedTrafficByMember()(implicit
       tc: TraceContext
-  ): Future[Long] = waitUntilAcsIngested {
-    sumPurchasedMemberTraffic(
+  ): Future[Map[Member, Long]] = waitUntilAcsIngested {
+    sumPurchasedTrafficByMember(
       storage,
       SyncOperatorTables.acsTableName,
       acsStoreId,
       domainMigrationId,
-      memberId,
       key.synchronizerId,
     )
   }
