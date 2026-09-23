@@ -67,6 +67,12 @@ export const discountFactorSchema = z
     message: 'Must be greater than 0 and at most 1',
   });
 
+// Bytes of traffic per member; the template rejects a negative amount and 0 means no advance.
+export const outageAdvanceSchema = z
+  .string()
+  .min(1, { message: 'Required' })
+  .regex(/^\d+$/, { message: 'Must be a whole number of bytes, 0 or more' });
+
 export const svWeightSchema = z
   .string()
   .min(1, { message: 'Weight is required' })
@@ -225,6 +231,11 @@ export const validateSynchronizerId = (value: string): string | false => {
 
 export const validateDiscountFactor = (value: string): string | false => {
   const result = discountFactorSchema.safeParse(value);
+  return result.success ? false : result.error.issues[0].message;
+};
+
+export const validateOutageAdvance = (value: string): string | false => {
+  const result = outageAdvanceSchema.safeParse(value);
   return result.success ? false : result.error.issues[0].message;
 };
 
