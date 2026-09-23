@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { RegisterSynchronizerForm } from '../../../components/forms/RegisterSynchronizerForm';
@@ -12,12 +12,12 @@ import {
 } from '../../../utils/constants';
 
 // The lookup needs an authenticated SV admin client, which the render wrapper does not set
-// up, so the two sources the warning reads are mocked and the component's own logic tested.
-const mockRegistration = vi.fn();
+// up, so the two sources the check reads are mocked and the component's own logic tested.
+const mockLookup = vi.fn();
 const mockVoteRequests = vi.fn();
-vi.mock('../../../hooks/useSynchronizerRegistration', () => ({
-  useSynchronizerRegistration: (synchronizerId: string, enabled: boolean) =>
-    mockRegistration(synchronizerId, enabled),
+vi.mock('../../../contexts/SvAdminServiceContext', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../../contexts/SvAdminServiceContext')>()),
+  useSvAdminClient: () => ({ lookupSynchronizerRegistration: mockLookup }),
 }));
 vi.mock('../../../hooks/useListVoteRequests', () => ({
   useListDsoRulesVoteRequests: () => mockVoteRequests(),
@@ -27,7 +27,8 @@ const validSynchronizerId = 'dedicated::1220deadbeef';
 const validOperator = 'operator::1220cafebabe';
 
 beforeEach(() => {
-  mockRegistration.mockReturnValue({ data: undefined });
+  vi.clearAllMocks();
+  mockLookup.mockResolvedValue(undefined);
   mockVoteRequests.mockReturnValue({ data: [] });
 });
 
@@ -133,15 +134,18 @@ describe('Register Dedicated Synchronizer Form', () => {
   });
 });
 
-describe('Register Dedicated Synchronizer Form, duplicate warning', () => {
-  const typeSynchronizerId = async (user: ReturnType<typeof userEvent.setup>) =>
+describe('Register Dedicated Synchronizer Form, duplicate registration', () => {
+  // Blurring runs the check without waiting out the typing debounce.
+  const enterSynchronizerId = async (user: ReturnType<typeof userEvent.setup>) => {
     await user.type(
       screen.getByTestId('register-synchronizer-synchronizer-id'),
       validSynchronizerId
     );
+    await user.click(screen.getByTestId('register-synchronizer-operator'));
+  };
 
-  test('warns when the synchronizer id is already registered', async () => {
-    mockRegistration.mockReturnValue({ data: { registration: {} } });
+  test('rejects a synchronizer id that is already registered', async () => {
+    mockLookup.mockResolvedValue({ registration: {} });
     const user = userEvent.setup();
     render(
       <Wrapper>
@@ -149,14 +153,13 @@ describe('Register Dedicated Synchronizer Form, duplicate warning', () => {
       </Wrapper>
     );
 
-    await typeSynchronizerId(user);
+    await enterSynchronizerId(user);
 
-    expect(screen.getByTestId('register-synchronizer-duplicate-warning').textContent).toContain(
-      'already registered'
-    );
+    expect(await screen.findByText(/already registered/)).toBeInTheDocument();
+    expect(mockLookup).toHaveBeenCalledWith(validSynchronizerId);
   });
 
-  test('warns when another open proposal asks for the same id', async () => {
+  test('rejects an id another open proposal already asks to register', async () => {
     mockVoteRequests.mockReturnValue({
       data: [
         {
@@ -181,14 +184,14 @@ describe('Register Dedicated Synchronizer Form, duplicate warning', () => {
       </Wrapper>
     );
 
-    await typeSynchronizerId(user);
+    await enterSynchronizerId(user);
 
-    expect(screen.getByTestId('register-synchronizer-duplicate-warning').textContent).toContain(
-      'Another open proposal'
-    );
+    expect(await screen.findByText(/Another open proposal/)).toBeInTheDocument();
+    // an id already spoken for on the proposal side is not worth a round trip
+    expect(mockLookup).not.toHaveBeenCalled();
   });
 
-  test('does not warn for an id that is neither registered nor proposed', async () => {
+  test('accepts an id that is neither registered nor proposed', async () => {
     const user = userEvent.setup();
     render(
       <Wrapper>
@@ -196,9 +199,11 @@ describe('Register Dedicated Synchronizer Form, duplicate warning', () => {
       </Wrapper>
     );
 
-    await typeSynchronizerId(user);
+    await enterSynchronizerId(user);
 
-    expect(screen.queryByTestId('register-synchronizer-duplicate-warning')).not.toBeInTheDocument();
+    await waitFor(() => expect(mockLookup).toHaveBeenCalledWith(validSynchronizerId));
+    expect(screen.queryByText(/already registered/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Another open proposal/)).not.toBeInTheDocument();
   });
 
   test('does not look up an id that is not yet well formed', async () => {
@@ -210,8 +215,44 @@ describe('Register Dedicated Synchronizer Form, duplicate warning', () => {
     );
 
     await user.type(screen.getByTestId('register-synchronizer-synchronizer-id'), 'not-an-id');
+    await user.click(screen.getByTestId('register-synchronizer-operator'));
 
-    // the lookup is gated on the id parsing, so it is never asked about a malformed one
-    expect(mockRegistration).toHaveBeenCalledWith('not-an-id', false);
+    // the check is gated on the id parsing, so the ledger is never asked about a malformed one
+    expect(await screen.findByText(/Invalid synchronizer id/)).toBeInTheDocument();
+    expect(mockLookup).not.toHaveBeenCalled();
+  });
+
+  test('a failing lookup does not block the proposal', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockLookup.mockRejectedValue(new Error('scan is unreachable'));
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <RegisterSynchronizerForm />
+      </Wrapper>
+    );
+
+    await enterSynchronizerId(user);
+
+    await waitFor(() => expect(mockLookup).toHaveBeenCalledWith(validSynchronizerId));
+    expect(screen.queryByText(/already registered/)).not.toBeInTheDocument();
+  });
+
+  test('keeps an otherwise complete proposal unsubmittable while the id is a duplicate', async () => {
+    mockLookup.mockResolvedValue({ registration: {} });
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <RegisterSynchronizerForm />
+      </Wrapper>
+    );
+
+    await user.type(screen.getByTestId('register-synchronizer-summary'), 'Register a sync');
+    await user.type(screen.getByTestId('register-synchronizer-url'), 'https://example.com');
+    await user.type(screen.getByTestId('register-synchronizer-operator'), validOperator);
+    await enterSynchronizerId(user);
+
+    expect(await screen.findByText(/already registered/)).toBeInTheDocument();
+    expect(screen.getByTestId('submit-button').getAttribute('disabled')).not.toBeNull();
   });
 });
