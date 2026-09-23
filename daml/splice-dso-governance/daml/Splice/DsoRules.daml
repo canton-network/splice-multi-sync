@@ -1784,7 +1784,7 @@ template DsoRules with
         governanceParameters : GovernanceParameters
           -- ^ the parameters the same vote sets, so a synchronizer promised a discount is never
           --   registered at full price while a second vote is arranged. Stated explicitly rather
-          --   than defaulted (`defaultGovernanceParameters` is the no-discount value); changing
+          --   than defaulted (`defaultGovernanceParameters` is no discount and no outage advance); changing
           --   them later is `DsoRules_SetSynchronizerGovernanceParameters`.
       controller dso
       do

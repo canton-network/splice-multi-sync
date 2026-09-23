@@ -137,7 +137,7 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
               new DsoRules_RegisterSynchronizer(
                 appSynchronizerId.toProtoPrimitive,
                 operatorParty.toProtoPrimitive,
-                new GovernanceParameters(java.math.BigDecimal.ONE.setScale(10)),
+                new GovernanceParameters(java.math.BigDecimal.ONE.setScale(10), 0L),
               )
             )
           ),
