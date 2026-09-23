@@ -139,6 +139,16 @@ class CachingScanStore(
       store.getTotalPurchasedMemberTraffic _ tupled,
     ).get((memberId, synchronizerId))
 
+  override def getTotalPurchasedTrafficForSynchronizer(synchronizerId: SynchronizerId)(implicit
+      tc: TraceContext
+  ): Future[Long] =
+    getCache(
+      "totalPurchasedTrafficForSynchronizer",
+      // a separate cache on the per-member total's config, the way cachedByParty is shared
+      cacheConfig.totalPurchasedMemberTraffic,
+      store.getTotalPurchasedTrafficForSynchronizer,
+    ).get(synchronizerId)
+
   override def lookupFeaturedAppRight(providerPartyId: PartyId)(implicit
       tc: TraceContext
   ): Future[Option[ContractWithState[FeaturedAppRight.ContractId, FeaturedAppRight]]] =

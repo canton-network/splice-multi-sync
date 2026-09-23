@@ -179,6 +179,35 @@ abstract class ScanStoreTest
 
     }
 
+    "getTotalPurchasedTrafficForSynchronizer" should {
+
+      "sum every member's purchases on the synchronizer" in {
+        val namespace = Namespace(Fingerprint.tryFromString("dummy"))
+        val alice = ParticipantId(UniqueIdentifier.tryCreate("alice", namespace))
+        val bob = ParticipantId(UniqueIdentifier.tryCreate("bob", namespace))
+        val mediator = MediatorId(UniqueIdentifier.tryCreate("mediator", namespace))
+        for {
+          store <- mkStore()
+          _ <- MonadUtil.sequentialTraverse(
+            Seq(
+              memberTraffic(alice, domainMigrationId, 100L),
+              memberTraffic(alice, domainMigrationId, 250L),
+              memberTraffic(bob, domainMigrationId, 700L),
+              memberTraffic(mediator, domainMigrationId, 3L),
+              // another synchronizer's purchase, which must not count
+              memberTraffic(
+                alice,
+                domainMigrationId,
+                999L,
+                synchronizerId = dummy2Domain.toProtoPrimitive,
+              ),
+            )
+          )(dummyDomain.create(_)(store.multiDomainAcsStore))
+          result <- store.getTotalPurchasedTrafficForSynchronizer(dummyDomain)
+        } yield result shouldBe 1053L
+      }
+    }
+
     "lookupAmuletRules" should {
 
       "find the latest amulet rules" in {

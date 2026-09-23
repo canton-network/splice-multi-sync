@@ -166,6 +166,11 @@ trait ScanStore
       tc: TraceContext
   ): Future[Long]
 
+  /** Total traffic purchased for `synchronizerId` across all its members, in bytes. */
+  def getTotalPurchasedTrafficForSynchronizer(synchronizerId: SynchronizerId)(implicit
+      tc: TraceContext
+  ): Future[Long]
+
   def lookupFeaturedAppRight(providerPartyId: PartyId)(implicit
       tc: TraceContext
   ): Future[Option[ContractWithState[FeaturedAppRight.ContractId, FeaturedAppRight]]]

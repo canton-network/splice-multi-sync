@@ -576,6 +576,29 @@ class DbScanStore(
     } yield sum.getOrElse(0L)
   }
 
+  override def getTotalPurchasedTrafficForSynchronizer(synchronizerId: SynchronizerId)(implicit
+      tc: TraceContext
+  ): Future[Long] = waitUntilAcsIngested {
+    for {
+      sum <- storage
+        .querySingle(
+          sql"""
+               select sum(total_traffic_purchased)
+               from #${ScanTables.acsTableName}
+               where store_id = $acsStoreId
+                and migration_id = $domainMigrationId
+                and package_name = ${MemberTraffic.PACKAGE_NAME}
+                and template_id_qualified_name = ${QualifiedName(
+              MemberTraffic.TEMPLATE_ID_WITH_PACKAGE_ID
+            )}
+                and member_traffic_domain = ${lengthLimited(synchronizerId.toProtoPrimitive)}
+             """.as[Long].headOption,
+          "getTotalPurchasedTrafficForSynchronizer",
+        )
+        .value
+    } yield sum.getOrElse(0L)
+  }
+
   def lookupSvNodeState(svPartyId: PartyId)(implicit
       tc: TraceContext
   ): Future[Option[ContractWithState[SvNodeState.ContractId, SvNodeState]]] =
