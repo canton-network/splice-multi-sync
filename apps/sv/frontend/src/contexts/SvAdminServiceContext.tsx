@@ -271,7 +271,8 @@ export const SvAdminClientProvider: React.FC<React.PropsWithChildren<SvAdminProp
         try {
           return await svAdminClient.lookupSynchronizerRegistration(synchronizerId);
         } catch (e) {
-          if (e instanceof openapi.ApiException && e.code === 404) {
+          // Not `instanceof`: the client is compiled to ES5, where it never matches an Error subclass.
+          if ((e as openapi.ApiException<undefined>).code === 404) {
             return undefined;
           }
           throw e;
