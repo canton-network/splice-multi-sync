@@ -25,7 +25,6 @@ import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   IntegrationTest,
   SpliceTestConsoleEnvironment,
 }
-import org.lfdecentralizedtrust.splice.syncoperator.automation.ReconcilePurchasedTrafficTrigger
 import org.lfdecentralizedtrust.splice.util.{
   ContractWithState,
   DisclosedContracts,
@@ -272,33 +271,23 @@ class SyncOperatorTrafficIntegrationTest
         },
       )
 
-      val reconcilePurchasedTrigger = syncOperatorBackend.appState.automation
-        .trigger[ReconcilePurchasedTrafficTrigger]
-      setTriggersWithin(triggersToPauseAtStart = Seq(reconcilePurchasedTrigger)) {
-        actAndCheck(
-          "bob's participant joins splitwell",
-          bobValidatorBackend.participantClient.synchronizers
-            .connect(splitwellAlias, splitwellSequencerUrl),
-        )(
-          "the sequencer now holds a traffic state for it",
-          _ => trafficState(bobMember).map(_.extraTrafficLimit.value) shouldBe Some(0L),
-        )
-        clue("joining alone grants nothing") {
-          always(durationOfSuccess = 5.seconds, pollIntervalMs = 500) {
-            extraTrafficLimit(bobMember) shouldBe 0L
-          }
-        }
-      }
-
-      clue("the resumed poll grants the earlier purchase, without a second one") {
-        eventually() {
+      // Joining is what gives the member a traffic state, and the connect only returns once the
+      // grant lands: with base rate zero the participant cannot sequence its own onboarding
+      // transactions until the operator raises its limit.
+      actAndCheck(
+        "bob's participant joins splitwell",
+        bobValidatorBackend.participantClient.synchronizers
+          .connect(splitwellAlias, splitwellSequencerUrl),
+      )(
+        "the earlier purchase is granted, with no second purchase",
+        _ => {
           extraTrafficLimit(bobMember) shouldBe purchaseBeforeJoining
-        }
-        syncOperatorBackend.appState.store
-          .getPurchasedTrafficByMember()
-          .futureValue
-          .get(bobMember) shouldBe Some(purchaseBeforeJoining)
-      }
+          syncOperatorBackend.appState.store
+            .getPurchasedTrafficByMember()
+            .futureValue
+            .get(bobMember) shouldBe Some(purchaseBeforeJoining)
+        },
+      )
     }
   }
 
