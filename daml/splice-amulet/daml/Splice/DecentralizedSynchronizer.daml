@@ -120,11 +120,20 @@ defaultDiscountFactor = 1.0
 data GovernanceParameters = GovernanceParameters with
     discountFactor : Decimal
       -- ^ Multiplies this synchronizer's traffic price.
+    outageAdvance : Int
+      -- ^ Traffic in bytes the operator may grant each member beyond what it has purchased while
+      --   its connection to the global synchronizer is down, and takes back when it returns, so a
+      --   member keeps transacting through an outage and repays by purchase afterwards. 0 disables
+      --   the advance. Applied off-ledger by the operator's app; the sequencer accepts any limit,
+      --   so this binds an honest operator.
   deriving (Show, Eq, Serializable)
 
--- | The parameters a synchronizer is registered with when governance has agreed no discount.
+-- | The parameters a synchronizer is registered with when governance has agreed no discount and
+--   no outage advance.
 defaultGovernanceParameters : GovernanceParameters
-defaultGovernanceParameters = GovernanceParameters with discountFactor = defaultDiscountFactor
+defaultGovernanceParameters = GovernanceParameters with
+  discountFactor = defaultDiscountFactor
+  outageAdvance = 0
 
 -- | The multiplier a registration applies to its synchronizer's traffic price.
 getDiscountFactor : RegisteredSynchronizer -> Decimal
@@ -167,6 +176,7 @@ template RegisteredSynchronizer with
 
     ensure not (T.isEmpty synchronizerId)
         && (let f = getDiscountFactor this in f > 0.0 && f <= 1.0)
+        && governanceParameters.outageAdvance >= 0
 
     -- Public read choice, mirroring OpenMiningRound_Fetch: lets a buyer who is neither
     -- signatory nor observer read this contract inside AmuletRules_BuyMemberTraffic
