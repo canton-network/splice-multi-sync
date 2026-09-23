@@ -3,11 +3,8 @@
 
 package org.lfdecentralizedtrust.splice.sv.automation.singlesv.onboarding
 
-import org.lfdecentralizedtrust.splice.automation.{GrantUnlimitedTrafficTriggerBase, TriggerContext}
-import org.lfdecentralizedtrust.splice.automation.GrantUnlimitedTrafficTriggerBase.{
-  Task,
-  UnlimitedTraffic,
-}
+import org.lfdecentralizedtrust.splice.automation.{GrantTrafficTriggerBase, TriggerContext}
+import org.lfdecentralizedtrust.splice.automation.GrantTrafficTriggerBase.{Task, UnlimitedTraffic}
 import org.lfdecentralizedtrust.splice.environment.{
   SequencerAdminConnection,
   SynchronizerNodeService,
@@ -38,7 +35,7 @@ class SvOnboardingUnlimitedTrafficTrigger(
     override val ec: ExecutionContext,
     mat: Materializer,
     override val tracer: Tracer,
-) extends GrantUnlimitedTrafficTriggerBase(trafficBalanceReconciliationDelay) {
+) extends GrantTrafficTriggerBase(trafficBalanceReconciliationDelay) {
 
   override protected def sequencerAdminConnection()(implicit
       tc: TraceContext
@@ -88,7 +85,7 @@ class SvOnboardingUnlimitedTrafficTrigger(
       // Sorting here so we have a better chance of all SVs working on the same set traffic balance request around the same time.
       svMembersWithTrafficState.sortBy(_._1).collect {
         case (memberId, trafficState) if trafficState.extraTrafficLimit != UnlimitedTraffic =>
-          Task(activeSynchronizerId, memberId)
+          Task(activeSynchronizerId, memberId, UnlimitedTraffic)
       }
     }
   }

@@ -11,19 +11,18 @@ import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
-import org.lfdecentralizedtrust.splice.automation.GrantUnlimitedTrafficTriggerBase.{
-  Task,
-  UnlimitedTraffic,
-}
+import org.lfdecentralizedtrust.splice.automation.GrantTrafficTriggerBase.Task
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
 
 import scala.concurrent.{ExecutionContext, Future}
 
-/** Grants unlimited traffic on a sequencer to members that cannot buy their own, such as the
-  * mediators and the SV participants of a synchronizer. Subclasses decide which members those are.
+/** Raises a member's extra traffic limit on a sequencer to the amount its task names. Subclasses
+  * decide which members to grant for and what they are owed: unlimited for those that cannot buy,
+  * such as the mediators and the SV participants of a synchronizer, or the total purchased for
+  * those that can.
   */
-abstract class GrantUnlimitedTrafficTriggerBase(
+abstract class GrantTrafficTriggerBase(
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration
 )(implicit
     ec: ExecutionContext,
@@ -52,12 +51,12 @@ abstract class GrantUnlimitedTrafficTriggerBase(
       _ <- connection.setSequencerTrafficControlState(
         trafficState,
         sequencerState,
-        UnlimitedTraffic,
+        task.trafficLimit,
         context.pollingClock,
         trafficBalanceReconciliationDelay,
       )
     } yield TaskSuccess(
-      s"Updated traffic limit for ${task.memberId} to NonNegativeLong.maxValue"
+      s"Updated traffic limit for ${task.memberId} from ${trafficState.extraTrafficLimit} to ${task.trafficLimit}"
     )
 
   override protected final def isStaleTask(task: Task)(implicit
@@ -70,22 +69,24 @@ abstract class GrantUnlimitedTrafficTriggerBase(
     } yield {
       // A member without a traffic state has nothing to grant on, so drop the task and let the
       // next poll pick it up once the state exists.
-      !active || trafficStateO.forall(_.extraTrafficLimit == UnlimitedTraffic)
+      !active || trafficStateO.forall(_.extraTrafficLimit >= task.trafficLimit)
     }
 }
 
-object GrantUnlimitedTrafficTriggerBase {
+object GrantTrafficTriggerBase {
 
   val UnlimitedTraffic: NonNegativeLong = NonNegativeLong.maxValue
 
   final case class Task(
       synchronizerId: SynchronizerId,
       memberId: Member,
+      trafficLimit: NonNegativeLong,
   ) extends PrettyPrinting {
     override def pretty: Pretty[this.type] =
       prettyOfClass(
         param("synchronizerId", _.synchronizerId),
         param("memberId", _.memberId),
+        param("trafficLimit", _.trafficLimit),
       )
   }
 }

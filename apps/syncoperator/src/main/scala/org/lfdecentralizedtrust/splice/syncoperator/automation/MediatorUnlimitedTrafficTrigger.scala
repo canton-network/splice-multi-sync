@@ -8,11 +8,8 @@ import com.digitalasset.canton.topology.{MediatorId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
-import org.lfdecentralizedtrust.splice.automation.{GrantUnlimitedTrafficTriggerBase, TriggerContext}
-import org.lfdecentralizedtrust.splice.automation.GrantUnlimitedTrafficTriggerBase.{
-  Task,
-  UnlimitedTraffic,
-}
+import org.lfdecentralizedtrust.splice.automation.{GrantTrafficTriggerBase, TriggerContext}
+import org.lfdecentralizedtrust.splice.automation.GrantTrafficTriggerBase.{Task, UnlimitedTraffic}
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
 
@@ -30,7 +27,7 @@ class MediatorUnlimitedTrafficTrigger(
     override val ec: ExecutionContext,
     mat: Materializer,
     override val tracer: Tracer,
-) extends GrantUnlimitedTrafficTriggerBase(trafficBalanceReconciliationDelay) {
+) extends GrantTrafficTriggerBase(trafficBalanceReconciliationDelay) {
 
   override protected def sequencerAdminConnection()(implicit
       tc: TraceContext
@@ -52,7 +49,7 @@ class MediatorUnlimitedTrafficTrigger(
       val limitByMember = trafficStates.map(state => state.member -> state.extraTrafficLimit).toMap
       mediators.collect {
         case mediatorId if limitByMember.get(mediatorId).exists(_ != UnlimitedTraffic) =>
-          Task(synchronizerId, mediatorId)
+          Task(synchronizerId, mediatorId, UnlimitedTraffic)
       }
     }
   }
