@@ -192,7 +192,8 @@ export function buildProposal(action: ActionRequiringConfirmation, dsoInfo?: Dso
         return createRegisterSynchronizerProposal(
           dsoAction.value.synchronizerId,
           dsoAction.value.operator,
-          dsoAction.value.governanceParameters.discountFactor
+          dsoAction.value.governanceParameters.discountFactor,
+          dsoAction.value.governanceParameters.outageAdvance
         );
       case 'SRARC_UpdateSvRewardWeight': {
         const allSvInfos = dsoInfo?.dsoRules.payload.svs.entriesArray() || [];
@@ -268,12 +269,14 @@ function createRevokeFeatureAppProposal(rightContractId: string): UnfeatureAppPr
 function createRegisterSynchronizerProposal(
   synchronizerId: string,
   operator: string,
-  discountFactor: string
+  discountFactor: string,
+  outageAdvance: string
 ): RegisterSynchronizerProposal {
   return {
     synchronizerId: synchronizerId,
     operator: operator,
     discountFactor: discountFactor,
+    outageAdvance: outageAdvance,
   };
 }
 
