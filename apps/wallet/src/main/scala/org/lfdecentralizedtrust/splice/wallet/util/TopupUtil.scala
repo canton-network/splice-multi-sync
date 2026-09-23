@@ -15,12 +15,11 @@ import com.digitalasset.canton.tracing.TraceContext
 import org.apache.pekko.stream.Materializer
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.OptionConverters.*
 
 object TopupUtil {
 
-  /** The registration's discount factor, or 1.0 where there is none, mirroring
-    * `getDiscountFactor` in Daml.
+  /** The registration's discount factor, or 1.0 where there is no registration, mirroring
+    * `getDiscountFactor` in Daml. A registration always states its parameters.
     */
   def discountFactor(
       registration: Option[
@@ -28,7 +27,7 @@ object TopupUtil {
       ]
   ): BigDecimal =
     registration
-      .flatMap(_.payload.governanceParameters.toScala)
+      .map(_.payload.governanceParameters)
       .fold(BigDecimal(1))(p => BigDecimal(p.discountFactor))
 
   def minWalletBalanceForTopup(
@@ -93,18 +92,16 @@ object TopupUtil {
     }
   }
 
-  def hasSufficientFundsForTopup(
+  def hasSufficientFundsForTopupOnGlobalSync(
       scanConnection: ScanConnection,
       validatorWalletStore: UserWalletStore,
-      validatorTopupConfig: ValidatorTopupConfig,
+      globalTopupConfig: ValidatorTopupConfig,
       clock: Clock,
   )(implicit tc: TraceContext, ec: ExecutionContext, mat: Materializer): Future[Boolean] = {
     topupBudget(scanConnection, validatorWalletStore).flatMap {
       case None => Future.successful(true)
       case Some(walletBalance) =>
-        // This config is the global synchronizer's, built from `domains.global` in ValidatorApp.
-        // A required synchronizer carries no registration, so there is no discount to apply.
-        minWalletBalanceForTopup(scanConnection, validatorTopupConfig, clock, None)
+        minWalletBalanceForTopup(scanConnection, globalTopupConfig, clock, None)
           .map(walletBalance >= _)
     }
   }

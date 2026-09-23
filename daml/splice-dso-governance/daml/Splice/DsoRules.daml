@@ -31,7 +31,7 @@ import Splice.Wallet.Subscriptions
 -- `RegisteredSynchronizer` (PoC): created by `DsoRules_RegisterSynchronizer` below; the template
 -- itself lives in splice-amulet because AmuletRules must be able to fetch it.
 import Splice.DecentralizedSynchronizer (MemberTraffic, RegisteredSynchronizer(..),
-  RegisteredSynchronizer_SetGovernanceParameters,
+  GovernanceParameters, RegisteredSynchronizer_SetGovernanceParameters,
   RegisteredSynchronizer_SetGovernanceParametersResult, DedicatedSynchronizerState(..))
 
 import qualified Splice.CometBft as CometBft
@@ -1776,13 +1776,20 @@ template DsoRules with
       -- Creates a RegisteredSynchronizer (in splice-amulet) binding synchronizerId to its
       -- operator. This is the only way the registry is populated; the member-traffic buy choice
       -- then reads that contract (via explicit disclosure) to authorize Amulet burns for the synchronizer.
+      -- The vote carries the governance parameters as well as the identity fields, so registering a
+      -- synchronizer at an agreed discount is one vote rather than two.
       with
         synchronizerId : Text -- ^ stable id of the dedicated synchronizer to register
         operator : Party -- ^ the party operating that synchronizer
+        governanceParameters : GovernanceParameters
+          -- ^ the parameters the same vote sets, so a synchronizer promised a discount is never
+          --   registered at full price while a second vote is arranged. Stated explicitly rather
+          --   than defaulted (`defaultGovernanceParameters` is the no-discount value); changing
+          --   them later is `DsoRules_SetSynchronizerGovernanceParameters`.
       controller dso
       do
         require "synchronizerId is non-empty" (not (T.isEmpty synchronizerId))
-        registeredSynchronizerCid <- create RegisteredSynchronizer with dso; synchronizerId; operator; governanceParameters = None
+        registeredSynchronizerCid <- create RegisteredSynchronizer with dso; synchronizerId; operator; governanceParameters
         -- reporting state for the extension reward flow (see DedicatedSynchronizerState),
         -- created at registration so the operator can report from its first round
         dedicatedSynchronizerStateCid <- create DedicatedSynchronizerState with

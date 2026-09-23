@@ -65,7 +65,12 @@ class CollectRewardsAndMergeAmuletsTrigger(
           Future.successful(CommandPriority.Low) // not the wallet of the validator operator
         case Some(validatorTopupConfig) =>
           TopupUtil
-            .hasSufficientFundsForTopup(scanConnection, store, validatorTopupConfig, clock)
+            .hasSufficientFundsForTopupOnGlobalSync(
+              scanConnection,
+              store,
+              validatorTopupConfig,
+              clock,
+            )
             .map(if (_) CommandPriority.Low else CommandPriority.High): Future[CommandPriority]
       }
       result <- treasury

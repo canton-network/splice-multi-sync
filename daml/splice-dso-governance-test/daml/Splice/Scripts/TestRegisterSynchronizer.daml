@@ -44,13 +44,14 @@ test_RegisterSynchronizer_viaVote = do
       dsoAction = SRARC_RegisterSynchronizer DsoRules_RegisterSynchronizer with
         synchronizerId = dedicatedSyncId
         operator
+        governanceParameters = defaultGovernanceParameters
 
   -- The registration now exists on-ledger with exactly the fields we voted for.
   (_, reg) <- onlyRegistration dso
   reg.dso === dso
   reg.synchronizerId === dedicatedSyncId
   reg.operator === operator
-  reg.governanceParameters === None
+  reg.governanceParameters === defaultGovernanceParameters
   getDiscountFactor reg === 1.0
 
   -- The operator is an observer, so it can see its own registration.
@@ -65,6 +66,27 @@ test_RegisterSynchronizer_viaVote = do
       st.operator === operator
       st.totalActivityReported === 0.0
     _ -> abort $ "expected exactly one DedicatedSynchronizerState, got " <> show (length states)
+
+-- | Register with the governance parameters in the same vote: the registration is live at the
+--   agreed discount immediately, with no window at full price and no second vote to arrange.
+test_RegisterSynchronizer_withGovernanceParameters : Script ()
+test_RegisterSynchronizer_withGovernanceParameters = do
+  (app, dso, (sv1, sv2, sv3, sv4)) <- initMainNet
+  operator <- allocateParty "dedicatedSyncOperator"
+  let dedicatedSyncId = "dedicated-sync::1220fafafafafafafafafafafafafafafafafafafafafafafafafafafafafafa"
+
+  initiateAndAcceptVote app [sv1, sv2, sv3, sv4] $
+    ARC_DsoRules with
+      dsoAction = SRARC_RegisterSynchronizer DsoRules_RegisterSynchronizer with
+        synchronizerId = dedicatedSyncId
+        operator
+        governanceParameters = GovernanceParameters with discountFactor = 0.5
+
+  (_, reg) <- onlyRegistration dso
+  reg.synchronizerId === dedicatedSyncId
+  reg.operator === operator
+  reg.governanceParameters === GovernanceParameters with discountFactor = 0.5
+  getDiscountFactor reg === 0.5
 
 -- | Set the governance parameters by vote, then replace them twice. A replacement archives the
 --   registration and recreates it, so exactly one is live throughout, and the setter always stores
@@ -87,21 +109,22 @@ test_SetSynchronizerGovernanceParameters_viaVote = do
       dsoAction = SRARC_RegisterSynchronizer DsoRules_RegisterSynchronizer with
         synchronizerId = dedicatedSyncId
         operator
+        governanceParameters = defaultGovernanceParameters
 
   (registeredCid, _) <- onlyRegistration dso
   setDiscountTo registeredCid 0.75
   (discountedCid, discounted) <- onlyRegistration dso
-  discounted.governanceParameters === Some (GovernanceParameters with discountFactor = 0.75)
+  discounted.governanceParameters === GovernanceParameters with discountFactor = 0.75
 
   setDiscountTo discountedCid 0.5
   (replacedCid, replaced) <- onlyRegistration dso
-  replaced.governanceParameters === Some (GovernanceParameters with discountFactor = 0.5)
+  replaced.governanceParameters === GovernanceParameters with discountFactor = 0.5
 
-  -- Voting a parameter back to its default stores the block rather than clearing it: `None` means
-  -- nothing has been voted, which stops being well defined once the block has several parameters.
+  -- Voting a parameter back to its default is an ordinary replacement: the block is always present,
+  -- so there is no "nothing voted yet" state to fall back to.
   setDiscountTo replacedCid 1.0
   (_, defaulted) <- onlyRegistration dso
-  defaulted.governanceParameters === Some (GovernanceParameters with discountFactor = 1.0)
+  defaulted.governanceParameters === GovernanceParameters with discountFactor = 1.0
   getDiscountFactor defaulted === 1.0
 
 -- | The one live registration, which also asserts that a parameter vote replaced rather than added.
@@ -129,6 +152,7 @@ test_ArchiveSynchronizerRegistration_viaVote = do
       dsoAction = SRARC_RegisterSynchronizer DsoRules_RegisterSynchronizer with
         synchronizerId = dedicatedSyncId
         operator
+        governanceParameters = defaultGovernanceParameters
   [(regCid, _)] <- query @RegisteredSynchronizer operator
   [(stateCid, _)] <- query @DedicatedSynchronizerState operator
 

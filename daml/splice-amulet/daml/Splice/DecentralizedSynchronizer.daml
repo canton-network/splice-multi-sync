@@ -122,10 +122,13 @@ data GovernanceParameters = GovernanceParameters with
       -- ^ Multiplies this synchronizer's traffic price.
   deriving (Show, Eq, Serializable)
 
+-- | The parameters a synchronizer is registered with when governance has agreed no discount.
+defaultGovernanceParameters : GovernanceParameters
+defaultGovernanceParameters = GovernanceParameters with discountFactor = defaultDiscountFactor
+
 -- | The multiplier a registration applies to its synchronizer's traffic price.
 getDiscountFactor : RegisteredSynchronizer -> Decimal
-getDiscountFactor reg =
-  optional defaultDiscountFactor (.discountFactor) reg.governanceParameters
+getDiscountFactor reg = reg.governanceParameters.discountFactor
 
 data RegisteredSynchronizer_SetGovernanceParametersResult = RegisteredSynchronizer_SetGovernanceParametersResult with
     registeredSynchronizerCid : ContractId RegisteredSynchronizer
@@ -155,8 +158,9 @@ template RegisteredSynchronizer with
     operator : Party
       -- ^ The party operating the dedicated synchronizer. Observes this registration and every
       --   traffic purchase for its synchronizer (via the `operator` field on `MemberTraffic`).
-    governanceParameters : Optional GovernanceParameters
-      -- ^ Set by DSO governance. `None` is nothing voted yet, so every parameter is at its default.
+    governanceParameters : GovernanceParameters
+      -- ^ Set by DSO governance, stated explicitly at registration rather than defaulted, so
+      --   what a synchronizer is registered with is never implied.
   where
     signatory dso
     observer operator
@@ -181,7 +185,7 @@ template RegisteredSynchronizer with
       controller dso
       do
         registeredSynchronizerCid <- create this with
-          governanceParameters = Some newGovernanceParameters
+          governanceParameters = newGovernanceParameters
         pure RegisteredSynchronizer_SetGovernanceParametersResult with registeredSynchronizerCid
 
 -- Group-id check for `fetchPublicReferenceData`: a `RegisteredSynchronizer` is scoped to the

@@ -257,6 +257,14 @@ export const ProposalDetailsContent: React.FC<ProposalDetailsContentProps> = pro
             />
           )}
 
+          {proposalDetails.action === 'SRARC_RegisterSynchronizer' && (
+            <RegisterSynchronizerSection
+              synchronizerId={proposalDetails.proposal.synchronizerId}
+              operator={proposalDetails.proposal.operator}
+              discountFactor={proposalDetails.proposal.discountFactor}
+            />
+          )}
+
           {proposalDetails.action === 'SRARC_CreateUnallocatedUnclaimedActivityRecord' && (
             <CreateUnallocatedUnclaimedActivityRecordSection
               beneficiary={proposalDetails.proposal.beneficiary}
@@ -945,6 +953,54 @@ const UpdateFeatureAppSection = ({
               },
             ]}
           />
+        }
+      />
+    </Box>
+  );
+};
+
+interface RegisterSynchronizerSectionProps {
+  synchronizerId: string;
+  operator: string;
+  discountFactor: string;
+}
+
+const RegisterSynchronizerSection = ({
+  synchronizerId,
+  operator,
+  discountFactor,
+}: RegisterSynchronizerSectionProps) => {
+  return (
+    <Box
+      id="proposal-details-register-synchronizer-section"
+      data-testid="proposal-details-register-synchronizer-section"
+    >
+      <DetailItem
+        label="Synchronizer ID"
+        value={
+          <Typography variant="body1" data-testid="proposal-details-synchronizer-id">
+            {synchronizerId}
+          </Typography>
+        }
+      />
+      <DetailItem
+        label="Synchronizer Operator"
+        value={
+          <MemberIdentifier
+            partyId={operator}
+            isYou={false}
+            size="large"
+            fullWidth
+            data-testid="proposal-details-operator-party-id"
+          />
+        }
+      />
+      <DetailItem
+        label="Traffic Discount"
+        value={
+          <Typography variant="body1" data-testid="proposal-details-discount-factor">
+            {`${discountFactor} (multiplies this synchronizer's traffic price)`}
+          </Typography>
         }
       />
     </Box>
