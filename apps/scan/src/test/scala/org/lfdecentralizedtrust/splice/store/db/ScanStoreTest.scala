@@ -21,6 +21,7 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.amuletrules.{
 }
 import org.lfdecentralizedtrust.splice.codegen.java.splice.ans.AnsEntry
 import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.{
+  GovernanceParameters,
   MemberTraffic,
   RegisteredSynchronizer,
 }
@@ -1782,7 +1783,7 @@ trait AmuletTransferUtil { self: StoreTestBase =>
         dsoParty.toProtoPrimitive,
         synchronizerId,
         operator.toProtoPrimitive,
-        java.util.Optional.empty(),
+        new GovernanceParameters(java.math.BigDecimal.ONE.setScale(10)),
       ),
     )
 
