@@ -358,7 +358,7 @@ class HttpWalletHandler(
               Future.successful(CommandPriority.Low)
             else
               TopupUtil
-                .hasSufficientFundsForTopup(
+                .hasSufficientFundsForTopupOnGlobalSync(
                   scanConnection,
                   userWallet.store,
                   validatorTopupConfig,

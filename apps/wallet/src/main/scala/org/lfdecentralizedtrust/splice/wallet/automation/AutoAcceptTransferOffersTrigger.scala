@@ -66,7 +66,12 @@ class AutoAcceptTransferOffersTrigger(
           case None => Future.successful(CommandPriority.Low)
           case Some(validatorTopupConfig) =>
             TopupUtil
-              .hasSufficientFundsForTopup(scanConnection, store, validatorTopupConfig, clock)
+              .hasSufficientFundsForTopupOnGlobalSync(
+                scanConnection,
+                store,
+                validatorTopupConfig,
+                clock,
+              )
               .map(if (_) CommandPriority.Low else CommandPriority.High): Future[CommandPriority]
         }
         res <- connection
