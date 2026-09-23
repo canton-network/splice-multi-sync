@@ -917,7 +917,7 @@ testBuyMemberTrafficForRegisteredSynchronizer = script do
     dso = app.dso
     synchronizerId = registeredSyncId
     operator
-    governanceParameters = None
+    governanceParameters = defaultGovernanceParameters
 
   submit aliceValidator.primaryParty $ createCmd $ WalletAppInstall with
     endUserParty = aliceValidator.primaryParty
@@ -956,7 +956,7 @@ testBuyTrafficRequestForRegisteredSynchronizer = script do
     dso = app.dso
     synchronizerId = registeredSyncId
     operator
-    governanceParameters = None
+    governanceParameters = defaultGovernanceParameters
 
   aliceInstall <- submit (actAs alice.primaryParty <> actAs aliceValidator.primaryParty) $ createCmd $ WalletAppInstall with
     endUserParty = alice.primaryParty

@@ -11,6 +11,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.{Member, PartyId, SynchronizerId}
 import monocle.macros.syntax.lens.*
 import org.lfdecentralizedtrust.splice.codegen.java.splice
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.GovernanceParameters
 import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.RegisteredSynchronizer
 import org.lfdecentralizedtrust.splice.codegen.java.splice.round.IssuingMiningRound
 import org.lfdecentralizedtrust.splice.codegen.java.splice.wallet.topupstate.ValidatorTopUpState
@@ -135,6 +136,7 @@ class SyncOperatorTrafficIntegrationTest
               .exerciseDsoRules_RegisterSynchronizer(
                 synchronizerId.toProtoPrimitive,
                 operatorParty.toProtoPrimitive,
+                new GovernanceParameters(java.math.BigDecimal.ONE.setScale(10)),
               )
               .commands
               .asScala

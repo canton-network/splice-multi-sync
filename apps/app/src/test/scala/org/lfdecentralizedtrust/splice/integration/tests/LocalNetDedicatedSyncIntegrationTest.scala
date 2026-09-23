@@ -8,6 +8,7 @@ import org.lfdecentralizedtrust.splice.auth.AuthUtil
 import org.lfdecentralizedtrust.splice.codegen.java.da.time.types.RelTime
 import org.lfdecentralizedtrust.splice.codegen.java.splice
 import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.RegisteredSynchronizer
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.GovernanceParameters
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dsorules.DsoRules_RegisterSynchronizer
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dsorules.actionrequiringconfirmation.ARC_DsoRules
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dsorules.dsorules_actionrequiringconfirmation.SRARC_RegisterSynchronizer
@@ -136,6 +137,7 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
               new DsoRules_RegisterSynchronizer(
                 appSynchronizerId.toProtoPrimitive,
                 operatorParty.toProtoPrimitive,
+                new GovernanceParameters(java.math.BigDecimal.ONE.setScale(10)),
               )
             )
           ),
