@@ -85,3 +85,7 @@ lnav*work
 
 # VS Code
 .vscode/
+
+# LSU schedule written by LocalNetDedicatedSyncLsuIntegrationTest
+cluster/compose/localnet/conf/splice/sync-operator/lsu-topology-freeze-time
+cluster/compose/localnet/conf/splice/sync-operator/lsu-upgrade-time
