@@ -79,6 +79,7 @@ type ProposalSummaryProps = BaseProposalSummaryProps &
         synchronizerId: string;
         operator: string;
         discountFactor: string;
+        outageAdvance: string;
       }
     | {
         formType: 'update-right-weight';
@@ -259,6 +260,11 @@ export const ProposalSummary: React.FC<ProposalSummaryProps> = props => {
               id="discountFactor"
               label="Traffic Discount"
               value={props.discountFactor}
+            />
+            <ProposalReviewField
+              id="outageAdvance"
+              label="Outage Traffic Advance"
+              value={props.outageAdvance}
             />
           </>
         )}

@@ -262,6 +262,7 @@ export const ProposalDetailsContent: React.FC<ProposalDetailsContentProps> = pro
               synchronizerId={proposalDetails.proposal.synchronizerId}
               operator={proposalDetails.proposal.operator}
               discountFactor={proposalDetails.proposal.discountFactor}
+              outageAdvance={proposalDetails.proposal.outageAdvance}
             />
           )}
 
@@ -963,12 +964,14 @@ interface RegisterSynchronizerSectionProps {
   synchronizerId: string;
   operator: string;
   discountFactor: string;
+  outageAdvance: string;
 }
 
 const RegisterSynchronizerSection = ({
   synchronizerId,
   operator,
   discountFactor,
+  outageAdvance,
 }: RegisterSynchronizerSectionProps) => {
   return (
     <Box
@@ -1000,6 +1003,16 @@ const RegisterSynchronizerSection = ({
         value={
           <Typography variant="body1" data-testid="proposal-details-discount-factor">
             {`${discountFactor} (multiplies this synchronizer's traffic price)`}
+          </Typography>
+        }
+      />
+      <DetailItem
+        label="Outage Traffic Advance"
+        value={
+          <Typography variant="body1" data-testid="proposal-details-outage-advance">
+            {outageAdvance === '0'
+              ? 'None'
+              : `${outageAdvance} bytes per member while the global synchronizer is unreachable`}
           </Typography>
         }
       />

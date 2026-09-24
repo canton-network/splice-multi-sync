@@ -114,4 +114,41 @@ describe('Register Dedicated Synchronizer Form', () => {
     await user.click(screen.getByTestId('register-synchronizer-action'));
     expect(screen.queryByText('Must be greater than 0 and at most 1')).not.toBeInTheDocument();
   });
+
+  test('prefills the outage advance with the no-advance value', () => {
+    render(
+      <Wrapper>
+        <RegisterSynchronizerForm />
+      </Wrapper>
+    );
+
+    expect(screen.getByTestId('register-synchronizer-outage-advance').getAttribute('value')).toBe(
+      '0'
+    );
+  });
+
+  test('accepts only a whole number of bytes for the outage advance', async () => {
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <RegisterSynchronizerForm />
+      </Wrapper>
+    );
+
+    const advanceInput = screen.getByTestId('register-synchronizer-outage-advance');
+    const message = 'Must be a whole number of bytes, 0 or more';
+
+    // the template's ensure rejects a negative advance, and Daml's Int has no fraction
+    for (const bad of ['-1', '1.5']) {
+      await user.clear(advanceInput);
+      await user.type(advanceInput, bad);
+      await user.click(screen.getByTestId('register-synchronizer-action'));
+      screen.getByText(message);
+    }
+
+    await user.clear(advanceInput);
+    await user.type(advanceInput, '5000000');
+    await user.click(screen.getByTestId('register-synchronizer-action'));
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
+  });
 });

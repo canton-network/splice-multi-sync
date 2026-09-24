@@ -1783,7 +1783,7 @@ trait AmuletTransferUtil { self: StoreTestBase =>
         dsoParty.toProtoPrimitive,
         synchronizerId,
         operator.toProtoPrimitive,
-        new GovernanceParameters(java.math.BigDecimal.ONE.setScale(10)),
+        new GovernanceParameters(java.math.BigDecimal.ONE.setScale(10), 0L),
       ),
     )
 

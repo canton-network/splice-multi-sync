@@ -18,7 +18,7 @@ import Daml.Script
 -- The extended buy choice, the merge choice, and `TransferInput`/`InputAmulet`/`TransferContext`.
 import Splice.AmuletRules
 -- The registry contract (rung 1) and the purchase record the buy choice creates.
-import Splice.DecentralizedSynchronizer (GovernanceParameters(..), defaultGovernanceParameters, RegisteredSynchronizer(..), MemberTraffic(..))
+import Splice.DecentralizedSynchronizer (defaultGovernanceParameters, RegisteredSynchronizer(..), MemberTraffic(..))
 
 -- App + user + round + funding helpers (setupDefaultAppWithUsers, tap, getTransferContext, ...).
 import Splice.Scripts.Util
@@ -289,7 +289,7 @@ test_BuyRegisteredSyncTraffic_requiredSynchronizer = do
     dso = app.dso
     synchronizerId = decentralizedSyncId
     operator
-    governanceParameters = GovernanceParameters with discountFactor = 0.5
+    governanceParameters = defaultGovernanceParameters with discountFactor = 0.5
 
   amuletCid <- tap app provider 1_000_000.0
   context <- getTransferContext app provider None
@@ -320,7 +320,7 @@ test_BuyRegisteredSyncTraffic_discounted = do
     dso = app.dso
     synchronizerId = registeredSyncId
     operator
-    governanceParameters = GovernanceParameters with discountFactor = 0.75
+    governanceParameters = defaultGovernanceParameters with discountFactor = 0.75
 
   amuletCid <- tap app provider 1_000_000.0
   context <- getTransferContext app provider None
@@ -352,9 +352,26 @@ test_RegisteredSynchronizer_ensureDiscountBounds = do
         dso = app.dso
         synchronizerId = "dedicated-sync::1220bounds"
         operator
-        governanceParameters = GovernanceParameters with discountFactor = f
+        governanceParameters = defaultGovernanceParameters with discountFactor = f
   register 0.0
   register 1.5
+
+-- | Negative: the outage advance is an amount of traffic, so the template `ensure` rejects a
+--   negative one, while 0 (no advance) and a positive amount are accepted.
+test_RegisteredSynchronizer_ensureOutageAdvanceNotNegative : Script ()
+test_RegisteredSynchronizer_ensureOutageAdvanceNotNegative = do
+  d <- setupDefaultAppWithUsers
+  let app = d.app
+  operator <- allocateParty "registeredSyncOperator"
+  let register a = createCmd RegisteredSynchronizer with
+        dso = app.dso
+        synchronizerId = "dedicated-sync::1220advance"
+        operator
+        governanceParameters = defaultGovernanceParameters with outageAdvance = a
+  submitMustFail app.dso $ register (-1)
+  _ <- submit app.dso $ register 0
+  _ <- submit app.dso $ register 5_000_000
+  pure ()
 
 -- | Merging member traffic preserves the operator observer, and refuses to merge contracts whose
 --   operators disagree.
