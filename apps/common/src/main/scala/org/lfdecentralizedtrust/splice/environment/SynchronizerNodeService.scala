@@ -14,13 +14,13 @@ import io.grpc.Status
 
 import scala.concurrent.{ExecutionContext, Future}
 
-class SynchronizerNodeService[T <: SynchronizerNode](
+/** Hands out whichever synchronizer node is live, so callers keep working across an upgrade.
+  * Subclasses decide when the successor has taken over. The switch is sticky once it has.
+  */
+abstract class SynchronizerNodeServiceBase[T <: SynchronizerNode](
     val nodes: SynchronizerNode.LocalSynchronizerNodes[T],
-    participantAdminConnection: ParticipantAdminConnection,
-    globalSynchronizerAlias: SynchronizerAlias,
     cacheExpiration: NonNegativeFiniteDuration,
     retryProvider: RetryProvider,
-    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
 
@@ -40,6 +40,9 @@ class SynchronizerNodeService[T <: SynchronizerNode](
           ),
     )(logger, "successorActive")
 
+  /** Whether the successor node has taken over from the current one. */
+  protected def successorActiveUncached()(implicit tc: TraceContext): Future[Boolean]
+
   private def successorActive()(implicit tc: TraceContext): Future[Boolean] =
     if (successorActiveRef.get()) {
       Future.successful(true)
@@ -53,7 +56,35 @@ class SynchronizerNodeService[T <: SynchronizerNode](
       }
     }
 
-  private def successorActiveUncached()(implicit tc: TraceContext): Future[Boolean] =
+  def activeSynchronizerNode()(implicit tc: TraceContext): Future[T] =
+    nodes.successor match {
+      case None => Future.successful(nodes.current)
+      case Some(successor) =>
+        successorActive().map {
+          if (_) {
+            successor
+          } else {
+            nodes.current
+          }
+        }
+    }
+
+  def sequencerAdminConnection()(implicit tc: TraceContext): Future[SequencerAdminConnection] =
+    activeSynchronizerNode().map(_.sequencerAdminConnection)
+}
+
+/** Switches over once this node's participant is registered on the successor's serial. */
+class SynchronizerNodeService[T <: SynchronizerNode](
+    nodes: SynchronizerNode.LocalSynchronizerNodes[T],
+    participantAdminConnection: ParticipantAdminConnection,
+    globalSynchronizerAlias: SynchronizerAlias,
+    cacheExpiration: NonNegativeFiniteDuration,
+    retryProvider: RetryProvider,
+    override protected val loggerFactory: NamedLoggerFactory,
+)(implicit ec: ExecutionContext)
+    extends SynchronizerNodeServiceBase[T](nodes, cacheExpiration, retryProvider) {
+
+  override protected def successorActiveUncached()(implicit tc: TraceContext): Future[Boolean] =
     nodes.successor match {
       case None => Future.successful(false)
       case Some(successor) =>
@@ -81,20 +112,4 @@ class SynchronizerNodeService[T <: SynchronizerNode](
             else Future.successful(None)
         } yield successorPSId.map(_.serial).contains(global.serial)
     }
-
-  def activeSynchronizerNode()(implicit tc: TraceContext): Future[T] =
-    nodes.successor match {
-      case None => Future.successful(nodes.current)
-      case Some(successor) =>
-        successorActive().map {
-          if (_) {
-            successor
-          } else {
-            nodes.current
-          }
-        }
-    }
-
-  def sequencerAdminConnection()(implicit tc: TraceContext): Future[SequencerAdminConnection] =
-    activeSynchronizerNode().map(_.sequencerAdminConnection)
 }
