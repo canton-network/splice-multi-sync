@@ -28,10 +28,8 @@ import org.lfdecentralizedtrust.splice.syncoperator.automation.DedicatedLsuTrigg
 import java.nio.file.Path
 import scala.concurrent.{ExecutionContext, Future}
 
-/** Stands up the successor of this operator's synchronizer once an LSU has been announced.
-  *
-  * The SV's `LsuTrigger` for a single-owner synchronizer: no DSO state to reconcile, no cometbft
-  * node to rotate, and members follow the sequencer successor this publishes.
+/** Stands up the successor of this operator's synchronizer once an LSU has been announced, and
+  * publishes the sequencer successor that members follow.
   */
 class DedicatedLsuTrigger(
     baseContext: TriggerContext,

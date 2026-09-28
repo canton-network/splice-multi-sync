@@ -68,11 +68,8 @@ case class SyncOperatorSynchronizerNodesConfig(
     successor: Option[SyncOperatorSynchronizerNodeConfig] = None,
 )
 
-/** A logical synchronizer upgrade the operator has scheduled for its own synchronizer.
-  *
-  * Mirrors the DSO's `LogicalSynchronizerUpgradeSchedule`, which governance votes for the
-  * decentralized synchronizer. The operator upgrades on its own schedule, so it configures the
-  * same fields here instead.
+/** An upgrade the operator has scheduled, mirroring the DSO's
+  * `LogicalSynchronizerUpgradeSchedule`.
   */
 case class SyncOperatorLsuConfig(
     // The announcement is published once this is reached, which is what freezes topology.
