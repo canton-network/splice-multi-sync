@@ -148,17 +148,13 @@ class LocalNetDedicatedSyncBftIntegrationTest extends LocalNetDedicatedSyncInteg
             .trafficStates
             .get(participant.id)
 
-        // The participant's purchased and consumed traffic on each node, read at one timestamp.
-        def trafficAt(on: Seq[Node]) = {
-          val at = trafficOn(on.head).value.timestamp
-          on.map(n =>
-            n.sequencer.traffic_control
-              .traffic_state_of_members_at_timestamp(Seq(participant.id), at)
-              .trafficStates
-              .get(participant.id)
-              .map(state => (state.extraTrafficPurchased.value, state.extraTrafficConsumed.value))
+        // The participant's purchased and consumed traffic as each node reports it.
+        def trafficOnAll(on: Seq[Node]) =
+          on.map(
+            trafficOn(_).map(state =>
+              (state.extraTrafficPurchased.value, state.extraTrafficConsumed.value)
+            )
           )
-        }
 
         def operatorNamespace() =
           decentralizedNamespace(nodes.head.orgParticipant, operator, globalSynchronizerId)
@@ -190,7 +186,7 @@ class LocalNetDedicatedSyncBftIntegrationTest extends LocalNetDedicatedSyncInteg
             timeout: FiniteDuration = automationTimeout,
         ): Long =
           eventuallySucceeds(timeout) {
-            val (purchasedOnAll, consumedOnAll) = trafficAt(on).distinct.loneElement.value
+            val (purchasedOnAll, consumedOnAll) = trafficOnAll(on).distinct.loneElement.value
             purchasedOnAll shouldBe purchased
             consumedOnAll should be > consumedAbove
             consumedOnAll
