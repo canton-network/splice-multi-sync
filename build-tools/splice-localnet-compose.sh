@@ -32,14 +32,16 @@ ALPHA_PROTOCOL_VERSION_ENV=""
 # The sync operator serves the app-synchronizer, so it runs with the multi-sync profile.
 SYNC_OPERATOR_PROFILE=off
 export SYNC_OPERATOR_PROFILE
+EXTRA_COMPOSE_FILES=()
 
 function usage() {
-    echo "Usage: $SCRIPTNAME <start|stop> [-D] [-M] [-O] [-u] [-p <protocol_version>]"
+    echo "Usage: $SCRIPTNAME <start|stop> [-D] [-M] [-O] [-B] [-u] [-p <protocol_version>]"
     echo ""
     echo "Options:"
     echo "  -D                        Completely tear down the localnet (using 'docker compose down') instead of just stopping the containers (using 'docker compose stop')"
     echo "  -M                        Start the localnet with the 'multi-sync' profile enabled"
     echo "  -O                        Run the sync operator, serving the app-synchronizer as a dedicated synchronizer. Implies -M."
+    echo "  -B                        Run the app-synchronizer on four BFT nodes, each run by its own org with its own sync operator. Implies -O. Tear down with -D before switching to or from it."
     echo "  -u                        Enable unstable Canton protocol versions. WARNING: This should be used only for temporary test environments that be be reset often."
     echo "  -p <protocol_version>     Set the PROTOCOL_VERSION environment variable to the specified value (e.g. 35)"
 }
@@ -73,6 +75,11 @@ while [[ $# -gt 0 ]]; do
             MULTI_SYNC_PROFILE=( --profile multi-sync )
             SYNC_OPERATOR_PROFILE=on
             ;;
+        -B)
+            MULTI_SYNC_PROFILE=( --profile multi-sync )
+            SYNC_OPERATOR_PROFILE=on
+            EXTRA_COMPOSE_FILES=( -f "$LOCALNET_DIR/compose-app-synchronizer-bft.yaml" )
+            ;;
         -p)
             shift
             if [[ -z "$1" ]]; then
@@ -102,6 +109,7 @@ DOCKER_COMPOSE_CMD=( docker compose
     --env-file "$LOCALNET_DIR/env/common.env"
     -f "$LOCALNET_DIR/compose.yaml"
     -f "$LOCALNET_DIR/resource-constraints.yaml"
+    "${EXTRA_COMPOSE_FILES[@]}"
     --profile sv
     --profile app-provider
     --profile app-user

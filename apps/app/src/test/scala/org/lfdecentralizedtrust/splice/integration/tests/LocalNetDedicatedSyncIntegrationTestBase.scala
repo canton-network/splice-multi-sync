@@ -92,8 +92,8 @@ abstract class LocalNetDedicatedSyncIntegrationTestBase
       .getOrElse(fail(s"${participant.name} is not connected to $alias"))
       .synchronizerId
 
-  /** The operator acts as the primary party of its ledger API user, onboarded by the app-provider
-    * validator.
+  /** The operator acts as the primary party of its ledger API user. The app-provider validator
+    * onboards that user, except on the four-node app-synchronizer (-B), where each org does.
     */
   protected def operatorParty(participant: ParticipantClientReference): PartyId =
     eventuallySucceeds(automationTimeout) {
