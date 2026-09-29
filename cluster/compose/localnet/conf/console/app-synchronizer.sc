@@ -56,6 +56,8 @@ if (sequencerThreshold != PositiveInt.one) {
       threshold = sequencerThreshold,
       active = appSequencers.map(_.id),
       signedBy = Some(owner.id.uid.namespace.fingerprint),
+      // Bound the wait, which for this command has no limit by default.
+      synchronize = Some(console.command_timeout),
     )
   )
 
@@ -291,11 +293,14 @@ if (bft) {
   }
 
   // Each org's sync operator reads as the party on the org's own participant.
-  orgs.foreach(
-    _.ledger_api.users.create(
-      "sync-operator",
-      primaryParty = Some(operatorParty),
-      readAs = Set(operatorParty),
-    )
-  )
+  orgs.foreach { org =>
+    val existingUsers = org.ledger_api.users.list(filterUser = "sync-operator").users
+    if (!existingUsers.exists(_.id == "sync-operator")) {
+      org.ledger_api.users.create(
+        "sync-operator",
+        primaryParty = Some(operatorParty),
+        readAs = Set(operatorParty),
+      )
+    }
+  }
 }
