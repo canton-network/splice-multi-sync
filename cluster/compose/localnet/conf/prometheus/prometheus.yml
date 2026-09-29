@@ -1,0 +1,20 @@
+# Both images serve the Prometheus reporter on port 10013, set in their /app/monitoring.conf.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: splice
+    scrape_native_histograms: true
+    static_configs:
+      - targets: ["splice:10013"]
+        # Sets the namespace label the dashboards filter by.
+        labels:
+          namespace: localnet
+
+  - job_name: canton
+    scrape_native_histograms: true
+    static_configs:
+      - targets: ["canton:10013"]
+        labels:
+          namespace: localnet
