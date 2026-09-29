@@ -1,0 +1,55 @@
+# Runs the app-synchronizer on four BFT nodes, each run by its own org with its own sync operator
+# (-B).
+services:
+  canton:
+    volumes:
+      - ${LOCALNET_DIR}/conf/canton/app-synchronizer-bft:/app/app-synchronizer-bft/on
+    ports:
+      # Sequencer public and admin APIs and mediator admin APIs of nodes 1 to 5, used by the
+      # four-node integration test.
+      - "5017:5017"
+      - "5018:5018"
+      - "5019:5019"
+      - "5217:5217"
+      - "5218:5218"
+      - "5219:5219"
+      - "5317:5317"
+      - "5318:5318"
+      - "5319:5319"
+      - "5417:5417"
+      - "5418:5418"
+      - "5419:5419"
+      - "5517:5517"
+      - "5518:5518"
+      - "5519:5519"
+      # Ledger and admin APIs of the participants of orgs 1 to 5, used by the same test.
+      - "6001:6001"
+      - "6002:6002"
+      - "6201:6201"
+      - "6202:6202"
+      - "6301:6301"
+      - "6302:6302"
+      - "6401:6401"
+      - "6402:6402"
+      - "6501:6501"
+      - "6502:6502"
+    # Headroom for the additional synchronizer nodes and participants.
+    mem_limit: 8g
+    environment:
+      _JAVA_OPTIONS: "-XX:-UseCompressedOops -Xms512m -Xmx6g"
+
+  splice:
+    volumes:
+      - ${LOCALNET_DIR}/conf/splice/app-synchronizer-bft:/app/app-synchronizer-bft/on
+
+  console:
+    environment:
+      - APP_SYNCHRONIZER_BFT_PROFILE=on
+    volumes:
+      - ${LOCALNET_DIR}/conf/console/app-synchronizer-bft:/app/app-synchronizer-bft/on
+
+  multi-sync-startup:
+    environment:
+      - APP_SYNCHRONIZER_BFT_PROFILE=on
+    volumes:
+      - ${LOCALNET_DIR}/conf/console/app-synchronizer-bft:/app/app-synchronizer-bft/on
