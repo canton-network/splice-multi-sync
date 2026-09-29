@@ -75,8 +75,8 @@ class LocalNetDedicatedSyncBftIntegrationTest extends LocalNetDedicatedSyncInteg
         s"app-sequencer$suffix",
         RemoteSequencerConfig(
           adminApi = FullClientConfig("localhost", Port.tryCreate(base + 19)),
-          // Only the nodes use this address, and they all run in the canton container.
-          publicApi = SequencerApiClientConfig("canton", Port.tryCreate(base + 18)),
+          // Reachable from the test and, as all nodes run in the canton container, from the nodes.
+          publicApi = SequencerApiClientConfig("localhost", Port.tryCreate(base + 18)),
         ),
       ),
       new MediatorClientReference(
@@ -102,9 +102,8 @@ class LocalNetDedicatedSyncBftIntegrationTest extends LocalNetDedicatedSyncInteg
     new ParticipantClientReference(
       env,
       participant.name,
-      participant.config.copy(token =
-        Some(AuthUtil.testToken(AuthUtil.testAudience, operatorUser, "unsafe"))
-      ),
+      participant.config
+        .copy(token = Some(AuthUtil.testToken(AuthUtil.testAudience, operatorUser, "unsafe"))),
     )
 
   "the four-node app-synchronizer keeps traffic consistent as nodes and orgs join, leave and go down" in {
@@ -133,6 +132,16 @@ class LocalNetDedicatedSyncBftIntegrationTest extends LocalNetDedicatedSyncInteg
         def ping() =
           participant.health.ping(participant.id, synchronizerId = Some(appSynchronizerId))
 
+        // A connected participant only picks up changed sequencer connections on reconnect.
+        def useSequencers(connections: SequencerConnections): Unit = {
+          participant.synchronizers.disconnect(appSynchronizerAlias)
+          participant.synchronizers.modify(
+            appSynchronizerAlias,
+            _.copy(sequencerConnections = connections),
+          )
+          val _ = participant.synchronizers.reconnect(appSynchronizerAlias)
+        }
+
         def trafficOn(n: Node) =
           n.sequencer.traffic_control
             .traffic_state_of_members(Seq(participant.id))
@@ -154,7 +163,8 @@ class LocalNetDedicatedSyncBftIntegrationTest extends LocalNetDedicatedSyncInteg
         def operatorNamespace() =
           decentralizedNamespace(nodes.head.orgParticipant, operator, globalSynchronizerId)
 
-        def operatorHosting() = partyHosting(nodes.head.orgParticipant, operator, globalSynchronizerId)
+        def operatorHosting() =
+          partyHosting(nodes.head.orgParticipant, operator, globalSynchronizerId)
 
         // The traffic bought for the participant, as each org's sync operator reads it from the
         // org's own participant.
@@ -316,18 +326,10 @@ class LocalNetDedicatedSyncBftIntegrationTest extends LocalNetDedicatedSyncInteg
               .config(appSynchronizerAlias)
               .value
               .sequencerConnections
-            participant.synchronizers.modify(
-              appSynchronizerAlias,
-              _.copy(sequencerConnections =
-                SequencerConnections.single(joiner.sequencer.sequencerConnection)
-              ),
-            )
+            useSequencers(SequencerConnections.single(joiner.sequencer.sequencerConnection))
             val consumed =
               buyAndSpend(nodes :+ joiner, nodes :+ joiner, 2 * purchasedTraffic, consumedOnFour)
-            participant.synchronizers.modify(
-              appSynchronizerAlias,
-              _.copy(sequencerConnections = connections),
-            )
+            useSequencers(connections)
             consumed
           }
 
@@ -352,7 +354,8 @@ class LocalNetDedicatedSyncBftIntegrationTest extends LocalNetDedicatedSyncInteg
         )(
           "the four orgs host and own the party again",
           _ => {
-            operatorHosting().participants.map(_.participantId) should contain theSameElementsAs nodes
+            operatorHosting().participants
+              .map(_.participantId) should contain theSameElementsAs nodes
               .map(_.orgParticipant.id)
             operatorNamespace().owners.forgetNE should contain theSameElementsAs nodes.map(
               _.orgParticipant.id.uid.namespace
@@ -554,7 +557,8 @@ class LocalNetDedicatedSyncBftIntegrationTest extends LocalNetDedicatedSyncInteg
       ) should not contain leaver.orgParticipant.id
     }
     val namespace = decentralizedNamespace(hosts.head, party, synchronizerId)
-    val owners = NonEmpty.from(namespace.owners.forgetNE - leaver.orgParticipant.id.uid.namespace).value
+    val owners =
+      NonEmpty.from(namespace.owners.forgetNE - leaver.orgParticipant.id.uid.namespace).value
     val withoutLeaver = DecentralizedNamespaceDefinition
       .create(
         namespace.namespace,
