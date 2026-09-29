@@ -121,11 +121,11 @@ data GovernanceParameters = GovernanceParameters with
     discountFactor : Decimal
       -- ^ Multiplies this synchronizer's traffic price.
     outageAdvance : Int
-      -- ^ Traffic in bytes the operator may grant each member beyond what it has purchased while
-      --   its connection to the global synchronizer is down, and takes back when it returns, so a
-      --   member keeps transacting through an outage and repays by purchase afterwards. 0 disables
-      --   the advance. Applied off-ledger by the operator's app; the sequencer accepts any limit,
-      --   so this binds an honest operator.
+      -- ^ Traffic in bytes the operator may grant each participant beyond what it has purchased
+      --   while its connection to the decentralized synchronizer is down, and takes back when it
+      --   returns, so a participant keeps transacting through an outage and repays by purchase
+      --   afterwards. 0 disables the advance. Applied off-ledger by the operator's app; the
+      --   sequencer accepts any limit, so this binds an honest operator.
   deriving (Show, Eq, Serializable)
 
 -- | The parameters a synchronizer is registered with when governance has agreed no discount and
