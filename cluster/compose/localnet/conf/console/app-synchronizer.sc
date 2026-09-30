@@ -67,8 +67,7 @@ utils.retry_until_true {
 }
 
 // With the sync operator serving it (-O), the app-synchronizer runs traffic control with a zero
-// base rate, so members transact only against traffic they buy, charged as on the global
-// synchronizer. Without it nothing is changed.
+// base rate, so members transact only against traffic they buy. Without it nothing is changed.
 if (sys.env.get("SYNC_OPERATOR_PROFILE").contains("on")) {
   `app-sequencer`.topology.synchronizer_parameters.propose_update(
     appSynchronizerId.logical,
