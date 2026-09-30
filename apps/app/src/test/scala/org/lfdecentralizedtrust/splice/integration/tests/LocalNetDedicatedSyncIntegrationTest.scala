@@ -57,9 +57,6 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
   // Covers the traffic fee with a wide margin, the fee itself depends on the amulet price.
   private val tapAmount = 100_000.0
 
-  // The traffic discount the DSO registers the app-synchronizer at.
-  private val discount = BigDecimal("0.5")
-
   // LocalNet runs the apps at their default polling interval, so a change takes a few rounds of
   // automation to land.
   private val automationTimeout = 2.minutes
@@ -140,7 +137,7 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
               new DsoRules_RegisterSynchronizer(
                 appSynchronizerId.toProtoPrimitive,
                 operatorParty.toProtoPrimitive,
-                new GovernanceParameters(discount.bigDecimal.setScale(10)),
+                new GovernanceParameters(java.math.BigDecimal.ONE.setScale(10)),
               )
             )
           ),
@@ -157,10 +154,6 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
         scancl("scanClient")
           .lookupSynchronizerRegistration(appSynchronizerId.toProtoPrimitive)
           .value
-      }
-
-      clue("the registration carries the discount") {
-        BigDecimal(registration.payload.governanceParameters.discountFactor) shouldBe discount
       }
 
       clue("with a zero base rate the participant has no allowance of its own") {
@@ -180,31 +173,13 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
 
       val buyer = vc("providerValidatorClient").copy(token = Some(token)).getValidatorPartyId()
 
-      val (dedicatedPurchase, _) = actAndCheck(automationTimeout)(
+      actAndCheck(automationTimeout)(
         "the participant buys traffic for the dedicated synchronizer on the global synchronizer",
-        buyTraffic(participant, buyer, appSynchronizerId, Some(registration)),
+        buyTraffic(participant, buyer, appSynchronizerId, registration),
       )(
         "the operator grants it on the dedicated synchronizer's sequencer",
         _ => trafficState().extraTrafficPurchased.value shouldBe purchasedTraffic,
       )
-
-      clue("the purchase costs the global synchronizer's price at the discount") {
-        val globalPurchase =
-          buyTraffic(participant, buyer, synchronizerId(participant, "global"), None)
-        // Allows for Daml rounding each step to ten decimal places.
-        BigDecimal(dedicatedPurchase.amuletPaid) shouldBe
-          (BigDecimal(globalPurchase.amuletPaid) * discount +- BigDecimal("0.000001"))
-      }
-
-      clue("a purchase for a synchronizer that is neither required nor registered is refused") {
-        val unregisteredSynchronizerId = SynchronizerId.tryFromString(
-          s"unregistered::${appSynchronizerId.namespace.toProtoPrimitive}"
-        )
-        assertThrowsAndLogsCommandFailures(
-          buyTraffic(participant, buyer, unregisteredSynchronizerId, None),
-          _.errorMessage should include("Unknown synchronizer provided"),
-        )
-      }
 
       clue("the purchased traffic is drawn down by transacting on the dedicated synchronizer") {
         val before = trafficState().extraTrafficConsumed.value
@@ -220,10 +195,8 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
       participant: ParticipantClientReference,
       buyer: PartyId,
       synchronizerId: SynchronizerId,
-      registration: Option[
-        ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
-      ],
-  )(implicit env: FixtureParam): splice.amuletrules.AmuletRules_BuyMemberTrafficResult = {
+      registration: ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer],
+  )(implicit env: FixtureParam): Unit = {
     val scan = scancl("scanClient")
     val transferContext = scan.getTransferContextWithInstances(env.environment.clock.now)
     val amuletRules = transferContext.amuletRules
@@ -247,7 +220,7 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
       .amuletSum
       .amulet
 
-    val purchase = participant.ledger_api_extensions.commands.submitWithResult(
+    val _ = participant.ledger_api_extensions.commands.submitWithResult(
       ledgerApiUserId,
       actAs = Seq(buyer),
       readAs = Seq(buyer),
@@ -268,12 +241,11 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
         0L,
         purchasedTraffic,
         Some(scan.getDsoPartyId().toProtoPrimitive).toJava,
-        registration.map(_.contractId).toJava,
+        Some(registration.contractId).toJava,
       ),
       disclosedContracts = DisclosedContracts
-        .forTesting(amuletRules, (Seq[ContractWithState[?, ?]](openMiningRound) ++ registration)*)
+        .forTesting(amuletRules, openMiningRound, registration)
         .toLedgerApiDisclosedContracts,
     )
-    purchase.exerciseResult
   }
 }
