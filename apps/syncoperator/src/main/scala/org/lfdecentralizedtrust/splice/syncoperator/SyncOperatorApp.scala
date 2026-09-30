@@ -126,7 +126,7 @@ class SyncOperatorApp(
       synchronizerId <- appInitStep("Get the synchronizer id from the sequencer") {
         servedSynchronizerId(sequencerAdminConnection)
       }
-      _ <- appInitStep("Check the configured synchronizer node has not been upgraded past") {
+      _ <- appInitStep("Check the configured synchronizer has not already been upgraded") {
         requireCurrentNodeIsLive(synchronizerNodes)
       }
       _ <- appInitStep("Check the synchronizer runs traffic control") {

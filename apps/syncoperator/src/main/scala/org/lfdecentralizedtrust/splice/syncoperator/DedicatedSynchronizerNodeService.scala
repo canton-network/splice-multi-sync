@@ -19,7 +19,10 @@ import scala.concurrent.{ExecutionContext, Future}
 /** Hands out the sequencer of whichever of this operator's synchronizer nodes is live.
   *
   * The successor is stood up well before the upgrade lands, so it counts as live only once it is
-  * initialized, reports a higher serial, and the announced upgrade time has passed.
+  * initialized, reports a higher serial, and the announced upgrade time has passed. Unlike
+  * [[org.lfdecentralizedtrust.splice.environment.SynchronizerNodeService]] this cannot read the
+  * switchover off the participant: the operator's participant is on the global synchronizer and is
+  * never registered on the synchronizer it runs.
   */
 class DedicatedSynchronizerNodeService(
     nodes: SynchronizerNode.LocalSynchronizerNodes[SyncOperatorSynchronizerNode],

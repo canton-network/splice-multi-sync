@@ -126,7 +126,6 @@ class SyncOperatorAutomationService(
                 "lsu-dump-path must be set when a successor synchronizer node is configured"
               )
             ),
-            retryProvider,
           )
         )
         registerTrigger(

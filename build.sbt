@@ -2659,7 +2659,8 @@ updateTestConfigForParallelRuns := {
     (
       "tests to check logical sync upgrade",
       "test-full-class-names-lsu.log",
-      (t: String) => isLSUTest(t),
+      // the sync operator upgrades its own synchronizer, which needs its job's base traffic rate
+      (t: String) => isLSUTest(t) && !isSyncOperatorTest(t),
     ),
     (
       "sync operator tests",

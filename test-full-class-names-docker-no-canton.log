@@ -1,5 +1,4 @@
 org.lfdecentralizedtrust.splice.integration.tests.LocalNetDedicatedSyncIntegrationTest
-org.lfdecentralizedtrust.splice.integration.tests.LocalNetDedicatedSyncLsuIntegrationTest
 org.lfdecentralizedtrust.splice.integration.tests.LocalNetFrontendIntegrationTest
 org.lfdecentralizedtrust.splice.integration.tests.LocalNetReassignIntegrationTest
 org.lfdecentralizedtrust.splice.scan.store.bulk.AcsSnapshotBulkStorageCommitFromStagingTest
