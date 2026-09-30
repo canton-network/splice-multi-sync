@@ -15,7 +15,8 @@ import org.lfdecentralizedtrust.splice.automation.GrantUnlimitedTrafficTriggerBa
 }
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
-import org.lfdecentralizedtrust.splice.syncoperator.DedicatedSynchronizerNodeService
+import org.lfdecentralizedtrust.splice.environment.SynchronizerNodeService
+import org.lfdecentralizedtrust.splice.syncoperator.SyncOperatorSynchronizerNode
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -25,7 +26,7 @@ import scala.concurrent.{ExecutionContext, Future}
 class MediatorUnlimitedTrafficTrigger(
     override protected val context: TriggerContext,
     synchronizerId: SynchronizerId,
-    synchronizerNodeService: DedicatedSynchronizerNodeService,
+    synchronizerNodeService: SynchronizerNodeService[SyncOperatorSynchronizerNode],
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
 )(implicit
     override val ec: ExecutionContext,

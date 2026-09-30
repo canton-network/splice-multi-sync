@@ -13,8 +13,9 @@ import org.lfdecentralizedtrust.splice.automation.{
   TriggerContext,
 }
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
-import org.lfdecentralizedtrust.splice.syncoperator.DedicatedSynchronizerNodeService
 import org.lfdecentralizedtrust.splice.syncoperator.store.SyncOperatorStore
+import org.lfdecentralizedtrust.splice.environment.SynchronizerNodeService
+import org.lfdecentralizedtrust.splice.syncoperator.SyncOperatorSynchronizerNode
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -22,7 +23,7 @@ import scala.concurrent.{ExecutionContext, Future}
 class ReconcileDedicatedSequencerTrafficTrigger(
     override protected val context: TriggerContext,
     store: SyncOperatorStore,
-    synchronizerNodeService: DedicatedSynchronizerNodeService,
+    synchronizerNodeService: SynchronizerNodeService[SyncOperatorSynchronizerNode],
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
 )(implicit
     ec: ExecutionContext,

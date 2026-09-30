@@ -23,9 +23,10 @@ import org.lfdecentralizedtrust.splice.environment.{
   PackageVersionSupport,
   RetryProvider,
   SpliceLedgerClient,
+  SynchronizerNodeService,
 }
+import org.lfdecentralizedtrust.splice.syncoperator.SyncOperatorSynchronizerNode
 import org.lfdecentralizedtrust.splice.store.DomainTimeSynchronization
-import org.lfdecentralizedtrust.splice.syncoperator.DedicatedSynchronizerNodeService
 import org.lfdecentralizedtrust.splice.syncoperator.config.SyncOperatorLsuConfig
 import org.lfdecentralizedtrust.splice.syncoperator.store.SyncOperatorStore
 
@@ -42,7 +43,7 @@ class SyncOperatorAutomationService(
     ledgerClient: SpliceLedgerClient,
     retryProvider: RetryProvider,
     params: SpliceParametersConfig,
-    synchronizerNodeService: DedicatedSynchronizerNodeService,
+    synchronizerNodeService: SynchronizerNodeService[SyncOperatorSynchronizerNode],
     lsuConfig: Option[SyncOperatorLsuConfig],
     lsuDumpPath: Option[Path],
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,

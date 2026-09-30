@@ -29,6 +29,7 @@ import org.lfdecentralizedtrust.splice.environment.{
   SequencerAdminConnection,
   SpliceLedgerClient,
   SynchronizerNode,
+  SynchronizerNodeService,
 }
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.ScanConnection
 import org.lfdecentralizedtrust.splice.syncoperator.automation.SyncOperatorAutomationService
@@ -115,9 +116,8 @@ class SyncOperatorApp(
         legacy = None,
         additionalLegacy = Seq.empty,
       )
-      synchronizerNodeService = new DedicatedSynchronizerNodeService(
+      synchronizerNodeService = new SynchronizerNodeService(
         synchronizerNodes,
-        clock,
         config.parameters.spliceCachingConfigs.physicalSynchronizerExpiration,
         retryProvider,
         loggerFactory,
@@ -314,7 +314,7 @@ object SyncOperatorApp {
       with HasHealth {
 
     /** The configured current node's sequencer. Automation follows the successor across an
-      * upgrade, see `DedicatedSynchronizerNodeService`.
+      * upgrade, see `SynchronizerNodeService`.
       */
     def sequencerAdminConnection: SequencerAdminConnection =
       synchronizerNodes.current.sequencerAdminConnection
