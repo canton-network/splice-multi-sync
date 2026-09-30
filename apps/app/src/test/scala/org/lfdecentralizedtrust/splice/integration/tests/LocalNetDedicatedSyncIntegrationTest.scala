@@ -27,8 +27,7 @@ import scala.sys.process.*
 
 /** Verifies that the sync operator serves the app-synchronizer as a dedicated synchronizer: it is
   * bootstrapped with a zero base rate and admits only permissioned participants, the DSO registers
-  * it to the operator at a discount, and a member transacts on it only against traffic it has
-  * bought at that discount. A purchase for a synchronizer that is not registered is refused.
+  * it to the operator, and a member transacts on it only against traffic it has bought.
   *
   * This spins up the docker-compose localnet with the sync operator enabled (-O)
   */
@@ -265,7 +264,7 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
         buyer.toProtoPrimitive,
         participant.id.toProtoPrimitive,
         synchronizerId.toProtoPrimitive,
-        // LocalNet runs at migration id 0, which a registered synchronizer is pinned to
+        // a registered synchronizer is pinned to migration id 0
         0L,
         purchasedTraffic,
         Some(scan.getDsoPartyId().toProtoPrimitive).toJava,
