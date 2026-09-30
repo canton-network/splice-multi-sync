@@ -18,3 +18,8 @@ scrape_configs:
       - targets: ["canton:10013"]
         labels:
           namespace: localnet
+    # Sets job to the Canton node, one job per node as in the clusters.
+    metric_relabel_configs:
+      - source_labels: [node]
+        regex: (.+)
+        target_label: job
