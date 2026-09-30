@@ -208,8 +208,9 @@ class SyncOperatorLsuIntegrationTest
           val upgradeTime = actAndCheck(
             "the operator schedules the upgrade", {
               val now = CantonTimestamp.now()
-              // Far enough out that a slow initialization cannot overshoot it.
-              val upgradeTime = now.plus(Duration.ofMinutes(5))
+              // Long enough for the successor to be stood up, short enough that the test
+              // still crosses it.
+              val upgradeTime = now.plus(Duration.ofMinutes(3))
               freezeTimeFile.overwrite(now.toInstant.toString)
               upgradeTimeFile.overwrite(upgradeTime.toInstant.toString)
               upgradeTime
@@ -249,6 +250,40 @@ class SyncOperatorLsuIntegrationTest
               // Without the transfer this resets to zero and members get back what they spent.
               state.extraTrafficConsumed.value should be >= consumedBefore
             }
+          }
+
+          clue(s"the participant follows the upgrade onto the successor at $upgradeTime") {
+            eventually(10.minutes) {
+              val psid = aliceValidatorBackend.participantClientWithAdminToken.synchronizers
+                .list_connected()
+                .find(_.synchronizerAlias == splitwellAlias)
+                .value
+                .physicalSynchronizerId
+              psid.logical shouldBe currentPsid.logical
+              psid.serial shouldBe successorSerial
+            }
+          }
+
+          actAndCheck(10.minutes)(
+            "alice buys traffic again once the upgrade has landed",
+            buyTraffic(aliceParty, member, synchronizerId, registration, dsoParty, purchase),
+          )(
+            "the operator grants it on the successor's sequencer, so it switched over too",
+            _ =>
+              successorNode.sequencerAdminConnection
+                .lookupSequencerTrafficControlState(member)
+                .futureValue
+                .value
+                .extraTrafficLimit
+                .value shouldBe (purchase * 2),
+          )
+
+          clue("and the participant can still transact on the upgraded synchronizer") {
+            aliceValidatorBackend.participantClient.health
+              .ping(
+                aliceValidatorBackend.participantClient.id,
+                synchronizerId = Some(synchronizerId),
+              )
           }
         }
       }
