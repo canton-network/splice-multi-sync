@@ -314,6 +314,12 @@ trait ScanConnection
       tc: TraceContext,
   ): Future[Option[ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]]]
 
+  /** Only active registrations: None for an archived (offboarded or re-parameterized) one. */
+  def lookupSynchronizerRegistrationByContractId(contractId: String)(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): Future[Option[Contract[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]]]
+
   def listVoteRequestResults(
       filters: VoteResultsFilters,
       limit: Int,

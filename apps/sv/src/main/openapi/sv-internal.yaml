@@ -241,8 +241,9 @@ paths:
       operationId: "lookupSynchronizerRegistration"
       description: |
         Look up the registration of a dedicated synchronizer, so the SV UI can tell a
-        proposer that a synchronizer id is already registered. Forwarded to Scan, which
-        holds the registry; the SV app does not ingest it.
+        proposer that a synchronizer id is already registered, and resolve the registration
+        an offboard or set-parameters proposal targets. Forwarded to Scan, which holds the
+        registry; the SV app does not ingest it.
       parameters:
         - name: "synchronizer_id"
           in: "path"
@@ -258,6 +259,28 @@ paths:
                 "$ref": "../../../../scan/src/main/openapi/scan.yaml#/components/schemas/LookupSynchronizerRegistrationResponse"
         "404":
           $ref: "../../../../common/src/main/openapi/common-external.yaml#/components/responses/404"
+  /v0/admin/sv/synchronizers/registrations/by-contract-id/{contract_id}:
+    get:
+      tags: [ sv ]
+      x-jvm-package: sv_operator
+      operationId: "lookupSynchronizerRegistrationByContractId"
+      description: |
+        Look up an active synchronizer registration by contract id, so the SV UI can show
+        what an offboard or set-parameters vote targets and flag a vote whose registration
+        is no longer active. Empty when the registration was archived. Forwarded to Scan.
+      parameters:
+        - name: "contract_id"
+          in: "path"
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                "$ref": "../../../../scan/src/main/openapi/scan.yaml#/components/schemas/LookupSynchronizerRegistrationByContractIdResponse"
   /v0/admin/sv/voteresults/count:
     post:
       tags: [ sv ]

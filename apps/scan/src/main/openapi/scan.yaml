@@ -1153,6 +1153,29 @@ paths:
         "404":
           $ref: "../../../../common/src/main/openapi/common-external.yaml#/components/responses/404"
 
+  /v0/synchronizers/registrations/by-contract-id/{contract_id}:
+    get:
+      tags: [internal, scan]
+      x-jvm-package: scan
+      operationId: "lookupSynchronizerRegistrationByContractId"
+      description: |
+        Look up an active RegisteredSynchronizer by its contract ID.
+        Returns `registration` if the contract is active, empty otherwise: an archived
+        registration (offboarded, or replaced by a governance-parameters change) is not returned.
+      parameters:
+        - name: "contract_id"
+          in: "path"
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/LookupSynchronizerRegistrationByContractIdResponse"
+
   /v0/transfer-command-counter/{party}:
     get:
       tags: [internal, scan]
@@ -3545,6 +3568,13 @@ components:
       properties:
         registration:
           "$ref": "../../../../common/src/main/openapi/common-internal.yaml#/components/schemas/ContractWithState"
+    LookupSynchronizerRegistrationByContractIdResponse:
+      description: |
+        If defined, an active contract of Daml template `Splice.DecentralizedSynchronizer:RegisteredSynchronizer`.
+      type: object
+      properties:
+        registration:
+          $ref: "../../../../common/src/main/openapi/common-external.yaml#/components/schemas/Contract"
 
     LookupTransferCommandCounterByPartyResponse:
       description: A Daml contract of template `Splice.ExternalPartyAmuletRules:TransferCommandCounter`.

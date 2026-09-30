@@ -627,6 +627,26 @@ object HttpScanAppClient {
     }
   }
 
+  case class LookupSynchronizerRegistrationByContractId(
+      contractId: String
+  ) extends InternalBaseCommand[http.LookupSynchronizerRegistrationByContractIdResponse, Option[
+        Contract[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
+      ]] {
+
+    override def submitRequest(
+        client: ScanClient,
+        headers: List[HttpHeader],
+    ) = client.lookupSynchronizerRegistrationByContractId(contractId, headers)
+
+    override def handleOk()(implicit
+        decoder: TemplateJsonDecoder
+    ) = { case http.LookupSynchronizerRegistrationByContractIdResponse.OK(response) =>
+      response.registration
+        .traverse(co => Contract.fromHttp(RegisteredSynchronizer.COMPANION)(co))
+        .leftMap(_.toString)
+    }
+  }
+
   case class LookupTransferCommandCounterByParty(
       party: PartyId
   ) extends InternalBaseCommand[http.LookupTransferCommandCounterByPartyResponse, Option[

@@ -250,7 +250,8 @@ class HttpSvOperatorHandler(
   }
 
   /** Intended use: the SV app UI, to warn a proposer that a synchronizer id is already
-    * registered. Forwarded to Scan, which holds the registry; the SV app does not ingest it.
+    * registered, and to resolve the registration an offboard or set-parameters proposal
+    * targets. Forwarded to Scan, which holds the registry; the SV app does not ingest it.
     */
   override def lookupSynchronizerRegistration(
       respond: r0.LookupSynchronizerRegistrationResponse.type
@@ -274,6 +275,27 @@ class HttpSvOperatorHandler(
             definitions.LookupSynchronizerRegistrationResponse(registration.toHttp)
           )
       }
+    }
+  }
+
+  /** Intended use: the SV app UI, to show what an offboard or set-parameters vote targets and
+    * to flag a vote whose pinned registration is no longer active. Forwarded to Scan.
+    */
+  override def lookupSynchronizerRegistrationByContractId(
+      respond: r0.LookupSynchronizerRegistrationByContractIdResponse.type
+  )(contractId: String)(
+      extracted: ActAsKnownUserRequest
+  ): Future[r0.LookupSynchronizerRegistrationByContractIdResponse] = {
+    implicit val ActAsKnownUserRequest(traceContext) = extracted
+    withSpan(s"$workflowId.lookupSynchronizerRegistrationByContractId") { _ => _ =>
+      for {
+        scanConnection <- scanConnectionF
+        registration <- scanConnection.lookupSynchronizerRegistrationByContractId(contractId)
+      } yield respond.OK(
+        definitions.LookupSynchronizerRegistrationByContractIdResponse(
+          registration.map(_.toHttp)
+        )
+      )
     }
   }
 
