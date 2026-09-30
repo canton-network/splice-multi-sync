@@ -113,6 +113,16 @@ class LocalNetDedicatedSyncIntegrationTest extends IntegrationTestWithIsolatedEn
         trafficControl().value.maxBaseTrafficAmount shouldBe NonNegativeLong.zero
       }
 
+      clue("the synchronizer charges traffic the way the global synchronizer does") {
+        val global = participant.topology.synchronizer_parameters
+          .get_dynamic_synchronizer_parameters(synchronizerId(participant, "global"))
+          .trafficControl
+          .value
+        val dedicated = trafficControl().value
+        dedicated.readVsWriteScalingFactor shouldBe global.readVsWriteScalingFactor
+        dedicated.freeConfirmationResponses shouldBe global.freeConfirmationResponses
+      }
+
       clue("the synchronizer admits only permissioned participants, and this one is permissioned") {
         dynamicParameters().onboardingRestriction shouldBe OnboardingRestriction.RestrictedOpen
         participant.topology.participant_synchronizer_permissions

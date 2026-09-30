@@ -5,7 +5,6 @@ package org.lfdecentralizedtrust.splice.syncoperator.config
 
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.sequencing.TrafficControlParameters
 import org.lfdecentralizedtrust.splice.config.{
   AutomationConfig,
   HttpClientConfig,
@@ -38,11 +37,12 @@ case class SyncOperatorAppBackendConfig(
     // Traffic control for the synchronizer this operator serves. Zero base amount so that all of
     // its traffic is paid for.
     baseTrafficAmount: NonNegativeLong = NonNegativeLong.zero,
-    readVsWriteScalingFactor: PositiveInt =
-      TrafficControlParameters.DefaultReadVsWriteScalingFactor,
+    // charge 4 per 10,000, i.e., 0.04% of write cost for every read, as on the global synchronizer.
+    readVsWriteScalingFactor: PositiveInt = PositiveInt.tryCreate(4),
     baseTrafficAccumulationDuration: NonNegativeFiniteDuration =
       NonNegativeFiniteDuration.ofMinutes(10),
-    freeConfirmationResponses: Boolean = TrafficControlParameters.DefaultFreeConfirmationResponses,
+    // Confirmation responses are free, as on the global synchronizer.
+    freeConfirmationResponses: Boolean = true,
     // Set to false to disable the DB-level exclusive lock that prevents two sync operator instances
     // from running concurrently against the same database.  Only disable for migration scenarios
     // where intentional overlap is required.
