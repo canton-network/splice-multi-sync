@@ -10,7 +10,11 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.topology.{Member, PartyId, SynchronizerId}
-import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.MemberTraffic
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.{
+  GovernanceParameters,
+  MemberTraffic,
+  RegisteredSynchronizer,
+}
 import org.lfdecentralizedtrust.splice.config.IngestionConfig
 import org.lfdecentralizedtrust.splice.environment.{DarResources, RetryProvider}
 import org.lfdecentralizedtrust.splice.store.{HardLimit, Limit, StoreTestBase}
@@ -60,9 +64,27 @@ abstract class SyncOperatorStoreTest extends StoreTestBase with HasExecutionCont
     )
   }
 
+  private def registration(
+      outageAdvance: Long,
+      synchronizerId: SynchronizerId = ourSynchronizer,
+      operator: PartyId = operatorParty,
+  ): Contract[RegisteredSynchronizer.ContractId, RegisteredSynchronizer] =
+    contract(
+      RegisteredSynchronizer.TEMPLATE_ID_WITH_PACKAGE_ID,
+      new RegisteredSynchronizer.ContractId(nextCid()),
+      new RegisteredSynchronizer(
+        dsoParty.toProtoPrimitive,
+        synchronizerId.toProtoPrimitive,
+        operator.toProtoPrimitive,
+        new GovernanceParameters(java.math.BigDecimal.ONE.setScale(10), outageAdvance),
+      ),
+    )
+
   private def ingest(
       store: SyncOperatorStore,
       contracts: Seq[Contract[MemberTraffic.ContractId, MemberTraffic]],
+      registrations: Seq[Contract[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]] =
+        Seq.empty,
   ): Future[Unit] =
     store.multiDomainAcsStore.testIngestionSink.ingestAcs(
       nextOffset(),
@@ -72,6 +94,10 @@ abstract class SyncOperatorStoreTest extends StoreTestBase with HasExecutionCont
         // mirrors `observer (optionalToList operator)` on the template
         val observers = c.payload.operator.toScala.map(PartyId.tryFromProtoPrimitive).toList
         toActiveContract(dummyDomain, c, i.toLong, observers)
+      } ++ registrations.zipWithIndex.map { case (r, i) =>
+        // mirrors `observer operator` on the template
+        val observers = Seq(PartyId.tryFromProtoPrimitive(r.payload.operator))
+        toActiveContract(dummyDomain, r, (contracts.size + i).toLong, observers)
       },
       Seq.empty,
       Seq.empty,
@@ -140,6 +166,48 @@ abstract class SyncOperatorStoreTest extends StoreTestBase with HasExecutionCont
         _ <- ingest(store, Seq.empty)
         total <- store.getTotalPurchasedMemberTraffic(alice)
       } yield total shouldBe 0L
+    }
+
+    "list the total of every member with a purchase for this synchronizer" in {
+      for {
+        store <- mkStore()
+        _ <- ingest(
+          store,
+          Seq(
+            memberTraffic(alice, 100L),
+            memberTraffic(alice, 250L),
+            memberTraffic(bob, 700L),
+            memberTraffic(bob, 900L, synchronizerId = foreignSynchronizer),
+          ),
+        )
+        totals <- store.listTotalPurchasedMemberTraffic()
+      } yield totals shouldBe Map(alice -> 350L, bob -> 700L)
+    }
+
+    "look up this synchronizer's registration" in {
+      for {
+        store <- mkStore()
+        _ <- ingest(
+          store,
+          Seq.empty,
+          Seq(
+            registration(5_000L),
+            registration(9_000L, synchronizerId = foreignSynchronizer),
+            registration(7_000L, operator = otherOperator),
+          ),
+        )
+        found <- store.lookupRegistration()
+      } yield found.map(_.payload.governanceParameters.outageAdvance.longValue()) shouldBe Some(
+        5_000L
+      )
+    }
+
+    "find no registration before the synchronizer is registered" in {
+      for {
+        store <- mkStore()
+        _ <- ingest(store, Seq(memberTraffic(alice, 100L)))
+        found <- store.lookupRegistration()
+      } yield found shouldBe None
     }
   }
 }

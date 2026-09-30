@@ -7,6 +7,7 @@ import org.lfdecentralizedtrust.splice.config.AutomationConfig
 import org.lfdecentralizedtrust.splice.environment.{ParticipantAdminConnection, RetryProvider}
 import org.lfdecentralizedtrust.splice.store.{DomainTimeStore, DomainTimeSynchronization}
 import com.digitalasset.canton.SynchronizerAlias
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.time.Clock
@@ -36,6 +37,9 @@ final class DomainTimeAutomationService(
     new DomainTimeStore(clock, config.maxAllowedDomainTimeDelay, retryProvider, loggerFactory)
 
   def domainTimeSync: DomainTimeSynchronization = store
+
+  /** The latest synchronizer time ingested, or None if none has been since startup. */
+  def lastDomainTime: Option[CantonTimestamp] = store.lastDomainTime
 
   registerTrigger(
     new DomainTimeIngestionTrigger(
