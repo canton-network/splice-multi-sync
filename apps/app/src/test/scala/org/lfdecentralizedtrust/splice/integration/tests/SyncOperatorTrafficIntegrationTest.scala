@@ -72,9 +72,10 @@ class SyncOperatorTrafficIntegrationTest
       .addConfigTransform((_, conf) =>
         conf.copy(
           splitwellApps = Map.empty,
-          validatorApps = conf.validatorApps.updatedWith(InstanceName.tryCreate("splitwellValidator")) {
-            _.map(c => c.copy(domains = c.domains.copy(extra = Seq.empty)))
-          },
+          validatorApps =
+            conf.validatorApps.updatedWith(InstanceName.tryCreate("splitwellValidator")) {
+              _.map(c => c.copy(domains = c.domains.copy(extra = Seq.empty)))
+            },
         )
       )
       .withStandardSetup
@@ -317,7 +318,9 @@ class SyncOperatorTrafficIntegrationTest
       loggerFactory.suppressWarningsAndErrors {
         operatorParticipant.synchronizers.disconnect(globalAlias)
         try {
-          clue("the advance applies once the global synchronizer has been unreachable for the delay") {
+          clue(
+            "the advance applies once the global synchronizer has been unreachable for the delay"
+          ) {
             eventually(1.minute) {
               extraTrafficLimit(bob) shouldBe bobPurchase + outageAdvance
             }
