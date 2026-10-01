@@ -131,7 +131,7 @@ class TopupMemberTrafficTrigger(
       _ = unfunded.foreach(task =>
         logger.warn(
           s"Insufficient funds to buy configured traffic amount. Please ensure that the validator's wallet has enough amulets to purchase " +
-            s"${BigDecimal(task.target.topupParameters.topupAmount) / 1e6} MB of traffic on ${task.target.alias} to continue healthy operation."
+            s"${BigDecimal(task.trafficToBuy) / 1e6} MB of traffic on ${task.target.alias} to continue healthy operation."
         )
       )
     } yield funded
@@ -166,12 +166,15 @@ class TopupMemberTrafficTrigger(
               if (!wantsTopup(target, currentTrafficState, topupState)) Future.successful(None)
               else
                 TopupUtil
-                  // The cost is derived from this target's throughput and interval.
+                  // The cost is derived from this target's throughput and interval, plus any
+                  // shortfall the top-up also buys.
                   .minWalletBalanceForTopup(
                     scanConnection,
                     target.topupConfig,
                     clock,
                     registration,
+                    extraTraffic = TopupMemberTrafficTrigger
+                      .shortfall(currentTrafficState.extraTrafficRemainder),
                   )
                   .map(Some(_))
           } yield cost.map(
@@ -188,7 +191,7 @@ class TopupMemberTrafficTrigger(
       task: TopupMemberTrafficTrigger.Task
   )(implicit tc: TraceContext): Future[TaskOutcome] = {
     val coBuyMemberTraffic = new CO_BuyMemberTraffic(
-      task.target.topupParameters.topupAmount,
+      task.trafficToBuy,
       task.topupState.payload.memberId,
       task.topupState.payload.synchronizerId,
       task.topupState.payload.migrationId,
@@ -422,6 +425,11 @@ object TopupMemberTrafficTrigger {
       // Two aliases can resolve to one synchronizer; topupTargets is global-first, so global wins.
       .distinctBy(_.synchronizerId)
 
+  /** Traffic below zero, as after a dedicated synchronizer's operator takes back an outage advance
+    * the member used. The member cannot submit until its purchases cover it.
+    */
+  def shortfall(extraTrafficRemainder: Long): Long = math.max(0L, -extraTrafficRemainder)
+
   final case class Task(
       target: Target,
       topupState: Contract[ValidatorTopUpState.ContractId, ValidatorTopUpState],
@@ -430,6 +438,13 @@ object TopupMemberTrafficTrigger {
         ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
       ],
   ) extends PrettyPrinting {
+
+    /** The configured top-up plus any shortfall, bought in one purchase: the configured amount
+      * alone would leave the member blocked until several top-ups had covered the shortfall.
+      */
+    def trafficToBuy: Long =
+      target.topupParameters.topupAmount + shortfall(trafficState.extraTrafficRemainder)
+
     override def pretty: Pretty[Task] =
       prettyOfClass[Task](
         param("target", _.target),

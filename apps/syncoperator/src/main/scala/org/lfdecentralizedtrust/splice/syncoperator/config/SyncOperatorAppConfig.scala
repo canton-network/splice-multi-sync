@@ -3,6 +3,7 @@
 
 package org.lfdecentralizedtrust.splice.syncoperator.config
 
+import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.sequencing.TrafficControlParameters
@@ -35,6 +36,13 @@ case class SyncOperatorAppBackendConfig(
     parameters: SpliceParametersConfig = SpliceParametersConfig(batching = BatchingConfig()),
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration =
       NonNegativeFiniteDuration.ofSeconds(10),
+    // The global synchronizer's alias on the operator's participant, the validator's default. Its
+    // time tells the operator whether the global synchronizer is reachable.
+    globalSynchronizerAlias: SynchronizerAlias = SynchronizerAlias.tryCreate("global"),
+    // How long the global synchronizer may go without a fresh time before the registration's
+    // outage traffic advance is granted. Keep it shorter than a member's prepaid runway, roughly
+    // its top-up interval, or members run out before the advance lands.
+    outageAdvanceDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMinutes(5),
     // Traffic control for the synchronizer this operator serves. Zero base amount so that all of
     // its traffic is paid for.
     baseTrafficAmount: NonNegativeLong = NonNegativeLong.zero,

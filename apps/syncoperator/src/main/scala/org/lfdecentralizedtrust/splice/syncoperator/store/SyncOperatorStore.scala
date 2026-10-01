@@ -16,7 +16,7 @@ import org.lfdecentralizedtrust.splice.store.db.AcsInterfaceViewRowData
 import org.lfdecentralizedtrust.splice.store.{AppStore, Limit, MultiDomainAcsStore}
 import org.lfdecentralizedtrust.splice.syncoperator.store.db.DbSyncOperatorStore
 import org.lfdecentralizedtrust.splice.syncoperator.store.db.SyncOperatorTables.SyncOperatorAcsStoreRowData
-import org.lfdecentralizedtrust.splice.util.TemplateJsonDecoder
+import org.lfdecentralizedtrust.splice.util.{ContractWithState, TemplateJsonDecoder}
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.OptionConverters.*
@@ -24,7 +24,8 @@ import scala.jdk.OptionConverters.*
 /** Store of a sync operator app.
   *
   * Ingests the `MemberTraffic` purchases made for this operator's synchronizer, which the buy choice
-  * makes it an observer of.
+  * makes it an observer of, and the synchronizer's `RegisteredSynchronizer`, which the operator
+  * observes, so both are at hand while the global synchronizer is unreachable.
   */
 trait SyncOperatorStore extends AppStore {
 
@@ -37,6 +38,23 @@ trait SyncOperatorStore extends AppStore {
   def getTotalPurchasedMemberTraffic(memberId: Member)(implicit
       tc: TraceContext
   ): Future[Long]
+
+  /** Total traffic purchased on this operator's synchronizer, per member with a purchase on record. */
+  def listTotalPurchasedMemberTraffic()(implicit
+      tc: TraceContext
+  ): Future[Map[Member, Long]]
+
+  /** The registration of this operator's synchronizer. Should two be live, the one with the
+    * lowest contract id, as Scan serves it, so every operator reads the same one.
+    */
+  def lookupRegistration()(implicit
+      tc: TraceContext
+  ): Future[Option[
+    ContractWithState[
+      splice.decentralizedsynchronizer.RegisteredSynchronizer.ContractId,
+      splice.decentralizedsynchronizer.RegisteredSynchronizer,
+    ]
+  ]]
 }
 
 object SyncOperatorStore {
@@ -110,7 +128,12 @@ object SyncOperatorStore {
             memberTrafficDomain = Some(key.synchronizerId),
             totalTrafficPurchased = Some(contract.payload.totalPurchased),
           )
-        }
+        },
+        mkFilter(splice.decentralizedsynchronizer.RegisteredSynchronizer.COMPANION)(co =>
+          co.payload.dso == dso &&
+            co.payload.operator == operator &&
+            co.payload.synchronizerId == synchronizerId
+        )(SyncOperatorAcsStoreRowData(_)),
       ),
     )
   }

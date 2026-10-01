@@ -18,6 +18,7 @@ import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.actor.ActorSystem
+import org.lfdecentralizedtrust.splice.automation.DomainTimeAutomationService
 import org.lfdecentralizedtrust.splice.config.SharedSpliceAppParameters
 import org.lfdecentralizedtrust.splice.environment.{
   BaseLedgerConnection,
@@ -147,6 +148,16 @@ class SyncOperatorApp(
         readOnlyLedgerConnection,
         loggerFactory,
       )
+      // Its own service, so that tracking the global synchronizer's time does not make this app's
+      // triggers wait for it, as they must act exactly when it is unreachable.
+      domainTimeAutomationService = new DomainTimeAutomationService(
+        config.globalSynchronizerAlias,
+        participantAdminConnection,
+        config.automation,
+        clock,
+        retryProvider,
+        loggerFactory,
+      )
       automation = new SyncOperatorAutomationService(
         config.automation,
         clock,
@@ -165,12 +176,15 @@ class SyncOperatorApp(
           ),
           freeConfirmationResponses = config.freeConfirmationResponses,
         ),
+        () => domainTimeAutomationService.lastDomainTime,
+        config.outageAdvanceDelay,
         loggerFactory,
         packageVersionSupport,
       )
     } yield {
       SyncOperatorApp.State(
         automation,
+        domainTimeAutomationService,
         storage,
         store,
         scanConnection,
@@ -232,6 +246,7 @@ class SyncOperatorApp(
 object SyncOperatorApp {
   case class State(
       automation: SyncOperatorAutomationService,
+      domainTimeAutomationService: DomainTimeAutomationService,
       storage: DbStorage,
       store: SyncOperatorStore,
       scanConnection: ScanConnection,
@@ -246,6 +261,7 @@ object SyncOperatorApp {
     override def close(): Unit =
       LifeCycle.close(
         automation,
+        domainTimeAutomationService,
         storage,
         store,
         scanConnection,

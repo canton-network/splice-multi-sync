@@ -48,6 +48,9 @@ final class DomainTimeStore(
   )
   private val mutex = Mutex()
 
+  /** The latest synchronizer time ingested, or None if none has been since startup. */
+  def lastDomainTime: Option[CantonTimestamp] = state.lastDomainTime
+
   override def waitForDomainTimeSync()(implicit tc: TraceContext): Future[Unit] = {
     val promiseO = checkDomainTimeDelay()
     promiseO match {

@@ -8,6 +8,7 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.topology.{Member, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.RegisteredSynchronizer
 import org.lfdecentralizedtrust.splice.config.IngestionConfig
 import org.lfdecentralizedtrust.splice.environment.RetryProvider
 import org.lfdecentralizedtrust.splice.store.db.AcsQueries.AcsStoreId
@@ -22,7 +23,7 @@ import org.lfdecentralizedtrust.splice.store.db.{
 import org.lfdecentralizedtrust.splice.store.{Limit, LimitHelpers, MultiDomainAcsStore}
 import org.lfdecentralizedtrust.splice.syncoperator.store.SyncOperatorStore
 import org.lfdecentralizedtrust.splice.syncoperator.store.db.SyncOperatorTables.SyncOperatorAcsStoreRowData
-import org.lfdecentralizedtrust.splice.util.TemplateJsonDecoder
+import org.lfdecentralizedtrust.splice.util.{ContractWithState, TemplateJsonDecoder}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -52,7 +53,9 @@ class DbSyncOperatorStore(
       // If you do modify it, make sure to very clearly document in the release notes that there will be planned downtime,
       // and notify the person coordinating the deployment.
       acsStoreDescriptor = StoreDescriptor(
-        version = 1,
+        // 2: the filter also ingests the RegisteredSynchronizer, so a store built by version 1
+        // re-ingests to pick up a registration it filtered out.
+        version = 2,
         name = "DbSyncOperatorStore",
         party = key.operatorParty,
         participant = participantId,
@@ -93,5 +96,27 @@ class DbSyncOperatorStore(
       memberId,
       key.synchronizerId,
     )
+  }
+
+  override def listTotalPurchasedMemberTraffic()(implicit
+      tc: TraceContext
+  ): Future[Map[Member, Long]] = waitUntilAcsIngested {
+    sumPurchasedMemberTrafficPerMember(
+      storage,
+      SyncOperatorTables.acsTableName,
+      acsStoreId,
+      domainMigrationId,
+      key.synchronizerId,
+    )
+  }
+
+  override def lookupRegistration()(implicit
+      tc: TraceContext
+  ): Future[Option[
+    ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
+  ]] = waitUntilAcsIngested {
+    multiDomainAcsStore
+      .listContracts(RegisteredSynchronizer.COMPANION)
+      .map(_.minByOption(_.contractId.contractId))
   }
 }

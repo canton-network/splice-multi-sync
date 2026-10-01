@@ -4,6 +4,7 @@
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.DbStorage
@@ -39,6 +40,8 @@ class SyncOperatorAutomationService(
     sequencerConnection: SequencerAdminConnection,
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
     trafficControl: TrafficControlParameters,
+    lastGlobalSynchronizerTime: () => Option[CantonTimestamp],
+    outageAdvanceDelay: NonNegativeFiniteDuration,
     protected val loggerFactory: NamedLoggerFactory,
     packageVersionSupport: PackageVersionSupport,
 )(implicit
@@ -48,7 +51,8 @@ class SyncOperatorAutomationService(
 ) extends SpliceAppAutomationService(
       automationConfig,
       clock,
-      // Nothing registered here depends on domain time.
+      // Every trigger here must keep running while the global synchronizer is unreachable, which
+      // is when OutageTrafficAdvanceTrigger acts, so none waits for its time to catch up.
       DomainTimeSynchronization.Noop,
       store,
       ledgerClient,
@@ -89,6 +93,17 @@ class SyncOperatorAutomationService(
       triggerContext,
       store,
       sequencerConnection,
+      trafficBalanceReconciliationDelay,
+    )
+  )
+
+  registerTrigger(
+    new OutageTrafficAdvanceTrigger(
+      triggerContext,
+      store,
+      sequencerConnection,
+      lastGlobalSynchronizerTime,
+      outageAdvanceDelay,
       trafficBalanceReconciliationDelay,
     )
   )

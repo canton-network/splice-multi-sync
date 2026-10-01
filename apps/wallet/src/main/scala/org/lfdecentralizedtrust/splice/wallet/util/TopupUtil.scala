@@ -30,6 +30,7 @@ object TopupUtil {
       .map(_.payload.governanceParameters)
       .fold(BigDecimal(1))(p => BigDecimal(p.discountFactor))
 
+  /** The cost of one top-up, plus `extraTraffic` bought with it. */
   def minWalletBalanceForTopup(
       scanConnection: ScanConnection,
       validatorTopupConfig: ValidatorTopupConfig,
@@ -37,6 +38,7 @@ object TopupUtil {
       registration: Option[
         ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
       ],
+      extraTraffic: Long = 0L,
   )(implicit tc: TraceContext, ec: ExecutionContext, mat: Materializer): Future[BigDecimal] = for {
     amuletRules <- scanConnection.getAmuletRulesWithState()
     synchronizerFeesConfig = AmuletConfigSchedule(amuletRules)
@@ -54,7 +56,7 @@ object TopupUtil {
     extraTrafficPrice = BigDecimal(synchronizerFeesConfig.extraTrafficPrice)
   } yield SpliceUtil
     .synchronizerFees(
-      topupParameters.topupAmount,
+      topupParameters.topupAmount + extraTraffic,
       extraTrafficPrice,
       amuletPrice,
       discountFactor(registration),

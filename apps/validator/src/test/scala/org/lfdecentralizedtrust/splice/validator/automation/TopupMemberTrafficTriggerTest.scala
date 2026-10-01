@@ -126,4 +126,16 @@ class TopupMemberTrafficTriggerTest extends AnyWordSpec with BaseTest {
       unfunded shouldBe empty
     }
   }
+
+  "TopupMemberTrafficTrigger.shortfall" should {
+
+    "be what a balance below zero needs to reach zero" in {
+      TopupMemberTrafficTrigger.shortfall(-300L) shouldBe 300L
+    }
+
+    "be zero for a balance at or above zero" in {
+      TopupMemberTrafficTrigger.shortfall(0L) shouldBe 0L
+      TopupMemberTrafficTrigger.shortfall(500L) shouldBe 0L
+    }
+  }
 }
