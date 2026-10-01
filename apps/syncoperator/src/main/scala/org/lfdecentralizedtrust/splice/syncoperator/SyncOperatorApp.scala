@@ -223,8 +223,9 @@ class SyncOperatorApp(
       loggerFactory.getTracedLogger(classOf[SyncOperatorSynchronizerNode]),
     )
 
-  /** An upgraded-past node still reports the same logical synchronizer id, so without a successor
-    * to switch to this app would grant traffic on a synchronizer nobody is connected to.
+  /** An upgraded node still reports the same logical synchronizer id, so without a successor to
+    * switch to this app would grant traffic on a synchronizer nobody is connected to. The
+    * announcement alone is enough to refuse: it is only ever published with a successor configured.
     */
   private def requireCurrentNodeIsLive(
       nodes: SynchronizerNode.LocalSynchronizerNodes[SyncOperatorSynchronizerNode]
@@ -235,18 +236,17 @@ class SyncOperatorApp(
         psid <- nodes.current.sequencerAdminConnection.getPhysicalSynchronizerId()
         announcements <- nodes.current.sequencerAdminConnection
           .listLsuAnnouncements(psid.logical)
-        superseded = announcements.filter(announcement =>
-          announcement.mapping.successorSynchronizerId.serial > psid.serial &&
-            !clock.now.isBefore(announcement.mapping.upgradeTime)
+        superseded = announcements.filter(
+          _.mapping.successorSynchronizerId.serial > psid.serial
         )
         _ <- superseded.headOption.fold(Future.unit) { announcement =>
           Future.failed(
             Status.FAILED_PRECONDITION
               .withDescription(
-                s"The configured synchronizer node is at $psid but was upgraded to " +
+                s"The configured synchronizer node is at $psid but is upgraded to " +
                   s"${announcement.mapping.successorSynchronizerId} at " +
-                  s"${announcement.mapping.upgradeTime}. Point synchronizer-nodes.current at the " +
-                  "successor before restarting."
+                  s"${announcement.mapping.upgradeTime}. Set synchronizer-nodes.successor, or " +
+                  "point synchronizer-nodes.current at the successor once the upgrade has landed."
               )
               .asRuntimeException()
           )
