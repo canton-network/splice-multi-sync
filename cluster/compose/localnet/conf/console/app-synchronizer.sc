@@ -76,12 +76,12 @@ if (sys.env.get("SYNC_OPERATOR_PROFILE").contains("on")) {
       Some(
         TrafficControlParameters(
           maxBaseTrafficAmount = NonNegativeLong.zero,
-          readVsWriteScalingFactor = PositiveInt.tryCreate(4),
+          readVsWriteScalingFactor = PositiveInt.tryCreate(200),
           maxBaseTrafficAccumulationDuration = PositiveFiniteDuration.ofMinutes(10),
           setBalanceRequestSubmissionWindowSize = PositiveFiniteDuration.ofMinutes(5),
           enforceRateLimiting = true,
           baseEventCost = NonNegativeLong.zero,
-          freeConfirmationResponses = true,
+          freeConfirmationResponses = false,
         )
       )
     ),

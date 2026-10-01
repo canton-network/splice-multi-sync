@@ -3,9 +3,10 @@
 
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
-import com.digitalasset.canton.sequencing.TrafficControlParameters
+import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
@@ -17,8 +18,10 @@ import org.lfdecentralizedtrust.splice.automation.{
   TriggerContext,
 }
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
+import org.lfdecentralizedtrust.splice.scan.admin.api.client.ScanConnection
 import org.lfdecentralizedtrust.splice.syncoperator.automation.ReconcileDedicatedSynchronizerParametersTrigger.Task
 import org.lfdecentralizedtrust.splice.syncoperator.store.SyncOperatorStore
+import org.lfdecentralizedtrust.splice.util.AmuletConfigSchedule
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -27,7 +30,9 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
     override protected val context: TriggerContext,
     store: SyncOperatorStore,
     sequencerConnection: SequencerAdminConnection,
-    trafficControl: TrafficControlParameters,
+    scanConnection: ScanConnection,
+    baseTrafficAmount: NonNegativeLong,
+    baseTrafficAccumulationDuration: PositiveFiniteDuration,
 )(implicit
     override val ec: ExecutionContext,
     mat: Materializer,
@@ -39,41 +44,63 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
   override protected def retrieveTasks()(implicit
       tc: TraceContext
   ): Future[Seq[Task]] =
-    isReconciled().map(if (_) Seq.empty else Seq(Task(synchronizerId)))
+    for {
+      readVsWriteScalingFactor <- globalReadVsWriteScalingFactor()
+      reconciled <- isReconciled(readVsWriteScalingFactor)
+    } yield if (reconciled) Seq.empty else Seq(Task(synchronizerId, readVsWriteScalingFactor))
 
   override protected def completeTask(task: Task)(implicit
       tc: TraceContext
   ): Future[TaskOutcome] =
     sequencerConnection
-      .ensureDomainParameters(task.synchronizerId, withTrafficControl)
+      .ensureDomainParameters(
+        task.synchronizerId,
+        withTrafficControl(_, task.readVsWriteScalingFactor),
+      )
       .map(_ =>
         TaskSuccess(
           s"Set the traffic control parameters on ${task.synchronizerId}, " +
-            s"base traffic amount ${trafficControl.maxBaseTrafficAmount}"
+            s"base traffic amount $baseTrafficAmount"
         )
       )
 
   override protected def isStaleTask(task: Task)(implicit
       tc: TraceContext
-  ): Future[Boolean] = isReconciled()
+  ): Future[Boolean] = isReconciled(task.readVsWriteScalingFactor)
 
-  private def isReconciled()(implicit tc: TraceContext): Future[Boolean] =
+  private def isReconciled(
+      readVsWriteScalingFactor: PositiveInt
+  )(implicit tc: TraceContext): Future[Boolean] =
     sequencerConnection
       .getSynchronizerParametersState(synchronizerId)
-      .map(state => state.mapping.parameters == withTrafficControl(state.mapping.parameters))
+      .map(state =>
+        state.mapping.parameters ==
+          withTrafficControl(state.mapping.parameters, readVsWriteScalingFactor)
+      )
 
-  /** Applies the configured parameters, leaving the rest as the synchronizer has them */
+  /** The global synchronizer's read cost, from the amulet config served by Scan. */
+  private def globalReadVsWriteScalingFactor()(implicit tc: TraceContext): Future[PositiveInt] =
+    scanConnection.getAmuletRulesWithState().map { amuletRules =>
+      val fees = AmuletConfigSchedule(amuletRules)
+        .getConfigAsOf(context.clock.now)
+        .decentralizedSynchronizer
+        .fees
+      PositiveInt.tryCreate(fees.readVsWriteScalingFactor.toInt)
+    }
+
+  /** Applies the target parameters, leaving the rest as the synchronizer has them */
   private def withTrafficControl(
-      parameters: DynamicSynchronizerParameters
+      parameters: DynamicSynchronizerParameters,
+      readVsWriteScalingFactor: PositiveInt,
   ): DynamicSynchronizerParameters =
     parameters.trafficControl.fold(parameters)(current =>
       parameters.tryUpdate(trafficControlParameters =
         Some(
           current.copy(
-            maxBaseTrafficAmount = trafficControl.maxBaseTrafficAmount,
-            readVsWriteScalingFactor = trafficControl.readVsWriteScalingFactor,
-            maxBaseTrafficAccumulationDuration = trafficControl.maxBaseTrafficAccumulationDuration,
-            freeConfirmationResponses = trafficControl.freeConfirmationResponses,
+            maxBaseTrafficAmount = baseTrafficAmount,
+            readVsWriteScalingFactor = readVsWriteScalingFactor,
+            maxBaseTrafficAccumulationDuration = baseTrafficAccumulationDuration,
+            freeConfirmationResponses = true,
           )
         )
       )
@@ -82,8 +109,12 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
 
 object ReconcileDedicatedSynchronizerParametersTrigger {
 
-  final case class Task(synchronizerId: SynchronizerId) extends PrettyPrinting {
+  final case class Task(synchronizerId: SynchronizerId, readVsWriteScalingFactor: PositiveInt)
+      extends PrettyPrinting {
     override def pretty: Pretty[this.type] =
-      prettyOfClass(param("synchronizerId", _.synchronizerId))
+      prettyOfClass(
+        param("synchronizerId", _.synchronizerId),
+        param("readVsWriteScalingFactor", _.readVsWriteScalingFactor.value),
+      )
   }
 }

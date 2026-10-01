@@ -4,10 +4,10 @@
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.sequencing.TrafficControlParameters
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.DbStorage
-import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.time.{Clock, PositiveFiniteDuration}
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 import org.lfdecentralizedtrust.splice.automation.{
@@ -22,6 +22,7 @@ import org.lfdecentralizedtrust.splice.environment.{
   SequencerAdminConnection,
   SpliceLedgerClient,
 }
+import org.lfdecentralizedtrust.splice.scan.admin.api.client.ScanConnection
 import org.lfdecentralizedtrust.splice.store.DomainTimeSynchronization
 import org.lfdecentralizedtrust.splice.syncoperator.store.SyncOperatorStore
 
@@ -37,8 +38,10 @@ class SyncOperatorAutomationService(
     retryProvider: RetryProvider,
     params: SpliceParametersConfig,
     sequencerConnection: SequencerAdminConnection,
+    scanConnection: ScanConnection,
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
-    trafficControl: TrafficControlParameters,
+    baseTrafficAmount: NonNegativeLong,
+    baseTrafficAccumulationDuration: PositiveFiniteDuration,
     protected val loggerFactory: NamedLoggerFactory,
     packageVersionSupport: PackageVersionSupport,
 )(implicit
@@ -71,7 +74,9 @@ class SyncOperatorAutomationService(
       triggerContext,
       store,
       sequencerConnection,
-      trafficControl,
+      scanConnection,
+      baseTrafficAmount,
+      baseTrafficAccumulationDuration,
     )
   )
 
