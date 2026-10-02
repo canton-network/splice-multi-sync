@@ -79,6 +79,8 @@ export interface RegisterSynchronizerProposal {
   operator: string;
   /** The discount factor the registration would be created with. */
   discountFactor: string;
+  /** The per-member outage traffic advance, in bytes, the registration would be created with. */
+  outageAdvance: string;
 }
 
 export interface UpdateSvRewardWeightProposal {

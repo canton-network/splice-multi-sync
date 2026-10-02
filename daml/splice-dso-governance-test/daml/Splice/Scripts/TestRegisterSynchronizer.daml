@@ -80,12 +80,16 @@ test_RegisterSynchronizer_withGovernanceParameters = do
       dsoAction = SRARC_RegisterSynchronizer DsoRules_RegisterSynchronizer with
         synchronizerId = dedicatedSyncId
         operator
-        governanceParameters = GovernanceParameters with discountFactor = 0.5
+        governanceParameters = defaultGovernanceParameters with
+          discountFactor = 0.5
+          outageAdvance = 5_000_000
 
   (_, reg) <- onlyRegistration dso
   reg.synchronizerId === dedicatedSyncId
   reg.operator === operator
-  reg.governanceParameters === GovernanceParameters with discountFactor = 0.5
+  reg.governanceParameters === defaultGovernanceParameters with
+    discountFactor = 0.5
+    outageAdvance = 5_000_000
   getDiscountFactor reg === 0.5
 
 -- | Set the governance parameters by vote, then replace them twice. A replacement archives the
@@ -102,7 +106,7 @@ test_SetSynchronizerGovernanceParameters_viaVote = do
           dsoAction = SRARC_SetSynchronizerGovernanceParameters DsoRules_SetSynchronizerGovernanceParameters with
             registeredSynchronizerCid = cid
             setGovernanceParameters = RegisteredSynchronizer_SetGovernanceParameters with
-              newGovernanceParameters = GovernanceParameters with discountFactor = f
+              newGovernanceParameters = defaultGovernanceParameters with discountFactor = f
 
   initiateAndAcceptVote app svs $
     ARC_DsoRules with
@@ -114,18 +118,49 @@ test_SetSynchronizerGovernanceParameters_viaVote = do
   (registeredCid, _) <- onlyRegistration dso
   setDiscountTo registeredCid 0.75
   (discountedCid, discounted) <- onlyRegistration dso
-  discounted.governanceParameters === GovernanceParameters with discountFactor = 0.75
+  discounted.governanceParameters === defaultGovernanceParameters with discountFactor = 0.75
 
   setDiscountTo discountedCid 0.5
   (replacedCid, replaced) <- onlyRegistration dso
-  replaced.governanceParameters === GovernanceParameters with discountFactor = 0.5
+  replaced.governanceParameters === defaultGovernanceParameters with discountFactor = 0.5
 
   -- Voting a parameter back to its default is an ordinary replacement: the block is always present,
   -- so there is no "nothing voted yet" state to fall back to.
   setDiscountTo replacedCid 1.0
   (_, defaulted) <- onlyRegistration dso
-  defaulted.governanceParameters === GovernanceParameters with discountFactor = 1.0
+  defaulted.governanceParameters === defaultGovernanceParameters with discountFactor = 1.0
   getDiscountFactor defaulted === 1.0
+
+-- | The outage advance is set by the same set-parameters vote as the discount, and a vote that
+--   changes only the advance leaves the discount as it was.
+test_SetSynchronizerGovernanceParameters_outageAdvance : Script ()
+test_SetSynchronizerGovernanceParameters_outageAdvance = do
+  (app, dso, (sv1, sv2, sv3, sv4)) <- initMainNet
+  operator <- allocateParty "dedicatedSyncOperator"
+  let dedicatedSyncId = "dedicated-sync::1220dadadadadadadadadadadadadadadadadadadadadadadadadadadadadada"
+      svs = [sv1, sv2, sv3, sv4]
+      discounted = defaultGovernanceParameters with discountFactor = 0.5
+
+  initiateAndAcceptVote app svs $
+    ARC_DsoRules with
+      dsoAction = SRARC_RegisterSynchronizer DsoRules_RegisterSynchronizer with
+        synchronizerId = dedicatedSyncId
+        operator
+        governanceParameters = discounted
+
+  (registeredCid, registered) <- onlyRegistration dso
+  registered.governanceParameters.outageAdvance === 0
+
+  initiateAndAcceptVote app svs $
+    ARC_DsoRules with
+      dsoAction = SRARC_SetSynchronizerGovernanceParameters DsoRules_SetSynchronizerGovernanceParameters with
+        registeredSynchronizerCid = registeredCid
+        setGovernanceParameters = RegisteredSynchronizer_SetGovernanceParameters with
+          newGovernanceParameters = discounted with outageAdvance = 10_000_000
+
+  (_, updated) <- onlyRegistration dso
+  updated.governanceParameters.outageAdvance === 10_000_000
+  getDiscountFactor updated === 0.5
 
 -- | The one live registration, which also asserts that a parameter vote replaced rather than added.
 onlyRegistration : Party -> Script (ContractId RegisteredSynchronizer, RegisteredSynchronizer)

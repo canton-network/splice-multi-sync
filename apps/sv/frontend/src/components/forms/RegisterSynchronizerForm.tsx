@@ -24,6 +24,7 @@ import {
 } from '../../utils/constants';
 import {
   validateDiscountFactor,
+  validateOutageAdvance,
   validateEffectiveDate,
   validateExpiration,
   validateExpiryEffectiveDate,
@@ -42,12 +43,17 @@ interface ExtraFormField {
   operator: string;
   /** Stated on every registration: 1 is the no-discount value, not an absent one. */
   discountFactor: string;
+  /** Bytes per member; 0 is the no-advance value. */
+  outageAdvance: string;
 }
 
 export type RegisterSynchronizerFormData = CommonProposalFormData & ExtraFormField;
 
 /** The no-discount value. A registration states its parameters rather than defaulting them. */
 const DEFAULT_DISCOUNT_FACTOR = '1.0';
+
+/** The no-advance value. */
+const DEFAULT_OUTAGE_ADVANCE = '0';
 
 export const RegisterSynchronizerForm: React.FC = _ => {
   const dsoInfosQuery = useDsoInfos();
@@ -74,6 +80,7 @@ export const RegisterSynchronizerForm: React.FC = _ => {
     synchronizerId: '',
     operator: '',
     discountFactor: DEFAULT_DISCOUNT_FACTOR,
+    outageAdvance: DEFAULT_OUTAGE_ADVANCE,
   };
 
   const form = useAppForm({
@@ -81,6 +88,7 @@ export const RegisterSynchronizerForm: React.FC = _ => {
 
     onSubmit: async ({ value }) => {
       const discountFactor = value.discountFactor.trim();
+      const outageAdvance = value.outageAdvance.trim();
       const action: ActionRequiringConfirmation = {
         tag: 'ARC_DsoRules',
         value: {
@@ -91,7 +99,7 @@ export const RegisterSynchronizerForm: React.FC = _ => {
               operator: value.operator,
               // The same vote sets the parameters, so a synchronizer promised a discount is
               // never registered at the full price while a second vote is arranged.
-              governanceParameters: { discountFactor },
+              governanceParameters: { discountFactor, outageAdvance },
             },
           },
         },
@@ -166,6 +174,7 @@ export const RegisterSynchronizerForm: React.FC = _ => {
           synchronizerId={form.state.values.synchronizerId}
           operator={form.state.values.operator}
           discountFactor={form.state.values.discountFactor.trim()}
+          outageAdvance={form.state.values.outageAdvance.trim()}
           onEdit={() => setShowConfirmation(false)}
           onSubmit={() => {}}
         />
@@ -227,6 +236,22 @@ export const RegisterSynchronizerForm: React.FC = _ => {
                 title="Traffic Discount"
                 id="register-synchronizer-discount-factor"
                 subtitle="Multiplies this synchronizer's traffic price, greater than 0 and at most 1. 1 registers at the full price."
+              />
+            )}
+          </form.AppField>
+
+          <form.AppField
+            name="outageAdvance"
+            validators={{
+              onBlur: ({ value }) => validateOutageAdvance(value.trim()),
+              onChange: ({ value }) => validateOutageAdvance(value.trim()),
+            }}
+          >
+            {field => (
+              <field.TextField
+                title="Outage Traffic Advance"
+                id="register-synchronizer-outage-advance"
+                subtitle="Bytes each member may use beyond what it has bought while the operator is cut off from the global synchronizer, taken back when it reconnects. 0 means no advance."
               />
             )}
           </form.AppField>
