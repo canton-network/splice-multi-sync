@@ -21,7 +21,11 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.amuletrules.{
 }
 import org.lfdecentralizedtrust.splice.codegen.java.splice.ans.*
 import org.lfdecentralizedtrust.splice.codegen.java.splice.cometbft.CometBftConfigLimits
-import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.MemberTraffic
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.{
+  GovernanceParameters,
+  MemberTraffic,
+  RegisteredSynchronizer,
+}
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dso.decentralizedsynchronizer.{
   DsoDecentralizedSynchronizerConfig,
   SynchronizerNodeConfigLimits,
@@ -208,6 +212,34 @@ abstract class SvDsoStoreTest extends StoreTestBase with HasExecutionContext {
     )(
       _.lookupFeaturedAppRightWithOffset(userParty(1))
     )
+
+    "RegisteredSynchronizer" should {
+      def lookup(store: SvDsoStore, cid: RegisteredSynchronizer.ContractId) =
+        store.multiDomainAcsStore.lookupContractById(RegisteredSynchronizer.COMPANION)(cid)
+
+      "be found by contract id" in {
+        val wanted = registeredSynchronizer(userParty(1), "dedicated::1220aa")
+        val other = registeredSynchronizer(userParty(2), "dedicated::1220bb")
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(wanted)(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(other)(store.multiDomainAcsStore)
+          result <- lookup(store, wanted.contractId)
+        } yield result.map(_.contract) should be(Some(wanted))
+      }
+
+      // An offboard or set-parameters vote archives the registration it pins, which leaves any
+      // other vote pinning it stale.
+      "not be found once archived" in {
+        val registration = registeredSynchronizer(userParty(1), "dedicated::1220aa")
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(registration)(store.multiDomainAcsStore)
+          _ <- dummyDomain.archive(registration)(store.multiDomainAcsStore)
+          result <- lookup(store, registration.contractId)
+        } yield result should be(None)
+      }
+    }
 
     "getOpenMiningRoundTriple" should {
 
@@ -2285,6 +2317,18 @@ abstract class SvDsoStoreTest extends StoreTestBase with HasExecutionContext {
       template,
     )
   }
+
+  private def registeredSynchronizer(operator: PartyId, synchronizerId: String) =
+    contract(
+      RegisteredSynchronizer.TEMPLATE_ID_WITH_PACKAGE_ID,
+      new RegisteredSynchronizer.ContractId(nextCid()),
+      new RegisteredSynchronizer(
+        dsoParty.toProtoPrimitive,
+        synchronizerId,
+        operator.toProtoPrimitive,
+        new GovernanceParameters(java.math.BigDecimal.ONE.setScale(10)),
+      ),
+    )
 
   private def memberTraffic(
       member: Member,
