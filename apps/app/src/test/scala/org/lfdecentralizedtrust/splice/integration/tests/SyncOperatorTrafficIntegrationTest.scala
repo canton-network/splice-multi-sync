@@ -147,16 +147,6 @@ class SyncOperatorTrafficIntegrationTest
         sv1ScanBackend.lookupSynchronizerRegistration(synchronizerId.toProtoPrimitive).value
       }
 
-      // Offboard and set-parameters votes pin the registration by contract id.
-      clue("scan looks the registration up by contract id") {
-        sv1ScanBackend
-          .lookupSynchronizerRegistrationByContractId(registration.contractId.contractId)
-          .value
-          .payload
-          .synchronizerId shouldBe synchronizerId.toProtoPrimitive
-        sv1ScanBackend.lookupSynchronizerRegistrationByContractId("00" * 33) shouldBe None
-      }
-
       clue("the validator serves the registration to its wallet clients through the scan proxy") {
         aliceValidatorBackend.scanProxy
           .lookupSynchronizerRegistration(synchronizerId.toProtoPrimitive)

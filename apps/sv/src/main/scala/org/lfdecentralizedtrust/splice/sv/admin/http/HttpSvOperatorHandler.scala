@@ -279,7 +279,8 @@ class HttpSvOperatorHandler(
   }
 
   /** Intended use: the SV app UI, to show what an offboard or set-parameters vote targets and
-    * to flag a vote whose pinned registration is no longer active. Forwarded to Scan.
+    * to flag a vote whose pinned registration is no longer active. The DSO party signs every
+    * registration, so the SV app's own DSO store holds them.
     */
   override def lookupSynchronizerRegistrationByContractId(
       respond: r0.LookupSynchronizerRegistrationByContractIdResponse.type
@@ -289,11 +290,12 @@ class HttpSvOperatorHandler(
     implicit val ActAsKnownUserRequest(traceContext) = extracted
     withSpan(s"$workflowId.lookupSynchronizerRegistrationByContractId") { _ => _ =>
       for {
-        scanConnection <- scanConnectionF
-        registration <- scanConnection.lookupSynchronizerRegistrationByContractId(contractId)
+        registration <- dsoStore.multiDomainAcsStore.lookupContractById(
+          spliceCodegen.decentralizedsynchronizer.RegisteredSynchronizer.COMPANION
+        )(new spliceCodegen.decentralizedsynchronizer.RegisteredSynchronizer.ContractId(contractId))
       } yield respond.OK(
         definitions.LookupSynchronizerRegistrationByContractIdResponse(
-          registration.map(_.toHttp)
+          registration.map(_.contract.toHttp)
         )
       )
     }

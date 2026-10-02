@@ -495,15 +495,6 @@ class BftScanConnection(
   ): Future[Option[ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]]] =
     bftCall(_.lookupSynchronizerRegistration(synchronizerId), "lookupSynchronizerRegistration")
 
-  override def lookupSynchronizerRegistrationByContractId(contractId: String)(implicit
-      ec: ExecutionContext,
-      tc: TraceContext,
-  ): Future[Option[Contract[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]]] =
-    bftCall(
-      _.lookupSynchronizerRegistrationByContractId(contractId),
-      "lookupSynchronizerRegistrationByContractId",
-    )
-
   override def lookupTransferPreapprovalByParty(receiver: PartyId)(implicit
       ec: ExecutionContext,
       tc: TraceContext,

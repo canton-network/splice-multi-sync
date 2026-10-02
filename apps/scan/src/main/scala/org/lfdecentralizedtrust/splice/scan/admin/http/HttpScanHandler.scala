@@ -34,7 +34,6 @@ import org.apache.pekko.http.scaladsl.model.Uri
 import org.lfdecentralizedtrust.splice.admin.http.HttpErrorHandler
 import org.lfdecentralizedtrust.splice.codegen.java.splice.{amulet, ans as ansCodegen}
 import org.lfdecentralizedtrust.splice.codegen.java.splice.amuletrules.AmuletRules
-import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.RegisteredSynchronizer
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dso.decentralizedsynchronizer.SynchronizerNodeConfig
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dso.svstate.SvNodeState
 import org.lfdecentralizedtrust.splice.codegen.java.splice.externalpartyamuletrules.{
@@ -1234,27 +1233,6 @@ class HttpScanHandler(
               )
             )
         }
-    }
-  }
-
-  override def lookupSynchronizerRegistrationByContractId(
-      respond: ScanResource.LookupSynchronizerRegistrationByContractIdResponse.type
-  )(
-      contractId: String
-  )(extracted: TraceContext): Future[
-    ScanResource.LookupSynchronizerRegistrationByContractIdResponse
-  ] = {
-    implicit val tc = extracted
-    withSpan(s"$workflowId.lookupSynchronizerRegistrationByContractId") { _ => _ =>
-      for {
-        registration <- store.multiDomainAcsStore.lookupContractById(
-          RegisteredSynchronizer.COMPANION
-        )(new RegisteredSynchronizer.ContractId(contractId))
-      } yield {
-        definitions.LookupSynchronizerRegistrationByContractIdResponse(
-          registration.map(_.contract.toHttp)
-        )
-      }
     }
   }
 

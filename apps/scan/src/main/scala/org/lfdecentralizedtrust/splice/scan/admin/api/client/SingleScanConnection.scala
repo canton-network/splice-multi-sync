@@ -500,15 +500,6 @@ class SingleScanConnection private[client] (
       HttpScanAppClient.LookupSynchronizerRegistration(synchronizerId),
     )
 
-  override def lookupSynchronizerRegistrationByContractId(contractId: String)(implicit
-      ec: ExecutionContext,
-      tc: TraceContext,
-  ): Future[Option[Contract[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]]] =
-    runHttpCmd(
-      config.adminApi.url,
-      HttpScanAppClient.LookupSynchronizerRegistrationByContractId(contractId),
-    )
-
   override def lookupTransferPreapprovalByParty(receiver: PartyId)(implicit
       ec: ExecutionContext,
       tc: TraceContext,

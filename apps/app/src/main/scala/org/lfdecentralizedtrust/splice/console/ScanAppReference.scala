@@ -205,14 +205,6 @@ abstract class ScanAppReference(
       httpCommand(HttpScanAppClient.LookupSynchronizerRegistration(synchronizerId))
     }
 
-  @Help.Summary("Look up an active RegisteredSynchronizer by contract ID")
-  def lookupSynchronizerRegistrationByContractId(
-      contractId: String
-  ): Option[Contract[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]] =
-    consoleEnvironment.run {
-      httpCommand(HttpScanAppClient.LookupSynchronizerRegistrationByContractId(contractId))
-    }
-
   @Help.Summary("Lookup a TransferCommandCounter by the receiver party")
   def lookupTransferCommandCounterByParty(
       party: PartyId

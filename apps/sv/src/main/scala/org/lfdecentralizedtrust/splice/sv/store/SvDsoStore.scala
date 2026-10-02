@@ -1507,6 +1507,11 @@ object SvDsoStore {
           totalTrafficPurchased = Some(contract.payload.totalPurchased),
         )
       },
+      // Offboard and set-parameters votes pin a registration by contract id; the SV UI looks it
+      // up here to show what such a vote targets.
+      mkFilter(splice.decentralizedsynchronizer.RegisteredSynchronizer.COMPANION)(co =>
+        co.payload.dso == dso
+      )(DsoAcsStoreRowData(_)),
       mkFilter(splice.ans.AnsRules.COMPANION)(co => co.payload.dso == dso)(DsoAcsStoreRowData(_)),
       mkFilter(splice.ans.AnsEntry.COMPANION)(co => co.payload.dso == dso) { contract =>
         DsoAcsStoreRowData(
