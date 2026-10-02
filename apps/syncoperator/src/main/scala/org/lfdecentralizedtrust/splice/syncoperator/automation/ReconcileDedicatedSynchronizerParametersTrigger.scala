@@ -31,7 +31,6 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
     store: SyncOperatorStore,
     sequencerConnection: SequencerAdminConnection,
     scanConnection: ScanConnection,
-    baseTrafficAmount: NonNegativeLong,
     baseTrafficAccumulationDuration: PositiveFiniteDuration,
 )(implicit
     override val ec: ExecutionContext,
@@ -60,7 +59,7 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
       .map(_ =>
         TaskSuccess(
           s"Set the traffic control parameters on ${task.synchronizerId}, " +
-            s"base traffic amount $baseTrafficAmount"
+            s"read vs write scaling factor ${task.readVsWriteScalingFactor.value}"
         )
       )
 
@@ -97,7 +96,8 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
       parameters.tryUpdate(trafficControlParameters =
         Some(
           current.copy(
-            maxBaseTrafficAmount = baseTrafficAmount,
+            // Zero base amount so that all traffic is paid for.
+            maxBaseTrafficAmount = NonNegativeLong.zero,
             readVsWriteScalingFactor = readVsWriteScalingFactor,
             maxBaseTrafficAccumulationDuration = baseTrafficAccumulationDuration,
             freeConfirmationResponses = true,

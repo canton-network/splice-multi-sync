@@ -157,7 +157,6 @@ class SyncOperatorApp(
         sequencerAdminConnection,
         scanConnection,
         config.trafficBalanceReconciliationDelay,
-        config.baseTrafficAmount,
         PositiveFiniteDuration.tryOfSeconds(
           config.baseTrafficAccumulationDuration.duration.toSeconds
         ),
