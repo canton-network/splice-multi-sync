@@ -22,6 +22,8 @@ import org.lfdecentralizedtrust.splice.scan.admin.api.client.ScanConnection
 import org.lfdecentralizedtrust.splice.syncoperator.automation.ReconcileDedicatedSynchronizerParametersTrigger.Task
 import org.lfdecentralizedtrust.splice.syncoperator.store.SyncOperatorStore
 import org.lfdecentralizedtrust.splice.util.AmuletConfigSchedule
+import org.lfdecentralizedtrust.splice.environment.SynchronizerNodeService
+import org.lfdecentralizedtrust.splice.syncoperator.SyncOperatorSynchronizerNode
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -29,7 +31,7 @@ import scala.concurrent.{ExecutionContext, Future}
 class ReconcileDedicatedSynchronizerParametersTrigger(
     override protected val context: TriggerContext,
     store: SyncOperatorStore,
-    sequencerConnection: SequencerAdminConnection,
+    synchronizerNodeService: SynchronizerNodeService[SyncOperatorSynchronizerNode],
     scanConnection: ScanConnection,
     baseTrafficAccumulationDuration: PositiveFiniteDuration,
 )(implicit
@@ -44,17 +46,21 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
       tc: TraceContext
   ): Future[Seq[Task]] =
     for {
+      connection <- synchronizerNodeService.sequencerAdminConnection()
       readVsWriteScalingFactor <- globalReadVsWriteScalingFactor()
-      reconciled <- isReconciled(readVsWriteScalingFactor)
+      reconciled <- isReconciled(connection, readVsWriteScalingFactor)
     } yield if (reconciled) Seq.empty else Seq(Task(synchronizerId, readVsWriteScalingFactor))
 
   override protected def completeTask(task: Task)(implicit
       tc: TraceContext
   ): Future[TaskOutcome] =
-    sequencerConnection
-      .ensureDomainParameters(
-        task.synchronizerId,
-        withTrafficControl(_, task.readVsWriteScalingFactor),
+    synchronizerNodeService
+      .sequencerAdminConnection()
+      .flatMap(connection =>
+        connection.ensureDomainParameters(
+          task.synchronizerId,
+          withTrafficControl(_, task.readVsWriteScalingFactor),
+        )
       )
       .map(_ =>
         TaskSuccess(
@@ -65,12 +71,16 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
 
   override protected def isStaleTask(task: Task)(implicit
       tc: TraceContext
-  ): Future[Boolean] = isReconciled(task.readVsWriteScalingFactor)
+  ): Future[Boolean] =
+    synchronizerNodeService
+      .sequencerAdminConnection()
+      .flatMap(isReconciled(_, task.readVsWriteScalingFactor))
 
   private def isReconciled(
-      readVsWriteScalingFactor: PositiveInt
+      connection: SequencerAdminConnection,
+      readVsWriteScalingFactor: PositiveInt,
   )(implicit tc: TraceContext): Future[Boolean] =
-    sequencerConnection
+    connection
       .getSynchronizerParametersState(synchronizerId)
       .map(state =>
         state.mapping.parameters ==
