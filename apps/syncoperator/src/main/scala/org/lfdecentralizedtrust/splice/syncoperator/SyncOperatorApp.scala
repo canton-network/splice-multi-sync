@@ -10,7 +10,6 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.LifeCycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.resource.DbStorage
-import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
@@ -174,9 +173,6 @@ class SyncOperatorApp(
         config.lsu,
         config.lsuDumpPath,
         config.trafficBalanceReconciliationDelay,
-        PositiveFiniteDuration.tryOfSeconds(
-          config.baseTrafficAccumulationDuration.duration.toSeconds
-        ),
         loggerFactory,
         packageVersionSupport,
       )

@@ -6,7 +6,7 @@ package org.lfdecentralizedtrust.splice.syncoperator.automation
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.DbStorage
-import com.digitalasset.canton.time.{Clock, PositiveFiniteDuration}
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
@@ -48,7 +48,6 @@ class SyncOperatorAutomationService(
     lsuConfig: Option[SyncOperatorLsuConfig],
     lsuDumpPath: Option[Path],
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
-    baseTrafficAccumulationDuration: PositiveFiniteDuration,
     protected val loggerFactory: NamedLoggerFactory,
     packageVersionSupport: PackageVersionSupport,
 )(implicit
@@ -82,7 +81,6 @@ class SyncOperatorAutomationService(
       store,
       synchronizerNodeService,
       scanConnection,
-      baseTrafficAccumulationDuration,
     )
   )
 

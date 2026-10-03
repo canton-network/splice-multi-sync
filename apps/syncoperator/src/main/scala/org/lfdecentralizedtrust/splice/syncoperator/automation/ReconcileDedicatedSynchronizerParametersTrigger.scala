@@ -6,7 +6,6 @@ package org.lfdecentralizedtrust.splice.syncoperator.automation
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
-import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
@@ -33,7 +32,6 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
     store: SyncOperatorStore,
     synchronizerNodeService: SynchronizerNodeService[SyncOperatorSynchronizerNode],
     scanConnection: ScanConnection,
-    baseTrafficAccumulationDuration: PositiveFiniteDuration,
 )(implicit
     override val ec: ExecutionContext,
     mat: Materializer,
@@ -109,7 +107,6 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
             // Zero base amount so that all traffic is paid for.
             maxBaseTrafficAmount = NonNegativeLong.zero,
             readVsWriteScalingFactor = readVsWriteScalingFactor,
-            maxBaseTrafficAccumulationDuration = baseTrafficAccumulationDuration,
             freeConfirmationResponses = true,
           )
         )
