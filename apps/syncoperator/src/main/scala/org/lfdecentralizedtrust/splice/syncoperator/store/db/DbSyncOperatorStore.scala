@@ -94,4 +94,16 @@ class DbSyncOperatorStore(
       key.synchronizerId,
     )
   }
+
+  override def listTotalPurchasedMemberTraffic()(implicit
+      tc: TraceContext
+  ): Future[Map[Member, Long]] = waitUntilAcsIngested {
+    sumPurchasedMemberTrafficPerMember(
+      storage,
+      SyncOperatorTables.acsTableName,
+      acsStoreId,
+      domainMigrationId,
+      key.synchronizerId,
+    )
+  }
 }
