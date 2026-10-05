@@ -30,6 +30,7 @@ object TopupUtil {
       .map(_.payload.governanceParameters)
       .fold(BigDecimal(1))(p => BigDecimal(p.discountFactor))
 
+  /** The cost of one top-up, plus `extraTraffic` bought with it. */
   def minWalletBalanceForTopup(
       scanConnection: ScanConnection,
       validatorTopupConfig: ValidatorTopupConfig,
@@ -37,6 +38,7 @@ object TopupUtil {
       registration: Option[
         ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
       ],
+      extraTraffic: Long = 0L,
   )(implicit tc: TraceContext, ec: ExecutionContext, mat: Materializer): Future[BigDecimal] = for {
     amuletRules <- scanConnection.getAmuletRulesWithState()
     synchronizerFeesConfig = AmuletConfigSchedule(amuletRules)
@@ -50,16 +52,32 @@ object TopupUtil {
       validatorTopupConfig.topupTriggerPollingInterval,
     )
     latestRound <- scanConnection.getLatestOpenMiningRound()
-    amuletPrice = latestRound.payload.amuletPrice
-    extraTrafficPrice = BigDecimal(synchronizerFeesConfig.extraTrafficPrice)
-  } yield SpliceUtil
-    .synchronizerFees(
-      topupParameters.topupAmount,
-      extraTrafficPrice,
-      amuletPrice,
-      discountFactor(registration),
-    )
-    ._2
+  } yield topupCost(
+    topupParameters,
+    extraTraffic,
+    BigDecimal(synchronizerFeesConfig.extraTrafficPrice),
+    latestRound.payload.amuletPrice,
+    registration,
+  )
+
+  /** What one top-up, plus `extraTraffic` bought with it, costs in amulet. */
+  def topupCost(
+      topupParameters: ExtraTrafficTopupParameters,
+      extraTraffic: Long,
+      extraTrafficPrice: BigDecimal,
+      amuletPrice: BigDecimal,
+      registration: Option[
+        ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
+      ],
+  ): BigDecimal =
+    SpliceUtil
+      .synchronizerFees(
+        topupParameters.topupAmount + extraTraffic,
+        extraTrafficPrice,
+        amuletPrice,
+        discountFactor(registration),
+      )
+      ._2
 
   private def currentWalletBalance(scanConnection: ScanConnection, store: UserWalletStore)(implicit
       tc: TraceContext,
