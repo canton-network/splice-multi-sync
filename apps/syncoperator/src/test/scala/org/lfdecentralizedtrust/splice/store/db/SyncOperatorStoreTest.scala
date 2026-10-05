@@ -141,6 +141,31 @@ abstract class SyncOperatorStoreTest extends StoreTestBase with HasExecutionCont
         total <- store.getTotalPurchasedMemberTraffic(alice)
       } yield total shouldBe 0L
     }
+
+    "list the total of every member with a purchase for this synchronizer" in {
+      for {
+        store <- mkStore()
+        _ <- ingest(
+          store,
+          Seq(
+            memberTraffic(alice, 100L),
+            memberTraffic(alice, 250L),
+            memberTraffic(bob, 700L),
+            memberTraffic(bob, 900L, synchronizerId = foreignSynchronizer),
+            memberTraffic(bob, 300L, operator = Some(otherOperator)),
+          ),
+        )
+        totals <- store.listTotalPurchasedMemberTraffic()
+      } yield totals shouldBe Map(alice -> 350L, bob -> 700L)
+    }
+
+    "list no totals before any purchase" in {
+      for {
+        store <- mkStore()
+        _ <- ingest(store, Seq.empty)
+        totals <- store.listTotalPurchasedMemberTraffic()
+      } yield totals shouldBe empty
+    }
   }
 }
 

@@ -4,6 +4,7 @@
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.time.Clock
@@ -48,6 +49,8 @@ class SyncOperatorAutomationService(
     lsuConfig: Option[SyncOperatorLsuConfig],
     lsuDumpPath: Option[Path],
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
+    outageTrafficAllowance: Option[NonNegativeLong],
+    outageTrafficAllowanceWarningInterval: NonNegativeFiniteDuration,
     protected val loggerFactory: NamedLoggerFactory,
     packageVersionSupport: PackageVersionSupport,
 )(implicit
@@ -99,6 +102,29 @@ class SyncOperatorAutomationService(
       store,
       synchronizerNodeService,
       trafficBalanceReconciliationDelay,
+      outageTrafficAllowance,
+    )
+  )
+
+  // Also without an allowance, so that a restart after removing one sets the limits back.
+  registerTrigger(
+    new OutageTrafficAllowanceTrigger(
+      triggerContext,
+      store,
+      synchronizerNodeService,
+      outageTrafficAllowance,
+      trafficBalanceReconciliationDelay,
+    )
+  )
+
+  outageTrafficAllowance.foreach(allowance =>
+    registerTrigger(
+      new OutageTrafficAllowanceWarningTrigger(
+        outageTrafficAllowanceWarningInterval,
+        triggerContext,
+        store,
+        allowance,
+      )
     )
   )
 
@@ -155,6 +181,8 @@ object SyncOperatorAutomationService extends AutomationServiceCompanion {
       aTrigger[ReconcileDedicatedSynchronizerParametersTrigger],
       aTrigger[MediatorUnlimitedTrafficTrigger],
       aTrigger[ReconcileDedicatedSequencerTrafficTrigger],
+      aTrigger[OutageTrafficAllowanceTrigger],
+      aTrigger[OutageTrafficAllowanceWarningTrigger],
       aTrigger[DedicatedLsuAnnouncementTrigger],
       aTrigger[DedicatedLsuTrigger],
       aTrigger[LsuTransferTrafficTrigger],

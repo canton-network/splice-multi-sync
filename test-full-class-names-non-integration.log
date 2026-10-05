@@ -67,6 +67,7 @@ org.lfdecentralizedtrust.splice.sv.cometbft.CometBftRequestSignerTest
 org.lfdecentralizedtrust.splice.sv.onboarding.SequencerBftPeerReconcilerSpec
 org.lfdecentralizedtrust.splice.sv.util.SvOnboardingTokenTest
 org.lfdecentralizedtrust.splice.sv.util.WeightDistributionForSvTest
+org.lfdecentralizedtrust.splice.syncoperator.automation.OutageTrafficAllowanceTriggerTest
 org.lfdecentralizedtrust.splice.unit.http.HttpClientProxyTest
 org.lfdecentralizedtrust.splice.unit.store.db.AcsJdbcTypesTest
 org.lfdecentralizedtrust.splice.util.AmuletConfigScheduleTest
@@ -83,4 +84,5 @@ org.lfdecentralizedtrust.splice.validator.store.DbValidatorConfigProviderTest
 org.lfdecentralizedtrust.splice.validator.store.DbValidatorStoreTest
 org.lfdecentralizedtrust.splice.validator.store.InMemoryPartyToParticipantStoreTest
 org.lfdecentralizedtrust.splice.wallet.util.ExtraTrafficTopupParametersTest
+org.lfdecentralizedtrust.splice.wallet.util.TopupUtilTest
 org.lfdecentralizedtrust.splice.wart.ParTraverseTest

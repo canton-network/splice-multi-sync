@@ -126,4 +126,37 @@ class TopupMemberTrafficTriggerTest extends AnyWordSpec with BaseTest {
       unfunded shouldBe empty
     }
   }
+
+  "TopupMemberTrafficTrigger.shortfall" should {
+
+    "be what a balance below zero needs to reach zero" in {
+      TopupMemberTrafficTrigger.shortfall(-300L) shouldBe 300L
+    }
+
+    "be zero for a balance at or above zero" in {
+      TopupMemberTrafficTrigger.shortfall(0L) shouldBe 0L
+      TopupMemberTrafficTrigger.shortfall(500L) shouldBe 0L
+    }
+  }
+
+  "TopupMemberTrafficTrigger.trafficToBuy" should {
+
+    "buy the shortfall together with the configured top-up" in {
+      TopupMemberTrafficTrigger.trafficToBuy(
+        topupAmount = 2_000L,
+        extraTrafficRemainder = -300L,
+      ) shouldBe 2_300L
+    }
+
+    "buy only the configured top-up for a balance at or above zero" in {
+      TopupMemberTrafficTrigger.trafficToBuy(
+        topupAmount = 2_000L,
+        extraTrafficRemainder = 0L,
+      ) shouldBe 2_000L
+      TopupMemberTrafficTrigger.trafficToBuy(
+        topupAmount = 2_000L,
+        extraTrafficRemainder = 500L,
+      ) shouldBe 2_000L
+    }
+  }
 }
