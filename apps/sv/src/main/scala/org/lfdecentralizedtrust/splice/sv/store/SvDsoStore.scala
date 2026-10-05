@@ -1039,6 +1039,14 @@ trait SvDsoStore
     ]
   ]
 
+  /** The active registration for a dedicated synchronizer id, if any. */
+  def lookupSynchronizerRegistration(synchronizerId: String)(implicit
+      tc: TraceContext
+  ): Future[Option[ContractWithState[
+    splice.decentralizedsynchronizer.RegisteredSynchronizer.ContractId,
+    splice.decentralizedsynchronizer.RegisteredSynchronizer,
+  ]]]
+
   def lookupFeaturedAppRight(
       providerPartyId: PartyId
   )(implicit
@@ -1507,11 +1515,19 @@ object SvDsoStore {
           totalTrafficPurchased = Some(contract.payload.totalPurchased),
         )
       },
-      // Offboard and set-parameters votes pin a registration by contract id; the SV UI looks it
-      // up here to show what such a vote targets.
+      // The SV UI looks a registration up here by contract id, to show what an offboard or
+      // set-parameters vote targets, and by synchronizer id, to reject a duplicate registration.
       mkFilter(splice.decentralizedsynchronizer.RegisteredSynchronizer.COMPANION)(co =>
         co.payload.dso == dso
-      )(DsoAcsStoreRowData(_)),
+      )(contract =>
+        // A String, not a SynchronizerId: DsoRules_RegisterSynchronizer only checks the id is
+        // non-empty, so tryFromString here would throw on a governance typo and take down the
+        // ingestion pipeline. The query compares it as text.
+        DsoAcsStoreRowData(
+          contract,
+          registeredSynchronizerId = Some(contract.payload.synchronizerId),
+        )
+      ),
       mkFilter(splice.ans.AnsRules.COMPANION)(co => co.payload.dso == dso)(DsoAcsStoreRowData(_)),
       mkFilter(splice.ans.AnsEntry.COMPANION)(co => co.payload.dso == dso) { contract =>
         DsoAcsStoreRowData(

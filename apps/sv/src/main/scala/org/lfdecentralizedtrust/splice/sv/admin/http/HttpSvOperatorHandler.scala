@@ -251,7 +251,7 @@ class HttpSvOperatorHandler(
 
   /** Intended use: the SV app UI, to warn a proposer that a synchronizer id is already
     * registered, and to resolve the registration an offboard or set-parameters proposal
-    * targets. Forwarded to Scan, which holds the registry; the SV app does not ingest it.
+    * targets. The DSO party signs every registration, so the SV app's own DSO store holds them.
     */
   override def lookupSynchronizerRegistration(
       respond: r0.LookupSynchronizerRegistrationResponse.type
@@ -261,8 +261,7 @@ class HttpSvOperatorHandler(
     implicit val ActAsKnownUserRequest(traceContext) = extracted
     withSpan(s"$workflowId.lookupSynchronizerRegistration") { _ => _ =>
       for {
-        scanConnection <- scanConnectionF
-        registrationOpt <- scanConnection.lookupSynchronizerRegistration(synchronizerId)
+        registrationOpt <- dsoStore.lookupSynchronizerRegistration(synchronizerId)
       } yield registrationOpt match {
         case None =>
           r0.LookupSynchronizerRegistrationResponse.NotFound(
