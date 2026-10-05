@@ -36,7 +36,6 @@ import org.lfdecentralizedtrust.splice.sv.config.SvOnboardingConfig.FoundDso
 import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorAppBackendConfig,
   SyncOperatorAppClientConfig,
-  SyncOperatorLsuConfig,
   SyncOperatorMediatorConfig,
   SyncOperatorSequencerConfig,
   SyncOperatorSynchronizerNodeConfig,
@@ -1010,8 +1009,6 @@ object SpliceConfig {
     implicit val syncOperatorSynchronizerNodesConfigReader
         : ConfigReader[SyncOperatorSynchronizerNodesConfig] =
       deriveReader[SyncOperatorSynchronizerNodesConfig]
-    implicit val syncOperatorLsuConfigReader: ConfigReader[SyncOperatorLsuConfig] =
-      deriveReader[SyncOperatorLsuConfig]
     implicit val syncOperatorConfigReader: ConfigReader[SyncOperatorAppBackendConfig] =
       deriveReader[SyncOperatorAppBackendConfig]
     implicit val syncOperatorClientConfigReader: ConfigReader[SyncOperatorAppClientConfig] =
@@ -1352,8 +1349,6 @@ object SpliceConfig {
     implicit val syncOperatorSynchronizerNodesConfigWriter
         : ConfigWriter[SyncOperatorSynchronizerNodesConfig] =
       deriveWriter[SyncOperatorSynchronizerNodesConfig]
-    implicit val syncOperatorLsuConfigWriter: ConfigWriter[SyncOperatorLsuConfig] =
-      deriveWriter[SyncOperatorLsuConfig]
     implicit val syncOperatorConfigWriter: ConfigWriter[SyncOperatorAppBackendConfig] =
       deriveWriter[SyncOperatorAppBackendConfig]
     implicit val syncOperatorClientConfigWriter: ConfigWriter[SyncOperatorAppClientConfig] =

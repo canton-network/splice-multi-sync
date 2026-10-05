@@ -11,12 +11,13 @@ import org.apache.pekko.stream.Materializer
 import org.lfdecentralizedtrust.splice.automation.TriggerContext
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
 import org.lfdecentralizedtrust.splice.lsu.{LsuAnnouncementTriggerBase, LsuSchedule}
-import org.lfdecentralizedtrust.splice.syncoperator.config.SyncOperatorLsuConfig
+import org.lfdecentralizedtrust.splice.store.KeyValueStore
+import org.lfdecentralizedtrust.splice.syncoperator.store.SyncOperatorKeyValueStore
 
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Failure, Success, Try}
 
-/** Publishes the LSU announcement for the upgrade this operator has scheduled in its own config.
+/** Publishes the LSU announcement for the upgrade this operator has scheduled through its admin
+  * api.
   *
   * Written through the sequencer, which owns the synchronizer's namespace. The operator's
   * participant holds no key in it.
@@ -24,7 +25,7 @@ import scala.util.{Failure, Success, Try}
 class DedicatedLsuAnnouncementTrigger(
     override protected val context: TriggerContext,
     override protected val connection: SequencerAdminConnection,
-    lsuConfig: SyncOperatorLsuConfig,
+    keyValueStore: KeyValueStore,
 )(implicit
     ec: ExecutionContext,
     mat: Materializer,
@@ -38,23 +39,15 @@ class DedicatedLsuAnnouncementTrigger(
   override protected def upgradeDueAt(now: CantonTimestamp)(implicit
       tc: TraceContext
   ): Future[Option[LsuSchedule]] =
-    Future.successful(
-      // A file-backed time is only readable once the operator has written it, so until then the
-      // upgrade is not scheduled yet rather than misconfigured.
-      Try(
-        (lsuConfig.topologyFreezeTime.getTimestamp(), lsuConfig.upgradeTime.getTimestamp())
-      ) match {
-        case Failure(err) =>
-          logger.debug(s"No upgrade scheduled yet, the configured times are unreadable: $err")
-          None
-        case Success((freezeTime, upgradeTime)) =>
-          Option.when(!now.isBefore(freezeTime))(
-            LsuSchedule(
-              upgradeTime = upgradeTime,
-              successorSerial = lsuConfig.newPhysicalSynchronizerSerial,
-              successorProtocolVersion = lsuConfig.newPhysicalSynchronizerProtocolVersion,
-            )
-          )
-      }
-    )
+    SyncOperatorKeyValueStore
+      .getScheduledLsu(keyValueStore)
+      .filter(schedule => !now.isBefore(schedule.topologyFreezeTime))
+      .map(schedule =>
+        LsuSchedule(
+          upgradeTime = schedule.upgradeTime,
+          successorSerial = schedule.newPhysicalSynchronizerSerial,
+          successorProtocolVersion = schedule.newPhysicalSynchronizerProtocolVersion,
+        )
+      )
+      .value
 }

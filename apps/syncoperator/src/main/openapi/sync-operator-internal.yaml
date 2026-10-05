@@ -1,0 +1,78 @@
+openapi: 3.0.0
+info:
+  title: Sync Operator API
+  version: 0.0.1
+tags:
+  - name: syncoperator
+servers:
+  - url: https://example.com/api/syncoperator
+paths:
+  /readyz:
+    $ref: "../../../../common/src/main/openapi/common-external.yaml#/paths/~1readyz"
+  /livez:
+    $ref: "../../../../common/src/main/openapi/common-external.yaml#/paths/~1livez"
+  /status:
+    $ref: "../../../../common/src/main/openapi/common-external.yaml#/paths/~1status"
+  /version:
+    $ref: "../../../../common/src/main/openapi/common-external.yaml#/paths/~1version"
+
+  /v0/admin/synchronizer/lsu/schedule:
+    post:
+      tags: [syncoperator]
+      x-jvm-package: sync_operator_admin
+      operationId: "scheduleLogicalSynchronizerUpgrade"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/ScheduleLogicalSynchronizerUpgradeRequest"
+      responses:
+        "200":
+          description: ok
+        "409":
+          description: "An upgrade to a different serial is already scheduled."
+          content:
+            application/json:
+              schema:
+                $ref: "../../../../common/src/main/openapi/common-external.yaml#/components/schemas/ErrorResponse"
+        "400":
+          $ref: "../../../../common/src/main/openapi/common-external.yaml#/components/responses/400"
+        "500":
+          $ref: "../../../../common/src/main/openapi/common-external.yaml#/components/responses/500"
+
+  /v0/admin/synchronizer/lsu/cancel:
+    post:
+      tags: [syncoperator]
+      x-jvm-package: sync_operator_admin
+      operationId: "cancelLogicalSynchronizerUpgrade"
+      responses:
+        "200":
+          description: ok
+        "500":
+          $ref: "../../../../common/src/main/openapi/common-external.yaml#/components/responses/500"
+
+components:
+  schemas:
+    ScheduleLogicalSynchronizerUpgradeRequest:
+      type: object
+      required:
+        - topology_freeze_time
+        - upgrade_time
+        - new_physical_synchronizer_serial
+        - new_physical_synchronizer_protocol_version
+      properties:
+        topology_freeze_time:
+          description: "The announcement is published once this is reached, which is what freezes topology."
+          type: string
+          format: date-time
+        upgrade_time:
+          type: string
+          format: date-time
+        new_physical_synchronizer_serial:
+          type: integer
+          format: int32
+          minimum: 0
+        new_physical_synchronizer_protocol_version:
+          description: "An upgrade may keep the protocol version, it cannot go back to an earlier one."
+          type: string

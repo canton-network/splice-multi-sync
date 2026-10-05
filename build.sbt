@@ -1913,7 +1913,21 @@ lazy val `apps-syncoperator` =
       `apps-scan` % "compile->compile;test->test",
     )
     .settings(
-      BuildCommon.sharedAppSettings
+      BuildCommon.sharedAppSettings,
+      Compile / guardrailTasks :=
+        List(
+          ScalaServer(
+            new File("apps/syncoperator/src/main/openapi/sync-operator-internal.yaml"),
+            pkg = "org.lfdecentralizedtrust.splice.http.v0",
+            modules = List("pekko-http-v1.0.0", "circe"),
+            customExtraction = true,
+          ),
+          ScalaClient(
+            new File("apps/syncoperator/src/main/openapi/sync-operator-internal.yaml"),
+            pkg = "org.lfdecentralizedtrust.splice.http.v0",
+            modules = List("pekko-http-v1.0.0", "circe"),
+          ),
+        ),
     )
 
 lazy val pulumi =

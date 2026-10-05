@@ -14,10 +14,9 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchron
 import org.lfdecentralizedtrust.splice.config.ConfigTransforms
 import org.lfdecentralizedtrust.splice.integration.EnvironmentDefinition
 import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.IntegrationTest
-import org.lfdecentralizedtrust.splice.lsu.{LsuRollForwardTimestamp, LsuTransferTrafficTrigger}
+import org.lfdecentralizedtrust.splice.lsu.LsuTransferTrafficTrigger
 import org.lfdecentralizedtrust.splice.syncoperator.automation.DedicatedLsuTrigger
 import org.lfdecentralizedtrust.splice.syncoperator.config.{
-  SyncOperatorLsuConfig,
   SyncOperatorMediatorConfig,
   SyncOperatorSequencerConfig,
   SyncOperatorSynchronizerNodeConfig,
@@ -68,12 +67,10 @@ class SyncOperatorLsuIntegrationTest
 
   // The operator reads its schedule from files, so the test writes them once it is ready rather
   // than picking a time while the environment is still starting.
-  private lazy val scheduleDir = File.newTemporaryDirectory("sync-operator-lsu")
-  private lazy val freezeTimeFile = scheduleDir / "topology-freeze-time"
-  private lazy val upgradeTimeFile = scheduleDir / "upgrade-time"
+  private lazy val dumpDir = File.newTemporaryDirectory("sync-operator-lsu")
 
   override def afterAll(): Unit = {
-    scheduleDir.delete(swallowIOExceptions = true)
+    dumpDir.delete(swallowIOExceptions = true)
     super.afterAll()
   }
 
@@ -111,15 +108,7 @@ class SyncOperatorLsuIntegrationTest
                 )
               ),
             ),
-            lsu = Some(
-              SyncOperatorLsuConfig(
-                topologyFreezeTime = LsuRollForwardTimestamp.TimestampFromFile(freezeTimeFile.path),
-                upgradeTime = LsuRollForwardTimestamp.TimestampFromFile(upgradeTimeFile.path),
-                newPhysicalSynchronizerSerial = successorSerial,
-                newPhysicalSynchronizerProtocolVersion = successorPv,
-              )
-            ),
-            lsuDumpPath = Some((scheduleDir / "lsu-dump.json").path),
+            lsuDumpPath = Some((dumpDir / "lsu-dump.json").path),
             parameters = c.parameters.copy(
               spliceCachingConfigs = c.parameters.spliceCachingConfigs.copy(
                 physicalSynchronizerExpiration = NonNegativeFiniteDuration.ofSeconds(1)
@@ -206,13 +195,17 @@ class SyncOperatorLsuIntegrationTest
 
         setTriggersWithin(triggersToResumeAtStart = Seq[Trigger](lsuTrigger, trafficTrigger)) {
           val upgradeTime = actAndCheck(
-            "the operator schedules the upgrade", {
+            "the operator schedules the upgrade through its admin api", {
               val now = CantonTimestamp.now()
               // Long enough for the successor to be stood up, short enough that the test
               // still crosses it.
               val upgradeTime = now.plus(Duration.ofMinutes(3))
-              freezeTimeFile.overwrite(now.toInstant.toString)
-              upgradeTimeFile.overwrite(upgradeTime.toInstant.toString)
+              syncOperatorBackend.scheduleLogicalSynchronizerUpgrade(
+                topologyFreezeTime = now,
+                upgradeTime = upgradeTime,
+                newPhysicalSynchronizerSerial = successorSerial,
+                newPhysicalSynchronizerProtocolVersion = successorPv,
+              )
               upgradeTime
             },
           )(

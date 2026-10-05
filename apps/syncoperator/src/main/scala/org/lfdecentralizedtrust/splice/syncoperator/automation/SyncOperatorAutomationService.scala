@@ -7,7 +7,6 @@ import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 import org.lfdecentralizedtrust.splice.automation.{
@@ -27,7 +26,7 @@ import org.lfdecentralizedtrust.splice.environment.{
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.ScanConnection
 import org.lfdecentralizedtrust.splice.syncoperator.SyncOperatorSynchronizerNode
 import org.lfdecentralizedtrust.splice.store.DomainTimeSynchronization
-import org.lfdecentralizedtrust.splice.syncoperator.config.SyncOperatorLsuConfig
+import org.lfdecentralizedtrust.splice.store.KeyValueStore
 import org.lfdecentralizedtrust.splice.syncoperator.store.SyncOperatorStore
 
 import java.nio.file.Path
@@ -45,7 +44,7 @@ class SyncOperatorAutomationService(
     params: SpliceParametersConfig,
     synchronizerNodeService: SynchronizerNodeService[SyncOperatorSynchronizerNode],
     scanConnection: ScanConnection,
-    lsuConfig: Option[SyncOperatorLsuConfig],
+    keyValueStore: KeyValueStore,
     lsuDumpPath: Option[Path],
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
     protected val loggerFactory: NamedLoggerFactory,
@@ -108,15 +107,13 @@ class SyncOperatorAutomationService(
   private def registerLsuTriggers(): Unit =
     synchronizerNodeService.nodes.successor match {
       case Some(successorSynchronizerNode) =>
-        lsuConfig.foreach { lsu =>
-          registerTrigger(
-            new DedicatedLsuAnnouncementTrigger(
-              triggerContext,
-              synchronizerNodeService.nodes.current.sequencerAdminConnection,
-              lsu,
-            )
+        registerTrigger(
+          new DedicatedLsuAnnouncementTrigger(
+            triggerContext,
+            synchronizerNodeService.nodes.current.sequencerAdminConnection,
+            keyValueStore,
           )
-        }
+        )
         registerTrigger(
           new DedicatedLsuTrigger(
             triggerContext,
@@ -136,13 +133,7 @@ class SyncOperatorAutomationService(
             successorSynchronizerNode,
           )
         )
-      case None =>
-        lsuConfig.foreach(_ =>
-          logger.warn(
-            "An upgrade is scheduled but no successor synchronizer node is configured, so it will " +
-              "not run. Configure synchronizer-nodes.successor."
-          )(TraceContext.empty)
-        )
+      case None => ()
     }
 }
 

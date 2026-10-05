@@ -20,7 +20,6 @@ import org.lfdecentralizedtrust.splice.config.{
   SpliceParametersConfig,
   SplicePostgresConfig,
 }
-import org.lfdecentralizedtrust.splice.lsu.LsuRollForwardTimestamp
 import org.lfdecentralizedtrust.splice.scan.config.ScanAppClientConfig
 
 import java.nio.file.Path
@@ -67,18 +66,6 @@ case class SyncOperatorSynchronizerNodesConfig(
     successor: Option[SyncOperatorSynchronizerNodeConfig] = None,
 )
 
-/** An upgrade the operator has scheduled, mirroring the DSO's
-  * `LogicalSynchronizerUpgradeSchedule`.
-  */
-case class SyncOperatorLsuConfig(
-    // The announcement is published once this is reached, which is what freezes topology.
-    topologyFreezeTime: LsuRollForwardTimestamp,
-    upgradeTime: LsuRollForwardTimestamp,
-    newPhysicalSynchronizerSerial: NonNegativeInt,
-    // An upgrade may keep the protocol version, it cannot go back to an earlier one.
-    newPhysicalSynchronizerProtocolVersion: ProtocolVersion,
-)
-
 case class SyncOperatorAppBackendConfig(
     override val adminApi: AdminServerConfig = AdminServerConfig(),
     override val storage: DbConfig,
@@ -88,8 +75,6 @@ case class SyncOperatorAppBackendConfig(
     participantClient: ParticipantClientConfig,
     scanClient: ScanAppClientConfig,
     synchronizerNodes: SyncOperatorSynchronizerNodesConfig,
-    // The upgrade this operator has scheduled, if any. Read by the announcement trigger.
-    lsu: Option[SyncOperatorLsuConfig] = None,
     // Where the predecessor's synchronizer state is dumped during an upgrade.
     lsuDumpPath: Option[Path] = None,
     override val automation: AutomationConfig = AutomationConfig(),

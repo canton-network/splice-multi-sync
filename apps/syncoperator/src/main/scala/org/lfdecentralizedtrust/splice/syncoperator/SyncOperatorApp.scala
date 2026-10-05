@@ -16,7 +16,14 @@ import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.http.cors.scaladsl.CorsDirectives.cors
+import org.apache.pekko.http.cors.scaladsl.settings.CorsSettings
+import org.apache.pekko.http.scaladsl.server.Directives.*
+import org.lfdecentralizedtrust.splice.admin.api.TraceContextDirectives.withTraceContext
+import org.lfdecentralizedtrust.splice.admin.http.{AdminRoutes, HttpErrorHandler}
 import org.lfdecentralizedtrust.splice.config.SharedSpliceAppParameters
+import org.lfdecentralizedtrust.splice.http.v0.sync_operator_admin.SyncOperatorAdminResource
+import org.lfdecentralizedtrust.splice.syncoperator.admin.http.HttpSyncOperatorAdminHandler
 import org.lfdecentralizedtrust.splice.environment.{
   BaseLedgerConnection,
   MediatorAdminConnection,
@@ -36,7 +43,10 @@ import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorSynchronizerNodeConfig,
 }
 import org.lfdecentralizedtrust.splice.syncoperator.metrics.SyncOperatorAppMetrics
-import org.lfdecentralizedtrust.splice.syncoperator.store.SyncOperatorStore
+import org.lfdecentralizedtrust.splice.syncoperator.store.{
+  SyncOperatorKeyValueStore,
+  SyncOperatorStore,
+}
 import org.lfdecentralizedtrust.splice.util.HasHealth
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
@@ -58,6 +68,7 @@ class SyncOperatorApp(
     tracerProvider: TracerProvider,
     futureSupervisor: FutureSupervisor,
     metrics: SyncOperatorAppMetrics,
+    adminRoutes: AdminRoutes,
 )(implicit
     ac: ActorSystem,
     ec: ExecutionContextExecutor,
@@ -160,6 +171,9 @@ class SyncOperatorApp(
         readOnlyLedgerConnection,
         loggerFactory,
       )
+      keyValueStore <- appInitStep("Initialize the key value store") {
+        SyncOperatorKeyValueStore(partyId, participantId, storage, loggerFactory)
+      }
       automation = new SyncOperatorAutomationService(
         config.automation,
         clock,
@@ -170,12 +184,29 @@ class SyncOperatorApp(
         config.parameters,
         synchronizerNodeService,
         scanConnection,
-        config.lsu,
+        keyValueStore,
         config.lsuDumpPath,
         config.trafficBalanceReconciliationDelay,
         loggerFactory,
         packageVersionSupport,
       )
+      handler = new HttpSyncOperatorAdminHandler(
+        keyValueStore,
+        sequencerAdminConnection,
+        loggerFactory,
+      )
+      route = cors(
+        CorsSettings(ac).withExposedHeaders(Seq("traceparent"))
+      ) {
+        withTraceContext { traceContext =>
+          HttpErrorHandler(loggerFactory)(traceContext) {
+            concat(
+              SyncOperatorAdminResource.routes(handler, _ => provide(traceContext))
+            )
+          }
+        }
+      }
+      _ = adminRoutes.updateRoute(route)
     } yield {
       SyncOperatorApp.State(
         automation,

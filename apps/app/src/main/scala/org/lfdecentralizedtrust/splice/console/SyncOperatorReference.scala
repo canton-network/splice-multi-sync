@@ -3,9 +3,13 @@
 
 package org.lfdecentralizedtrust.splice.console
 
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.console.{BaseInspection, Help}
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.version.ProtocolVersion
 import org.lfdecentralizedtrust.splice.config.NetworkAppClientConfig
 import org.lfdecentralizedtrust.splice.environment.SpliceConsoleEnvironment
+import org.lfdecentralizedtrust.splice.syncoperator.admin.api.client.commands.HttpSyncOperatorAdminAppClient
 import org.lfdecentralizedtrust.splice.syncoperator.{SyncOperatorApp, SyncOperatorAppBootstrap}
 import org.lfdecentralizedtrust.splice.syncoperator.automation.SyncOperatorAutomationService
 import org.lfdecentralizedtrust.splice.syncoperator.config.{
@@ -13,15 +17,37 @@ import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorAppClientConfig,
 }
 
-/** Sync operator app reference. The app has no HTTP API of its own, so only the admin endpoints
-  * shared by every Splice app are available here.
-  */
+/** Sync operator app reference. */
 abstract class SyncOperatorAppReference(
     override val spliceConsoleEnvironment: SpliceConsoleEnvironment,
     override val name: String,
 ) extends HttpAppReference {
 
   override def basePath = "/api/syncoperator"
+
+  @Help.Summary("Schedule a logical synchronizer upgrade of this operator's synchronizer")
+  def scheduleLogicalSynchronizerUpgrade(
+      topologyFreezeTime: CantonTimestamp,
+      upgradeTime: CantonTimestamp,
+      newPhysicalSynchronizerSerial: NonNegativeInt,
+      newPhysicalSynchronizerProtocolVersion: ProtocolVersion,
+  ): Unit =
+    consoleEnvironment.run {
+      httpCommand(
+        HttpSyncOperatorAdminAppClient.ScheduleLogicalSynchronizerUpgrade(
+          topologyFreezeTime,
+          upgradeTime,
+          newPhysicalSynchronizerSerial,
+          newPhysicalSynchronizerProtocolVersion,
+        )
+      )
+    }
+
+  @Help.Summary("Cancel the scheduled upgrade by removing its LSU announcement")
+  def cancelLogicalSynchronizerUpgrade(): Unit =
+    consoleEnvironment.run {
+      httpCommand(HttpSyncOperatorAdminAppClient.CancelLogicalSynchronizerUpgrade())
+    }
 }
 
 final class SyncOperatorAppClientReference(
