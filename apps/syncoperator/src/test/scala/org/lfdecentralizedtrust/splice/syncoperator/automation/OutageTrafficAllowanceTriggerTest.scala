@@ -114,6 +114,12 @@ class OutageTrafficAllowanceTriggerTest extends AnyWordSpec with BaseTest {
       Task(alice, 100L, None).notApplied(150L) should include("50 bytes above")
       Task(alice, 100L, None).notApplied(80L) should include("20 bytes below")
     }
+
+    "tell the operator that the other operators may not have seen the same purchases" in {
+      forAll(Seq(Task(alice, 100L, None), Task(alice, 100L, allowance))) { task =>
+        task.notApplied(150L) should include("not all seen the same purchases")
+      }
+    }
   }
 
   "OutageTrafficAllowanceTrigger.withoutTrafficState" should {
