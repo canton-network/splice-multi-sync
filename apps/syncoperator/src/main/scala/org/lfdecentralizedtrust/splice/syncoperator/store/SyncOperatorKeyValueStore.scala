@@ -66,7 +66,9 @@ object SyncOperatorKeyValueStore {
       )
 
   private implicit val serialCodec: Codec[NonNegativeInt] =
-    Codec.from[Int](implicitly, implicitly).iemap(NonNegativeInt.create(_).leftMap(_.message))(_.value)
+    Codec
+      .from[Int](implicitly, implicitly)
+      .iemap(NonNegativeInt.create(_).leftMap(_.message))(_.value)
 
   private implicit val protocolVersionCodec: Codec[ProtocolVersion] =
     Codec.from[String](implicitly, implicitly).iemap(ProtocolVersion.create(_))(_.toString)

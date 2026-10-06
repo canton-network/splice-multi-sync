@@ -42,8 +42,7 @@ object HttpSyncOperatorAdminAppClient {
           topologyFreezeTime = topologyFreezeTime.toInstant.atOffset(ZoneOffset.UTC),
           upgradeTime = upgradeTime.toInstant.atOffset(ZoneOffset.UTC),
           newPhysicalSynchronizerSerial = newPhysicalSynchronizerSerial.value,
-          newPhysicalSynchronizerProtocolVersion =
-            newPhysicalSynchronizerProtocolVersion.toString,
+          newPhysicalSynchronizerProtocolVersion = newPhysicalSynchronizerProtocolVersion.toString,
         ),
         headers = headers,
       )

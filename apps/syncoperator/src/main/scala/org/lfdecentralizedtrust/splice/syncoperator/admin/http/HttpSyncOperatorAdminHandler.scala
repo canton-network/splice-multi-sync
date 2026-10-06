@@ -12,10 +12,7 @@ import org.lfdecentralizedtrust.splice.admin.http.HttpErrorHandler
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
 import org.lfdecentralizedtrust.splice.http.v0.{definitions, sync_operator_admin as v0}
 import org.lfdecentralizedtrust.splice.store.KeyValueStore
-import org.lfdecentralizedtrust.splice.syncoperator.store.{
-  ScheduledLsu,
-  SyncOperatorKeyValueStore,
-}
+import org.lfdecentralizedtrust.splice.syncoperator.store.{ScheduledLsu, SyncOperatorKeyValueStore}
 import io.grpc.Status
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -64,8 +61,10 @@ class HttpSyncOperatorAdminHandler(
     implicit val tc: TraceContext = extracted
     for {
       psid <- sequencerAdminConnection.getPhysicalSynchronizerId()
-      _ <- SyncOperatorKeyValueStore.clearScheduledLsu(keyValueStore)
+      // Removed first: clearing the schedule alone would leave an announcement the upgrade
+      // trigger still acts on.
       _ <- sequencerAdminConnection.removeLsuAnnouncement(psid.logical)
+      _ <- SyncOperatorKeyValueStore.clearScheduledLsu(keyValueStore)
     } yield {
       logger.info(s"Cancelled the scheduled upgrade of ${psid.logical}")
       v0.SyncOperatorAdminResource.CancelLogicalSynchronizerUpgradeResponseOK
@@ -120,8 +119,8 @@ class HttpSyncOperatorAdminHandler(
       )
     else Future.unit
 
-  /** Replacing a pending upgrade silently would leave the announcement and the schedule naming
-    * different serials, so a change has to be cancelled first.
+  /** Once the announcement is out, changing the schedule would not move it, so a change has to be
+    * cancelled first. Rescheduling the same upgrade stays idempotent.
     */
   private def requireNoOtherUpgradeScheduled(
       requested: ScheduledLsu
@@ -130,13 +129,13 @@ class HttpSyncOperatorAdminHandler(
       .getScheduledLsu(keyValueStore)
       .value
       .flatMap {
-        case Some(scheduled)
-            if scheduled.newPhysicalSynchronizerSerial != requested.newPhysicalSynchronizerSerial =>
+        case Some(scheduled) if scheduled != requested =>
           Future.failed(
             Status.ALREADY_EXISTS
               .withDescription(
-                s"An upgrade to serial ${scheduled.newPhysicalSynchronizerSerial} is already " +
-                  "scheduled. Cancel it before scheduling another."
+                s"An upgrade to serial ${scheduled.newPhysicalSynchronizerSerial} at " +
+                  s"${scheduled.upgradeTime} is already scheduled. Cancel it before scheduling " +
+                  "another."
               )
               .asRuntimeException()
           )

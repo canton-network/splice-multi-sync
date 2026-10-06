@@ -3,3 +3,7 @@
 # the error code; the outbox retry line carries the transaction hashes instead.
 SEQUENCER_NOT_ENOUGH_TRAFFIC_CREDIT
 synchronizer outbox flusher.*splitwell.*failed the following topology transactions
+
+# The participant keeps asking the successor for a time proof while the test tears its nodes
+# down at the end of the upgrade.
+The operation 'request current time' was not successful.*No connection available
