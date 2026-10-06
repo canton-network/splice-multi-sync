@@ -134,7 +134,11 @@ class TopupMemberTrafficTrigger(
       _ = unfunded.foreach(task =>
         logger.warn(
           s"Insufficient funds to buy configured traffic amount. Please ensure that the validator's wallet has enough amulets to purchase " +
-            s"${BigDecimal(task.trafficToBuy) / 1e6} MB of traffic on ${task.target.alias} to continue healthy operation."
+            s"${BigDecimal(task.trafficToBuy) / 1e6} MB of traffic on ${task.target.alias} to continue healthy operation." +
+            (if (task.shortfall > 0)
+               s" This member is also ${BigDecimal(task.shortfall) / 1e6} MB below zero there: for one purchase to get it submitting again, the wallet needs enough amulets for " +
+                 s"${BigDecimal(task.target.topupParameters.topupAmount + task.shortfall) / 1e6} MB, the top-up and the shortfall together."
+             else "")
         )
       )
       _ = funded
@@ -184,27 +188,21 @@ class TopupMemberTrafficTrigger(
                   TopupMemberTrafficTrigger.shortfall(currentTrafficState.extraTrafficRemainder)
                 // The top-up alone still pays a shortfall down, one interval at a time.
                 val withShortfallOptions = if (shortfall > 0) Seq(true, false) else Seq(true)
-                Future.traverse(withShortfallOptions)(withShortfall =>
-                  TopupUtil
-                    // The cost is derived from this target's throughput and interval, plus the
-                    // shortfall where the purchase covers it.
-                    .minWalletBalanceForTopup(
-                      scanConnection,
-                      target.topupConfig,
-                      clock,
-                      registration,
-                      extraTraffic = if (withShortfall) shortfall else 0L,
-                    )
-                    .map(
+                TopupUtil
+                  // The cost is derived from this target's throughput and interval, plus the
+                  // shortfall where the purchase covers it.
+                  .topupCosts(scanConnection, target.topupConfig, clock, registration)
+                  .map(costOf =>
+                    withShortfallOptions.map(withShortfall =>
                       TopupMemberTrafficTrigger.Task(
                         target,
                         topupState,
                         currentTrafficState,
                         registration,
                         withShortfall,
-                      ) -> _
+                      ) -> costOf(if (withShortfall) shortfall else 0L)
                     )
-                )
+                  )
               }
           } yield tasks
     } yield purchases
