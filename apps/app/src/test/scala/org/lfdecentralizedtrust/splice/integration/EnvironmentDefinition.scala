@@ -523,22 +523,26 @@ case class EnvironmentDefinition(
   /** Drops the splitwell apps and leaves alice's validator as the only one connected to the
     * splitwell synchronizer.
     */
-  def withOnlyAliceValidatorConnectingToSplitwell: EnvironmentDefinition = {
+  def withOnlyAliceValidatorConnectingToSplitwell: EnvironmentDefinition =
+    withValidatorsDisconnectedFromSplitwell("bobValidator", "splitwellValidator")
+
+  /** Drops the splitwell apps and disconnects the given validators from the splitwell
+    * synchronizer.
+    */
+  def withValidatorsDisconnectedFromSplitwell(validators: String*): EnvironmentDefinition =
     this
       .addConfigTransform((_, conf) =>
         conf.copy(
           splitwellApps = Map.empty,
-          validatorApps =
-            Seq("bobValidator", "splitwellValidator").foldLeft(conf.validatorApps) { (apps, name) =>
-              apps.updatedWith(InstanceName.tryCreate(name)) {
-                _.map { validatorConfig =>
-                  validatorConfig.copy(domains = validatorConfig.domains.copy(extra = Seq.empty))
-                }
+          validatorApps = validators.foldLeft(conf.validatorApps) { (apps, name) =>
+            apps.updatedWith(InstanceName.tryCreate(name)) {
+              _.map { validatorConfig =>
+                validatorConfig.copy(domains = validatorConfig.domains.copy(extra = Seq.empty))
               }
-            },
+            }
+          },
         )
       )
-  }
 
   def clearConfigTransforms(): EnvironmentDefinition =
     copy(configTransformsWithContext = _ => Seq())
