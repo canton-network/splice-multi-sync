@@ -14,6 +14,7 @@ import com.digitalasset.canton.topology.transaction.{
   ParticipantSynchronizerPermission,
   TopologyMapping,
 }
+import org.lfdecentralizedtrust.splice.console.ParticipantClientReference
 import org.lfdecentralizedtrust.splice.integration.EnvironmentDefinition
 import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.IntegrationTest
 
@@ -49,41 +50,60 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
       syncOperatorBackend.appState.store.key.synchronizerId shouldBe served
     }
 
-    "admit a participant to its running synchronizer" in { implicit env =>
+    "admit participants as its onboarding restriction allows" in { implicit env =>
       // The splitwell sequencer holds the synchronizer's owner key.
       val owner = syncOperatorBackend.appState.sequencerAdminConnection
       val synchronizerId = syncOperatorBackend.appState.store.key.synchronizerId
       val alice = aliceValidatorBackend.participantClientWithAdminToken
+      // Neither of these participants is on splitwell in this topology.
       val bob = bobValidatorBackend.participantClientWithAdminToken
+      val splitwellParticipant = splitwellValidatorBackend.participantClientWithAdminToken
 
-      def permission(participantId: ParticipantId) =
-        ParticipantSynchronizerPermission(
-          synchronizerId,
-          participantId,
-          ParticipantPermission.Submission,
-          limits = None,
-          loginAfter = None,
+      val splitwellConnection = SynchronizerConnectionConfig.tryGrpcSingleConnection(
+        splitwellAlias,
+        SequencerAlias.Default,
+        aliceValidatorBackend.config.domains.extra.find(_.alias == splitwellAlias).value.url,
+        manualConnect = true,
+      )
+
+      // Only the onboarding handshake, which needs no traffic on this zero-base-rate synchronizer.
+      def join(participant: ParticipantClientReference): Unit =
+        participant.synchronizers.register_by_config(
+          splitwellConnection,
+          performHandshake = true,
+          synchronize = None,
         )
+
+      def joined(participantId: ParticipantId): Boolean =
+        owner.listSynchronizerTrustCertificate(synchronizerId, participantId).futureValue.nonEmpty
+
+      def permitted(participantId: ParticipantId): Boolean =
+        owner
+          .listAllTransactions(
+            TopologyStoreId.Synchronizer(synchronizerId),
+            includeMappings = Set(TopologyMapping.Code.ParticipantSynchronizerPermission),
+          )
+          .futureValue
+          .flatMap(_.selectMapping[ParticipantSynchronizerPermission])
+          .exists(_.mapping.participantId == participantId)
 
       def permit(participantId: ParticipantId): Unit = {
         owner
           .proposeMapping(
             TopologyStoreId.Synchronizer(synchronizerId),
-            permission(participantId),
+            ParticipantSynchronizerPermission(
+              synchronizerId,
+              participantId,
+              ParticipantPermission.Submission,
+              limits = None,
+              loginAfter = None,
+            ),
             serial = PositiveInt.one,
             isProposal = false,
           )
           .futureValue
         // The sequencer checks a joining participant against its own topology store.
-        eventually() {
-          owner
-            .listAllTransactions(
-              TopologyStoreId.Synchronizer(synchronizerId),
-              includeMappings = Set(TopologyMapping.Code.ParticipantSynchronizerPermission),
-            )
-            .futureValue
-            .map(_.mapping) should contain(permission(participantId))
-        }
+        eventually()(permitted(participantId) shouldBe true)
       }
 
       def setOnboardingRestriction(restriction: OnboardingRestriction): Unit =
@@ -91,41 +111,36 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
           .ensureDomainParameters(synchronizerId, _.tryUpdate(onboardingRestriction = restriction))
           .futureValue
 
-      clue("the owner permissions the participant already connected, then restricts onboarding") {
+      clue("while onboarding is open, a participant joins without a permission") {
+        owner
+          .getSynchronizerParametersState(synchronizerId)
+          .futureValue
+          .mapping
+          .parameters
+          .onboardingRestriction shouldBe OnboardingRestriction.UnrestrictedOpen
+        // Alice's validator joined splitwell when the topology started.
+        joined(alice.id) shouldBe true
+        permitted(alice.id) shouldBe false
+      }
+
+      clue("while onboarding is restricted, a participant without a permission is refused") {
+        // The participant already on splitwell is permissioned first, so it keeps its access.
         permit(alice.id)
         setOnboardingRestriction(OnboardingRestriction.RestrictedOpen)
-      }
-
-      // Bob's validator does not connect to splitwell, so his participant is given the sequencer
-      // alice's validator connects to.
-      bob.synchronizers.register_by_config(
-        SynchronizerConnectionConfig.tryGrpcSingleConnection(
-          splitwellAlias,
-          SequencerAlias.Default,
-          aliceValidatorBackend.config.domains.extra.find(_.alias == splitwellAlias).value.url,
-          manualConnect = true,
-        ),
-        performHandshake = false,
-        synchronize = None,
-      )
-
-      clue("a participant the owner has not permissioned is refused") {
         assertThrowsAndLogsCommandFailures(
-          bob.synchronizers.reconnect(splitwellAlias, retry = false, synchronize = None),
+          join(bob),
           _.errorMessage should include("INITIAL_ONBOARDING_ERROR"),
         )
+        joined(bob.id) shouldBe false
       }
 
-      clue("once the owner permissions it, the same participant joins") {
-        permit(bob.id)
-        bob.synchronizers.reconnect(splitwellAlias, synchronize = None) shouldBe true
-        eventually() {
-          bob.synchronizers.active(splitwellAlias) shouldBe true
-        }
+      clue("while onboarding is restricted, a participant the owner permissions joins") {
+        permit(splitwellParticipant.id)
+        join(splitwellParticipant)
+        eventually()(joined(splitwellParticipant.id) shouldBe true)
       }
 
       // The other tests in this CI job share this Canton and expect splitwell open to anyone.
-      bob.synchronizers.disconnect(splitwellAlias)
       setOnboardingRestriction(OnboardingRestriction.UnrestrictedOpen)
     }
   }
