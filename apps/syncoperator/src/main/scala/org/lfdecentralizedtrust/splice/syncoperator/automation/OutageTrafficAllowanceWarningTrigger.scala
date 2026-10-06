@@ -4,7 +4,7 @@
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
+import com.digitalasset.canton.config.RequireTypes.PositiveLong
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 import org.lfdecentralizedtrust.splice.automation.{
@@ -24,7 +24,7 @@ class OutageTrafficAllowanceWarningTrigger(
     interval: NonNegativeFiniteDuration,
     triggerContext: TriggerContext,
     store: SyncOperatorStore,
-    allowance: NonNegativeLong,
+    allowance: PositiveLong,
 )(implicit
     override val ec: ExecutionContext,
     override val tracer: Tracer,

@@ -9,7 +9,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SynchronizerLimits,
 }
 import com.digitalasset.canton.config.*
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveLong}
 import com.digitalasset.canton.version.ProtocolVersion
 import org.lfdecentralizedtrust.splice.config.{
   AutomationConfig,
@@ -100,10 +100,11 @@ case class SyncOperatorAppBackendConfig(
     // operator sets it while the global synchronizer is unavailable, so nothing can be bought, and
     // removes it once it is back, each time followed by a restart: on start, every such member's
     // limit is set to its purchased total plus this, or back to its purchased total when unset.
-    outageTrafficAllowance: Option[NonNegativeLong] = None,
-    // How often this app warns that the outage traffic allowance is set.
-    outageTrafficAllowanceWarningInterval: NonNegativeFiniteDuration =
-      NonNegativeFiniteDuration.ofMinutes(5),
+    outageTrafficAllowance: Option[PositiveLong] = None,
+    // How often this app warns that the outage traffic allowance is set, and at most how often it
+    // warns about each member whose limit it could not set.
+    outageTrafficAllowanceWarningInterval: PositiveFiniteDuration =
+      PositiveFiniteDuration.ofMinutes(5),
     // Set to false to disable the DB-level exclusive lock that prevents two sync operator instances
     // from running concurrently against the same database.  Only disable for migration scenarios
     // where intentional overlap is required.

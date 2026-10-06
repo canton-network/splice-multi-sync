@@ -6,7 +6,11 @@ package org.lfdecentralizedtrust.splice.integration.tests
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, NonNegativeNumeric}
+import com.digitalasset.canton.config.RequireTypes.{
+  NonNegativeLong,
+  NonNegativeNumeric,
+  PositiveLong,
+}
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import monocle.macros.syntax.lens.*
@@ -139,7 +143,7 @@ class SyncOperatorTrafficIntegrationTest
       )
       // Last, so it is a copy of syncOperator as every transform above left it.
       .addConfigTransform { (_, conf) =>
-        val allowance = Some(NonNegativeLong.tryCreate(outageTrafficAllowance))
+        val allowance = Some(PositiveLong.tryCreate(outageTrafficAllowance))
         val syncOperator = conf.syncOperatorApps(InstanceName.tryCreate("syncOperator"))
         conf.copy(syncOperatorApps =
           conf.syncOperatorApps.updated(
@@ -518,7 +522,8 @@ class SyncOperatorTrafficIntegrationTest
 
   private val allowanceSetWarning =
     s"The outage traffic allowance of $outageTrafficAllowance bytes is set, covering 2 members"
-  private val purchaseLandedWarning = "landed while the outage traffic allowance is set"
+  private val purchaseLandedWarning =
+    "was bought or merged on the global synchronizer while the outage traffic allowance is set"
 
   // The warnings suppressed so far in the enclosing log assertion, for waiting on one.
   private def recordedWarnings(text: String) =

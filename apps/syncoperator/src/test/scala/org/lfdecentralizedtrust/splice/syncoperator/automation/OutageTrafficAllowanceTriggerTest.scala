@@ -4,6 +4,8 @@
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.config.PositiveFiniteDuration
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.topology.{MediatorId, Member, ParticipantId, UniqueIdentifier}
 import org.lfdecentralizedtrust.splice.syncoperator.automation.OutageTrafficAllowanceTrigger.Task
 import org.scalatest.wordspec.AnyWordSpec
@@ -111,6 +113,42 @@ class OutageTrafficAllowanceTriggerTest extends AnyWordSpec with BaseTest {
     "tell the operator the gap of a limit it could not bring back to the purchased total" in {
       Task(alice, 100L, None).notApplied(150L) should include("50 bytes above")
       Task(alice, 100L, None).notApplied(80L) should include("20 bytes below")
+    }
+  }
+
+  "OutageTrafficAllowanceTrigger.withoutTrafficState" should {
+
+    "list the members with a purchase on record the sequencer has no traffic state for" in {
+      OutageTrafficAllowanceTrigger.withoutTrafficState(
+        totals = Map(carol -> 100L, alice -> 100L, bob -> 200L, mediator -> 300L),
+        limits = Map(alice -> 100L),
+      ) shouldBe Seq(bob, carol)
+    }
+  }
+
+  "OutageTrafficAllowanceTrigger.warningDue" should {
+
+    val interval = PositiveFiniteDuration.ofMinutes(5)
+    val warnedAt = CantonTimestamp.Epoch
+
+    "warn about a member not warned about before" in {
+      OutageTrafficAllowanceTrigger.warningDue(None, warnedAt, interval) shouldBe true
+    }
+
+    "not warn again within the interval" in {
+      OutageTrafficAllowanceTrigger.warningDue(
+        Some(warnedAt),
+        warnedAt.plusSeconds(299),
+        interval,
+      ) shouldBe false
+    }
+
+    "warn again once the interval has passed" in {
+      OutageTrafficAllowanceTrigger.warningDue(
+        Some(warnedAt),
+        warnedAt.plusSeconds(300),
+        interval,
+      ) shouldBe true
     }
   }
 }
