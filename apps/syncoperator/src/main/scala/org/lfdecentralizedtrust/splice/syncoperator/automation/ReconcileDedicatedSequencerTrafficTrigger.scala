@@ -4,7 +4,7 @@
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
+import com.digitalasset.canton.config.RequireTypes.PositiveLong
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
@@ -29,7 +29,7 @@ class ReconcileDedicatedSequencerTrafficTrigger(
     store: SyncOperatorStore,
     synchronizerNodeService: SynchronizerNodeService[SyncOperatorSynchronizerNode],
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
-    outageTrafficAllowance: Option[NonNegativeLong],
+    outageTrafficAllowance: Option[PositiveLong],
 )(implicit
     ec: ExecutionContext,
     mat: Materializer,
@@ -60,18 +60,22 @@ class ReconcileDedicatedSequencerTrafficTrigger(
 
   override def completeTask(
       memberTraffic: AssignedContract[MemberTraffic.ContractId, MemberTraffic]
-  )(implicit tc: TraceContext): Future[TaskOutcome] = {
-    // Purchases are only made on the global synchronizer, so one that lands means it is back. The
-    // grant below only raises a limit to the purchased total, so it pays down the member's credit.
-    if (
-      outageTrafficAllowance.isDefined &&
-      memberTraffic.contract.createdAt.isAfter(startedAt.toInstant)
-    )
-      logger.warn(
-        s"A traffic purchase for ${memberTraffic.payload.memberId} landed while the outage " +
-          "traffic allowance is set, so the global synchronizer is reachable again. Remove " +
-          "outage-traffic-allowance from this app's config and restart it."
+  )(implicit tc: TraceContext): Future[TaskOutcome] =
+    // The grant only raises a limit to the purchased total, so while the allowance is set it pays
+    // down the member's credit. The warning follows it, so a grant that is retried warns once.
+    super.completeTask(memberTraffic).map { outcome =>
+      // Purchases, and the DSO's merges of them, only happen on the global synchronizer, so a
+      // contract created since this app started means it is back.
+      if (
+        outageTrafficAllowance.isDefined &&
+        memberTraffic.contract.createdAt.isAfter(startedAt.toInstant)
       )
-    super.completeTask(memberTraffic)
-  }
+        logger.warn(
+          s"Traffic for ${memberTraffic.payload.memberId} was bought or merged on the global " +
+            "synchronizer while the outage traffic allowance is set, so the global synchronizer " +
+            "is reachable again. Remove outage-traffic-allowance from this app's config and " +
+            "restart it."
+        )
+      outcome
+    }
 }
