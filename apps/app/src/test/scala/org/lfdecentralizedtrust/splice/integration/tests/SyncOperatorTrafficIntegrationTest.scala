@@ -78,15 +78,7 @@ class SyncOperatorTrafficIntegrationTest
       )
       // Only alice and bob connect to splitwell: alice for the purchases, bob for the outage test,
       // which needs a member whose balance starts small.
-      .addConfigTransform((_, conf) =>
-        conf.copy(
-          splitwellApps = Map.empty,
-          validatorApps =
-            conf.validatorApps.updatedWith(InstanceName.tryCreate("splitwellValidator")) {
-              _.map(c => c.copy(domains = c.domains.copy(extra = Seq.empty)))
-            },
-        )
-      )
+      .withValidatorsDisconnectedFromSplitwell("splitwellValidator")
       .withStandardSetup
       // Down from 200 KB, so bob's small purchases are allowed.
       .addConfigTransform((_, conf) =>
@@ -437,6 +429,11 @@ class SyncOperatorTrafficIntegrationTest
               }
 
               clue("alice runs on what was bought for her, without the allowance") {
+                val consumedBefore = consumed(alice)
+                ping(aliceParticipant, synchronizerId)
+                eventually() {
+                  consumed(alice) should be > consumedBefore
+                }
                 consumed(alice) should be <= totals(alice)
               }
             },
