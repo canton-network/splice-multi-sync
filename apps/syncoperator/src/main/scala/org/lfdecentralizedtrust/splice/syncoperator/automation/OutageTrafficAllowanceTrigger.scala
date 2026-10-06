@@ -119,10 +119,8 @@ class OutageTrafficAllowanceTrigger(
       current <- currentTask(task)
       limit = trafficState.extraTrafficLimit.value
       outcome <-
-        if (current.isDone(limit))
-          Future.successful(
-            TaskSuccess(s"The traffic limit of ${task.member} is already at its target of $limit")
-          )
+        // A grant since the task was retrieved has already brought the limit to its target.
+        if (current.isDone(limit)) Future.successful(TaskNoop)
         else
           connection
             .setSequencerTrafficControlState(
@@ -242,15 +240,17 @@ object OutageTrafficAllowanceTrigger {
       case Some(a) =>
         s"Could not set the traffic limit of $member to its purchased total of $total plus the " +
           s"outage traffic allowance of $a bytes: it is still $limit. On a synchronizer whose " +
-          "sequencers several operators run, it changes only once enough of them set the same " +
-          "allowance."
+          "sequencers several operators run, it changes only once enough of them send the same " +
+          "limit: either too few of them have set the same allowance yet, or they have not all " +
+          "seen the same purchases yet."
       case None =>
         val gap = limit - total
         val side = if (gap > 0) "above" else "below"
         s"Could not bring the traffic limit of $member back to its purchased total of $total: " +
           s"it is still $limit, ${math.abs(gap)} bytes $side it. On a synchronizer whose " +
-          "sequencers several operators run, it changes only once enough of them have removed " +
-          "the outage traffic allowance."
+          "sequencers several operators run, it changes only once enough of them send the same " +
+          "limit: either too few of them have removed the outage traffic allowance yet, or they " +
+          "have not all seen the same purchases yet."
     }
 
     override def pretty: Pretty[Task] = prettyOfClass(
