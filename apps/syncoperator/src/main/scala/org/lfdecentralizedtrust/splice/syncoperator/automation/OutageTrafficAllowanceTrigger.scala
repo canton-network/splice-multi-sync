@@ -4,8 +4,9 @@
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
 import cats.syntax.apply.*
-import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
+import com.digitalasset.canton.config.{NonNegativeFiniteDuration, PositiveFiniteDuration}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveLong}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.topology.{MediatorId, Member}
 import com.digitalasset.canton.tracing.TraceContext
@@ -15,6 +16,7 @@ import org.apache.pekko.stream.Materializer
 import org.lfdecentralizedtrust.splice.automation.{
   PollingParallelTaskExecutionTrigger,
   TaskFailed,
+  TaskNoop,
   TaskOutcome,
   TaskSuccess,
   TriggerContext,
@@ -26,6 +28,7 @@ import org.lfdecentralizedtrust.splice.syncoperator.automation.OutageTrafficAllo
 import org.lfdecentralizedtrust.splice.syncoperator.store.SyncOperatorStore
 
 import java.util.concurrent.atomic.AtomicBoolean
+import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Sets each member's traffic limit on this operator's sequencer from the outage traffic allowance
@@ -53,8 +56,9 @@ class OutageTrafficAllowanceTrigger(
     override protected val context: TriggerContext,
     store: SyncOperatorStore,
     synchronizerNodeService: SynchronizerNodeService[SyncOperatorSynchronizerNode],
-    allowance: Option[NonNegativeLong],
+    allowance: Option[PositiveLong],
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
+    warningInterval: PositiveFiniteDuration,
 )(implicit
     override val ec: ExecutionContext,
     mat: Materializer,
@@ -63,6 +67,9 @@ class OutageTrafficAllowanceTrigger(
 
   // Set once a poll finds every member at its target, after which polls do nothing.
   private val settled = new AtomicBoolean(false)
+
+  // When each member was last warned about a limit that could not be set.
+  private val lastWarnedAt = TrieMap.empty[Member, CantonTimestamp]
 
   override protected def retrieveTasks()(implicit tc: TraceContext): Future[Seq[Task]] =
     if (settled.get()) Future.successful(Seq.empty)
@@ -82,7 +89,19 @@ class OutageTrafficAllowanceTrigger(
           val target = allowance.fold("its purchased total")(a =>
             s"its purchased total plus the outage traffic allowance of ${a.value} bytes"
           )
-          logger.info(s"Every member with a purchase on record is at $target")
+          logger.info(
+            s"Every member with a purchase on record and a traffic state on the sequencer is at $target"
+          )
+          val skipped = OutageTrafficAllowanceTrigger.withoutTrafficState(totals, limits)
+          allowance.foreach(a =>
+            if (skipped.nonEmpty)
+              logger.warn(
+                s"These members have a purchase on record but no traffic state on this " +
+                  s"synchronizer's sequencer, so they did not get the outage traffic allowance of " +
+                  s"${a.value} bytes: ${skipped.mkString(", ")}. They only get it if this app is " +
+                  "restarted once the sequencer has a traffic state for them."
+              )
+          )
         }
         tasks
       }
@@ -95,32 +114,66 @@ class OutageTrafficAllowanceTrigger(
         connection.getSequencerTrafficControlState(task.member),
         connection.getSequencerSynchronizerState(TopologySnapshot.Effective),
       ).tupled
+      // And the total after it: a purchase granted since the task was retrieved is then either in
+      // the total, or its grant moved the serial and this one is refused and retried.
+      current <- currentTask(task)
       limit = trafficState.extraTrafficLimit.value
-      outcome <- connection
-        .setSequencerTrafficControlState(
-          trafficState,
-          sequencerState,
-          NonNegativeLong.tryCreate(task.target),
-          context.pollingClock,
-          trafficBalanceReconciliationDelay,
-        )
-        .map[TaskOutcome](_ =>
-          TaskSuccess(s"Set the traffic limit of ${task.member} from $limit to ${task.target}")
-        )
-        .recover {
-          // The grant did not land, for example because too few of the synchronizer's operators
-          // sent the same one. The next poll tries again, as the targets are not all in place.
-          case ex: StatusRuntimeException
-              if ex.getStatus.getCode == Status.Code.DEADLINE_EXCEEDED =>
-            TaskFailed(task.notApplied(limit))
-        }
+      outcome <-
+        if (current.isDone(limit))
+          Future.successful(
+            TaskSuccess(s"The traffic limit of ${task.member} is already at its target of $limit")
+          )
+        else
+          connection
+            .setSequencerTrafficControlState(
+              trafficState,
+              sequencerState,
+              NonNegativeLong.tryCreate(current.target),
+              context.pollingClock,
+              trafficBalanceReconciliationDelay,
+            )
+            .map[TaskOutcome](_ =>
+              TaskSuccess(
+                s"Set the traffic limit of ${task.member} from $limit to ${current.target}"
+              )
+            )
+            .recover {
+              // The grant did not land, for example because too few of the synchronizer's
+              // operators sent the same one. The next poll tries again, as the targets are not
+              // all in place.
+              case ex: StatusRuntimeException
+                  if ex.getStatus.getCode == Status.Code.DEADLINE_EXCEEDED =>
+                notApplied(task.member, current.notApplied(limit))
+            }
     } yield outcome
 
   override protected def isStaleTask(task: Task)(implicit tc: TraceContext): Future[Boolean] =
     for {
       connection <- synchronizerNodeService.sequencerAdminConnection()
       state <- connection.lookupSequencerTrafficControlState(task.member)
-    } yield state.forall(state => task.isDone(state.extraTrafficLimit.value))
+      current <- currentTask(task)
+    } yield state.forall(state => current.isDone(state.extraTrafficLimit.value))
+
+  // A warning at most once per warning interval for each member, and the same text in the info log
+  // in between: on a synchronizer whose operators set the allowance at different times, a limit
+  // can stay out of reach for many polls.
+  private def notApplied(member: Member, message: String)(implicit
+      tc: TraceContext
+  ): TaskOutcome = {
+    val now = context.clock.now
+    if (OutageTrafficAllowanceTrigger.warningDue(lastWarnedAt.get(member), now, warningInterval)) {
+      lastWarnedAt.update(member, now)
+      TaskFailed(message)
+    } else {
+      logger.info(message)
+      TaskNoop
+    }
+  }
+
+  // The task with the member's purchased total as it is now. A target from the total the task was
+  // retrieved with would take back a purchase the reconcile trigger granted since.
+  private def currentTask(task: Task)(implicit tc: TraceContext): Future[Task] =
+    store.getTotalPurchasedMemberTraffic(task.member).map(total => task.copy(total = total))
 }
 
 object OutageTrafficAllowanceTrigger {
@@ -151,6 +204,23 @@ object OutageTrafficAllowanceTrigger {
           Option.when(!task.isDone(limit))(task)
         }
       }
+
+  /** The members with a purchase on record that the allowance applies to but the sequencer has no
+    * traffic state for, so a sweep leaves them out, in a fixed order.
+    */
+  def withoutTrafficState(totals: Map[Member, Long], limits: Map[Member, Long]): Seq[Member] =
+    totals.keys
+      .filter(member => isCovered(member) && !limits.contains(member))
+      .toSeq
+      .sortBy(_.toProtoPrimitive)
+
+  /** Whether a warning last given at `lastWarned` is due again at `now`. */
+  def warningDue(
+      lastWarned: Option[CantonTimestamp],
+      now: CantonTimestamp,
+      interval: PositiveFiniteDuration,
+  ): Boolean =
+    lastWarned.forall(last => !now.isBefore(last.plus(interval.asJava)))
 
   final case class Task(member: Member, total: Long, allowance: Option[Long])
       extends PrettyPrinting {
