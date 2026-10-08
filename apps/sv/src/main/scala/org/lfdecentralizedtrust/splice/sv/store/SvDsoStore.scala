@@ -1517,8 +1517,11 @@ object SvDsoStore {
       },
       // The SV UI looks a registration up here by contract id, to show what an offboard or
       // set-parameters vote targets, and by synchronizer id, to reject a duplicate registration.
-      mkFilter(splice.decentralizedsynchronizer.RegisteredSynchronizer.COMPANION)(co =>
-        co.payload.dso == dso
+      mkFilter(splice.decentralizedsynchronizer.RegisteredSynchronizer.COMPANION)(
+        co => co.payload.dso == dso,
+        versionGuard = { case (pkgVersionSupport, now) =>
+          (tc) => pkgVersionSupport.supportsDedicatedSynchronizers(Seq(dsoParty), now)(tc)
+        },
       )(contract =>
         // A String, not a SynchronizerId: DsoRules_RegisterSynchronizer only checks the id is
         // non-empty, so tryFromString here would throw on a governance typo and take down the
