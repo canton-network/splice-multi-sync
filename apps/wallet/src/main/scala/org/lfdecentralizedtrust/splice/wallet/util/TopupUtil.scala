@@ -37,7 +37,24 @@ object TopupUtil {
       registration: Option[
         ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
       ],
-  )(implicit tc: TraceContext, ec: ExecutionContext, mat: Materializer): Future[BigDecimal] = for {
+  )(implicit tc: TraceContext, ec: ExecutionContext, mat: Materializer): Future[BigDecimal] =
+    topupCosts(scanConnection, validatorTopupConfig, clock, registration).map(costOf => costOf(0L))
+
+  /** What one top-up, plus the extra traffic bought with it, costs in amulet, for any amount of
+    * extra traffic, from one read of the rules and the open round.
+    */
+  def topupCosts(
+      scanConnection: ScanConnection,
+      validatorTopupConfig: ValidatorTopupConfig,
+      clock: Clock,
+      registration: Option[
+        ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
+      ],
+  )(implicit
+      tc: TraceContext,
+      ec: ExecutionContext,
+      mat: Materializer,
+  ): Future[Long => BigDecimal] = for {
     amuletRules <- scanConnection.getAmuletRulesWithState()
     synchronizerFeesConfig = AmuletConfigSchedule(amuletRules)
       .getConfigAsOf(clock.now)
@@ -50,16 +67,33 @@ object TopupUtil {
       validatorTopupConfig.topupTriggerPollingInterval,
     )
     latestRound <- scanConnection.getLatestOpenMiningRound()
-    amuletPrice = latestRound.payload.amuletPrice
-    extraTrafficPrice = BigDecimal(synchronizerFeesConfig.extraTrafficPrice)
-  } yield SpliceUtil
-    .synchronizerFees(
-      topupParameters.topupAmount,
-      extraTrafficPrice,
-      amuletPrice,
-      discountFactor(registration),
+  } yield (extraTraffic: Long) =>
+    topupCost(
+      topupParameters,
+      extraTraffic,
+      BigDecimal(synchronizerFeesConfig.extraTrafficPrice),
+      latestRound.payload.amuletPrice,
+      registration,
     )
-    ._2
+
+  /** What one top-up, plus `extraTraffic` bought with it, costs in amulet. */
+  def topupCost(
+      topupParameters: ExtraTrafficTopupParameters,
+      extraTraffic: Long,
+      extraTrafficPrice: BigDecimal,
+      amuletPrice: BigDecimal,
+      registration: Option[
+        ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
+      ],
+  ): BigDecimal =
+    SpliceUtil
+      .synchronizerFees(
+        topupParameters.topupAmount + extraTraffic,
+        extraTrafficPrice,
+        amuletPrice,
+        discountFactor(registration),
+      )
+      ._2
 
   private def currentWalletBalance(scanConnection: ScanConnection, store: UserWalletStore)(implicit
       tc: TraceContext,

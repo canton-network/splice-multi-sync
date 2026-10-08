@@ -110,7 +110,8 @@ class TopupMemberTrafficTriggerTest extends AnyWordSpec with BaseTest {
   "TopupMemberTrafficTrigger.fundedTasks" should {
 
     // Costs only; what they are attached to does not affect the allocation.
-    val candidates = Seq(globalAlias -> BigDecimal(100), dedicatedAlias -> BigDecimal(100))
+    val candidates =
+      Seq(Seq(globalAlias -> BigDecimal(100)), Seq(dedicatedAlias -> BigDecimal(100)))
 
     "fund only what the balance covers, in order" in {
       // Enough for either one alone, not for both, so the second one misses out.
@@ -124,6 +125,62 @@ class TopupMemberTrafficTriggerTest extends AnyWordSpec with BaseTest {
       val (funded, unfunded) = TopupMemberTrafficTrigger.fundedTasks(candidates, None)
       funded shouldBe Seq(globalAlias, dedicatedAlias)
       unfunded shouldBe empty
+    }
+
+    // A member below zero: its shortfall with the top-up, or the top-up alone.
+    val withShortfall = Seq("top-up and shortfall" -> BigDecimal(300), "top-up" -> BigDecimal(100))
+
+    "buy the shortfall with the top-up where the balance covers both" in {
+      TopupMemberTrafficTrigger.fundedTasks(Seq(withShortfall), Some(BigDecimal(300))) shouldBe
+        (Seq("top-up and shortfall"), Seq.empty)
+    }
+
+    "fall back to the top-up alone where the balance does not cover the shortfall too" in {
+      TopupMemberTrafficTrigger.fundedTasks(Seq(withShortfall), Some(BigDecimal(150))) shouldBe
+        (Seq("top-up"), Seq.empty)
+    }
+
+    "report the top-up alone where the balance does not cover even that" in {
+      TopupMemberTrafficTrigger.fundedTasks(Seq(withShortfall), Some(BigDecimal(50))) shouldBe
+        (Seq.empty, Seq("top-up"))
+    }
+
+    "buy the shortfall with the top-up where the balance does not bound the purchases" in {
+      TopupMemberTrafficTrigger.fundedTasks(Seq(withShortfall), None) shouldBe
+        (Seq("top-up and shortfall"), Seq.empty)
+    }
+  }
+
+  "TopupMemberTrafficTrigger.shortfall" should {
+
+    "be what a balance below zero needs to reach zero" in {
+      TopupMemberTrafficTrigger.shortfall(-300L) shouldBe 300L
+    }
+
+    "be zero for a balance at or above zero" in {
+      TopupMemberTrafficTrigger.shortfall(0L) shouldBe 0L
+      TopupMemberTrafficTrigger.shortfall(500L) shouldBe 0L
+    }
+  }
+
+  "TopupMemberTrafficTrigger.trafficToBuy" should {
+
+    "buy the shortfall together with the configured top-up" in {
+      TopupMemberTrafficTrigger.trafficToBuy(
+        topupAmount = 2_000L,
+        extraTrafficRemainder = -300L,
+      ) shouldBe 2_300L
+    }
+
+    "buy only the configured top-up for a balance at or above zero" in {
+      TopupMemberTrafficTrigger.trafficToBuy(
+        topupAmount = 2_000L,
+        extraTrafficRemainder = 0L,
+      ) shouldBe 2_000L
+      TopupMemberTrafficTrigger.trafficToBuy(
+        topupAmount = 2_000L,
+        extraTrafficRemainder = 500L,
+      ) shouldBe 2_000L
     }
   }
 }

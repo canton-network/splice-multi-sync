@@ -37,6 +37,13 @@ trait SyncOperatorStore extends AppStore {
   def getTotalPurchasedMemberTraffic(memberId: Member)(implicit
       tc: TraceContext
   ): Future[Long]
+
+  /** Total traffic purchased on this operator's synchronizer, per member with a purchase on
+    * record.
+    */
+  def listTotalPurchasedMemberTraffic()(implicit
+      tc: TraceContext
+  ): Future[Map[Member, Long]]
 }
 
 object SyncOperatorStore {
