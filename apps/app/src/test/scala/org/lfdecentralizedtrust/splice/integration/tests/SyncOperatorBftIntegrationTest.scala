@@ -5,23 +5,19 @@ package org.lfdecentralizedtrust.splice.integration.tests
 
 import com.digitalasset.canton.{HasExecutionContext, SequencerAlias, SynchronizerAlias}
 import com.digitalasset.canton.admin.api.client.data.{
-  StaticSynchronizerParameters,
   SubmissionRequestAmplification,
   TrafficControlParameters,
 }
 import com.digitalasset.canton.config.{
-  CryptoConfig,
   FullClientConfig,
   PositiveFiniteDuration,
   SequencerApiClientConfig,
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, Port, PositiveInt}
-import com.digitalasset.canton.console.ConsoleMacros
 import com.digitalasset.canton.synchronizer.mediator.RemoteMediatorConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.RemoteSequencerConfig
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
-import com.digitalasset.canton.version.ProtocolVersion
 import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.GovernanceParameters
 import org.lfdecentralizedtrust.splice.config.Thresholds
 import org.lfdecentralizedtrust.splice.console.{MediatorClientReference, SequencerClientReference}
@@ -30,11 +26,7 @@ import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   IntegrationTest,
   SpliceTestConsoleEnvironment,
 }
-import org.lfdecentralizedtrust.splice.util.{
-  StandaloneCanton,
-  SyncOperatorTestUtil,
-  WalletTestUtil,
-}
+import org.lfdecentralizedtrust.splice.util.{StandaloneCanton, SyncOperatorTestUtil, WalletTestUtil}
 import org.lfdecentralizedtrust.splice.validator.config.ValidatorAppBackendConfig
 
 import scala.concurrent.duration.*
@@ -88,8 +80,9 @@ class SyncOperatorBftIntegrationTest
         ),
         this.getClass.getSimpleName,
       )
+      .withOnlyAliceValidatorConnectingToSplitwell
       .withStandardSetup
-      // The operators can only start once the test has bootstrapped their synchronizer.
+      // The operators can only start once their synchronizer is bootstrapped.
       .withManualStart
 
   "sync operators" should {
@@ -97,21 +90,32 @@ class SyncOperatorBftIntegrationTest
     "run a dedicated synchronizer on four BFT nodes" in { implicit env =>
       initDsoWithSv1Only()
       startAllSync(aliceValidatorBackend, splitwellValidatorBackend)
-      withCanton(
+      withBootstrappedCanton(
         Seq(testResourcesPath / "standalone-sync-operator-bft.conf"),
-        Seq.empty,
+        testResourcesPath / "standalone-sync-operator-bft-bootstrap.sc",
         "sync-operator-bft",
       ) {
         val nodes = (1 to 4).map(node)
 
         val synchronizerId = clue("the four nodes bootstrap the synchronizer") {
-          eventually(3.minutes) {
-            forAll(nodes) { n =>
-              n.sequencer.health.is_ready_for_initialization() shouldBe true
-              n.mediator.health.is_ready_for_initialization() shouldBe true
-            }
+          // Each node reports the synchronizer it serves once the bootstrap script has run.
+          val synchronizerId = eventually(3.minutes) {
+            forAll(nodes)(_.mediator.health.status.successOption should not be empty)
+            nodes
+              .map(_.sequencer.health.status.successOption.map(_.synchronizerId))
+              .distinct
+              .loneElement
+              .value
+              .logical
           }
-          bootstrap(nodes)
+          eventually(1.minute) {
+            nodes.head.sequencer.topology.sequencers
+              .list(store = Some(TopologyStoreId.Synchronizer(synchronizerId)))
+              .loneElement
+              .item
+              .threshold shouldBe Thresholds.sequencerConnectionsSizeThreshold(nodes.size)
+          }
+          synchronizerId
         }
 
         clue("the four sequencers order together") {
@@ -128,7 +132,9 @@ class SyncOperatorBftIntegrationTest
         val member = participant.id
         // Joining vets Canton's admin workflows on the synchronizer, which a member without traffic
         // could not, so the participant joins before traffic control is on.
-        clue("the participant connects to all four nodes, as a validator does on the global synchronizer") {
+        clue(
+          "the participant connects to all four nodes, as a validator does on the global synchronizer"
+        ) {
           participant.synchronizers.connect_bft(
             nodes.map(n =>
               n.sequencer.sequencerConnection.withAlias(SequencerAlias.tryCreate(n.sequencer.name))
@@ -245,47 +251,10 @@ class SyncOperatorBftIntegrationTest
     )
   }
 
-  // The owners that sign topology changes, as many as the threshold the synchronizer is
-  // bootstrapped with.
+  // The owners that sign topology changes, as many as the owner threshold in
+  // standalone-sync-operator-bft-bootstrap.sc.
   private def signers(nodes: Seq[Node]): Seq[SequencerClientReference] =
     nodes.map(_.sequencer).take(Thresholds.decentralizedNamespaceThreshold(nodes.size).value)
-
-  // Bootstraps the synchronizer with the thresholds Splice sets for the global synchronizer.
-  private def bootstrap(
-      nodes: Seq[Node]
-  )(implicit env: SpliceTestConsoleEnvironment): SynchronizerId = {
-    val sequencers = nodes.map(_.sequencer)
-    val sequencerThreshold = Thresholds.sequencerConnectionsSizeThreshold(sequencers.size)
-    val synchronizerId = ConsoleMacros.bootstrap
-      .synchronizer(
-        "syncOperatorBft",
-        sequencers = sequencers,
-        mediators = nodes.map(_.mediator),
-        synchronizerOwners = sequencers,
-        synchronizerThreshold = Thresholds.decentralizedNamespaceThreshold(sequencers.size),
-        staticSynchronizerParameters =
-          StaticSynchronizerParameters.defaults(CryptoConfig(), ProtocolVersion.v35),
-        mediatorThreshold = Thresholds.mediatorDomainStateThreshold(nodes.size),
-      )
-      .logical
-    signers(nodes).foreach(owner =>
-      owner.topology.sequencers.propose(
-        synchronizerId,
-        threshold = sequencerThreshold,
-        active = sequencers.map(_.id),
-        signedBy = Some(owner.id.uid.namespace.fingerprint),
-        synchronize = None,
-      )
-    )
-    eventually(1.minute) {
-      sequencers.head.topology.sequencers
-        .list(store = Some(TopologyStoreId.Synchronizer(synchronizerId)))
-        .loneElement
-        .item
-        .threshold shouldBe sequencerThreshold
-    }
-    synchronizerId
-  }
 
   private def enableTrafficControl(nodes: Seq[Node], synchronizerId: SynchronizerId): Unit = {
     signers(nodes).foreach(owner =>
@@ -296,10 +265,13 @@ class SyncOperatorBftIntegrationTest
         synchronize = None,
       )
     )
+    // Each operator checks this on its own node when it starts.
     eventually(1.minute) {
-      nodes.head.sequencer.topology.synchronizer_parameters
-        .get_dynamic_synchronizer_parameters(synchronizerId)
-        .trafficControl should not be empty
+      forAll(nodes)(
+        _.sequencer.topology.synchronizer_parameters
+          .get_dynamic_synchronizer_parameters(synchronizerId)
+          .trafficControl should not be empty
+      )
     }
   }
 }
