@@ -250,7 +250,8 @@ class HttpSvOperatorHandler(
   }
 
   /** Intended use: the SV app UI, to warn a proposer that a synchronizer id is already
-    * registered. Forwarded to Scan, which holds the registry; the SV app does not ingest it.
+    * registered, and to resolve the registration an offboard or set-parameters proposal
+    * targets. The DSO party signs every registration, so the SV app's own DSO store holds them.
     */
   override def lookupSynchronizerRegistration(
       respond: r0.LookupSynchronizerRegistrationResponse.type
@@ -260,8 +261,7 @@ class HttpSvOperatorHandler(
     implicit val ActAsKnownUserRequest(traceContext) = extracted
     withSpan(s"$workflowId.lookupSynchronizerRegistration") { _ => _ =>
       for {
-        scanConnection <- scanConnectionF
-        registrationOpt <- scanConnection.lookupSynchronizerRegistration(synchronizerId)
+        registrationOpt <- dsoStore.lookupSynchronizerRegistration(synchronizerId)
       } yield registrationOpt match {
         case None =>
           r0.LookupSynchronizerRegistrationResponse.NotFound(
@@ -274,6 +274,29 @@ class HttpSvOperatorHandler(
             definitions.LookupSynchronizerRegistrationResponse(registration.toHttp)
           )
       }
+    }
+  }
+
+  /** Intended use: the SV app UI, to show what an offboard or set-parameters vote targets and
+    * to flag a vote whose pinned registration is no longer active. The DSO party signs every
+    * registration, so the SV app's own DSO store holds them.
+    */
+  override def lookupSynchronizerRegistrationByContractId(
+      respond: r0.LookupSynchronizerRegistrationByContractIdResponse.type
+  )(contractId: String)(
+      extracted: ActAsKnownUserRequest
+  ): Future[r0.LookupSynchronizerRegistrationByContractIdResponse] = {
+    implicit val ActAsKnownUserRequest(traceContext) = extracted
+    withSpan(s"$workflowId.lookupSynchronizerRegistrationByContractId") { _ => _ =>
+      for {
+        registration <- dsoStore.multiDomainAcsStore.lookupContractById(
+          spliceCodegen.decentralizedsynchronizer.RegisteredSynchronizer.COMPANION
+        )(new spliceCodegen.decentralizedsynchronizer.RegisteredSynchronizer.ContractId(contractId))
+      } yield respond.OK(
+        definitions.LookupSynchronizerRegistrationByContractIdResponse(
+          registration.map(_.contract.toHttp)
+        )
+      )
     }
   }
 

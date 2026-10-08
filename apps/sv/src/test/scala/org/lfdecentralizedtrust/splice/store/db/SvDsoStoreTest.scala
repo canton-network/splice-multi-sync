@@ -21,7 +21,11 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.amuletrules.{
 }
 import org.lfdecentralizedtrust.splice.codegen.java.splice.ans.*
 import org.lfdecentralizedtrust.splice.codegen.java.splice.cometbft.CometBftConfigLimits
-import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.MemberTraffic
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.{
+  GovernanceParameters,
+  MemberTraffic,
+  RegisteredSynchronizer,
+}
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dso.decentralizedsynchronizer.{
   DsoDecentralizedSynchronizerConfig,
   SynchronizerNodeConfigLimits,
@@ -51,6 +55,7 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.wallet.payment.{Payme
 import org.lfdecentralizedtrust.splice.codegen.java.splice.wallet.subscriptions.*
 import org.lfdecentralizedtrust.splice.config.IngestionConfig
 import org.lfdecentralizedtrust.splice.environment.{DarResources, RetryProvider}
+import org.lfdecentralizedtrust.splice.store.MultiDomainAcsStore.ContractState.Assigned
 import org.lfdecentralizedtrust.splice.store.MultiDomainAcsStore.QueryResult
 import org.lfdecentralizedtrust.splice.store.{
   HardLimit,
@@ -67,6 +72,7 @@ import org.lfdecentralizedtrust.splice.sv.util.SvUtil
 import org.lfdecentralizedtrust.splice.util.{
   AssignedContract,
   Contract,
+  ContractWithState,
   ResourceTemplateDecoder,
   TemplateJsonDecoder,
 }
@@ -208,6 +214,75 @@ abstract class SvDsoStoreTest extends StoreTestBase with HasExecutionContext {
     )(
       _.lookupFeaturedAppRightWithOffset(userParty(1))
     )
+
+    "RegisteredSynchronizer" should {
+      def lookup(store: SvDsoStore, cid: RegisteredSynchronizer.ContractId) =
+        store.multiDomainAcsStore.lookupContractById(RegisteredSynchronizer.COMPANION)(cid)
+
+      "be found by contract id" in {
+        val wanted = registeredSynchronizer(userParty(1), "dedicated::1220aa")
+        val other = registeredSynchronizer(userParty(2), "dedicated::1220bb")
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(wanted)(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(other)(store.multiDomainAcsStore)
+          result <- lookup(store, wanted.contractId)
+        } yield result.map(_.contract) should be(Some(wanted))
+      }
+
+      // An offboard or set-parameters vote archives the registration it pins, which leaves any
+      // other vote pinning it stale.
+      "not be found once archived" in {
+        val registration = registeredSynchronizer(userParty(1), "dedicated::1220aa")
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(registration)(store.multiDomainAcsStore)
+          _ <- dummyDomain.archive(registration)(store.multiDomainAcsStore)
+          result <- lookup(store, registration.contractId)
+        } yield result should be(None)
+      }
+
+      // The SV UI rejects a proposal to register a synchronizer id that already has one.
+      "be found by synchronizer id" in {
+        val wanted = registeredSynchronizer(userParty(1), "dedicated::1220aa")
+        val other = registeredSynchronizer(userParty(2), "dedicated::1220bb")
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(wanted)(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(other)(store.multiDomainAcsStore)
+          found <- store.lookupSynchronizerRegistration("dedicated::1220aa")
+          missing <- store.lookupSynchronizerRegistration("dedicated::1220zz")
+        } yield {
+          found should be(Some(ContractWithState(wanted, Assigned(dummyDomain))))
+          missing should be(None)
+        }
+      }
+
+      "not be found by synchronizer id once archived" in {
+        val registration = registeredSynchronizer(userParty(1), "dedicated::1220aa")
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(registration)(store.multiDomainAcsStore)
+          _ <- dummyDomain.archive(registration)(store.multiDomainAcsStore)
+          result <- store.lookupSynchronizerRegistration("dedicated::1220aa")
+        } yield result should be(None)
+      }
+
+      // Governance can create two registrations for one synchronizer id: the template has no
+      // key and DsoRules_RegisterSynchronizer creates unconditionally.
+      "pick deterministically when a synchronizer id has more than one registration" in {
+        // Ingest `lower` second so insertion order and contract-id order disagree.
+        val lower = registeredSynchronizer(userParty(1), "dedicated::1220aa")
+        val higher = registeredSynchronizer(userParty(2), "dedicated::1220aa")
+        lower.contractId.contractId should be < higher.contractId.contractId
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(higher)(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(lower)(store.multiDomainAcsStore)
+          result <- store.lookupSynchronizerRegistration("dedicated::1220aa")
+        } yield result should be(Some(ContractWithState(lower, Assigned(dummyDomain))))
+      }
+    }
 
     "getOpenMiningRoundTriple" should {
 
@@ -2285,6 +2360,18 @@ abstract class SvDsoStoreTest extends StoreTestBase with HasExecutionContext {
       template,
     )
   }
+
+  private def registeredSynchronizer(operator: PartyId, synchronizerId: String) =
+    contract(
+      RegisteredSynchronizer.TEMPLATE_ID_WITH_PACKAGE_ID,
+      new RegisteredSynchronizer.ContractId(nextCid()),
+      new RegisteredSynchronizer(
+        dsoParty.toProtoPrimitive,
+        synchronizerId,
+        operator.toProtoPrimitive,
+        new GovernanceParameters(java.math.BigDecimal.ONE.setScale(10)),
+      ),
+    )
 
   private def memberTraffic(
       member: Member,
