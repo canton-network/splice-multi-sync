@@ -11,7 +11,10 @@ import com.daml.nonempty.NonEmpty
 import org.lfdecentralizedtrust.splice.automation.MultiDomainExpiredContractTrigger.ListExpiredContracts
 import org.lfdecentralizedtrust.splice.codegen.java.splice
 import org.lfdecentralizedtrust.splice.codegen.java.splice.amulet.*
-import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.MemberTraffic
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.{
+  MemberTraffic,
+  RegisteredSynchronizer,
+}
 import org.lfdecentralizedtrust.splice.codegen.java.splice.round.{
   ClosedMiningRound,
   SummarizingMiningRound,
@@ -1954,6 +1957,31 @@ class DbSvDsoStore(
           )
           .value
       } yield row.map(contractWithStateFromRow(AnsEntryContext.COMPANION)(_))
+    }
+
+  override def lookupSynchronizerRegistration(synchronizerId: String)(implicit
+      tc: TraceContext
+  ): Future[Option[ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]]] =
+    waitUntilAcsIngested {
+      for {
+        row <- storage
+          .querySingle(
+            selectFromAcsTableWithState(
+              DsoTables.acsTableName,
+              acsStoreId,
+              domainMigrationId,
+              RegisteredSynchronizer.COMPANION,
+              additionalWhere = sql"""and registered_synchronizer_id = ${lengthLimited(
+                  synchronizerId
+                )}""",
+              // Uniqueness is not enforced on-ledger, so pick a total order: a duplicate
+              // registration then always resolves to the same row.
+              orderLimit = sql"""order by contract_id limit 1""",
+            ).headOption,
+            "lookupSynchronizerRegistration",
+          )
+          .value
+      } yield row.map(contractWithStateFromRow(RegisteredSynchronizer.COMPANION)(_))
     }
 
   override def listClosedRounds(
