@@ -22,6 +22,7 @@ import {
   ListFeaturedAppRightsByProviderResponse,
   LookupFeaturedAppRightByContractIdResponse,
   LookupSynchronizerRegistrationResponse,
+  LookupSynchronizerRegistrationByContractIdResponse,
   ListValidatorLicensesResponse,
   ListVoteRequestByTrackingCidResponse,
   ListVoteResultsRequest,
@@ -109,6 +110,10 @@ export interface SvAdminClient {
   lookupSynchronizerRegistration: (
     synchronizerId: string
   ) => Promise<LookupSynchronizerRegistrationResponse | undefined>;
+  /** `registration` is absent when the contract is no longer active. */
+  lookupSynchronizerRegistrationByContractId: (
+    contractId: string
+  ) => Promise<LookupSynchronizerRegistrationByContractIdResponse>;
 }
 
 class ApiMiddleware
@@ -277,6 +282,11 @@ export const SvAdminClientProvider: React.FC<React.PropsWithChildren<SvAdminProp
           }
           throw e;
         }
+      },
+      lookupSynchronizerRegistrationByContractId: async (
+        contractId: string
+      ): Promise<LookupSynchronizerRegistrationByContractIdResponse> => {
+        return await svAdminClient.lookupSynchronizerRegistrationByContractId(contractId);
       },
     };
   }, [url, userAccessToken]);

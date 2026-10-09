@@ -32,6 +32,8 @@ import type {
   UnfeatureAppProposal,
   UpdateFeatureAppProposal,
   RegisterSynchronizerProposal,
+  ArchiveSynchronizerRegistrationProposal,
+  SetSynchronizerGovernanceParametersProposal,
   UpdateSvRewardWeightProposal,
   YourVoteStatus,
 } from '../utils/types';
@@ -39,6 +41,7 @@ import { buildAmuletConfigChanges } from './buildAmuletConfigChanges';
 import { buildDsoConfigChanges } from './buildDsoConfigChanges';
 import { AmuletRules_SetConfig } from '@daml.js/splice-amulet/lib/Splice/AmuletRules';
 import { AmuletConfig } from '@daml.js/splice-amulet/lib/Splice/AmuletConfig';
+import type { GovernanceParameters } from '@daml.js/splice-amulet/lib/Splice/DecentralizedSynchronizer';
 import { Optional } from '@daml/types';
 
 export const actionTagToTitle = (amuletName: string): Record<SupportedActionTag, string> => ({
@@ -51,6 +54,8 @@ export const actionTagToTitle = (amuletName: string): Record<SupportedActionTag,
   SRARC_SetConfig: 'Set Decentralized Synchronizer Operations (DSO) Rules Configuration',
   SRARC_UpdateSvRewardWeight: 'Update Super Validator Reward Weight',
   SRARC_RegisterSynchronizer: 'Register Dedicated Synchronizer',
+  SRARC_ArchiveSynchronizerRegistration: 'Offboard Dedicated Synchronizer',
+  SRARC_SetSynchronizerGovernanceParameters: 'Set Dedicated Synchronizer Parameters',
   SRARC_UpdateFeaturedAppRight: 'Update Featured Application',
 });
 
@@ -73,6 +78,11 @@ export const createProposalActions: {
   { name: 'Set Amulet Rules Configuration', value: 'CRARC_SetConfig' },
   { name: 'Update Super Validator Reward Weight', value: 'SRARC_UpdateSvRewardWeight' },
   { name: 'Register Dedicated Synchronizer', value: 'SRARC_RegisterSynchronizer' },
+  { name: 'Offboard Dedicated Synchronizer', value: 'SRARC_ArchiveSynchronizerRegistration' },
+  {
+    name: 'Set Dedicated Synchronizer Parameters',
+    value: 'SRARC_SetSynchronizerGovernanceParameters',
+  },
 ];
 
 export const getVoteResultStatus = (
@@ -194,6 +204,15 @@ export function buildProposal(action: ActionRequiringConfirmation, dsoInfo?: Dso
           dsoAction.value.operator,
           dsoAction.value.governanceParameters.discountFactor
         );
+      case 'SRARC_ArchiveSynchronizerRegistration':
+        return createArchiveSynchronizerRegistrationProposal(
+          dsoAction.value.registeredSynchronizerCid
+        );
+      case 'SRARC_SetSynchronizerGovernanceParameters':
+        return createSetSynchronizerGovernanceParametersProposal(
+          dsoAction.value.registeredSynchronizerCid,
+          dsoAction.value.setGovernanceParameters.newGovernanceParameters
+        );
       case 'SRARC_UpdateSvRewardWeight': {
         const allSvInfos = dsoInfo?.dsoRules.payload.svs.entriesArray() || [];
         const svToUpdate = dsoAction.value.svParty;
@@ -275,6 +294,19 @@ function createRegisterSynchronizerProposal(
     operator: operator,
     discountFactor: discountFactor,
   };
+}
+
+function createArchiveSynchronizerRegistrationProposal(
+  registeredSynchronizerCid: string
+): ArchiveSynchronizerRegistrationProposal {
+  return { registeredSynchronizerCid };
+}
+
+function createSetSynchronizerGovernanceParametersProposal(
+  registeredSynchronizerCid: string,
+  newGovernanceParameters: GovernanceParameters
+): SetSynchronizerGovernanceParametersProposal {
+  return { registeredSynchronizerCid, newGovernanceParameters };
 }
 
 function createSvRewardWeightProposal(
