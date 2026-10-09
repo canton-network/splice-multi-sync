@@ -203,13 +203,16 @@ describe('Set Dedicated Synchronizer Parameters Form', () => {
     await enterSynchronizerId(user, synchronizerId);
     const discountInput = await screen.findByTestId(`${prefix}-discountFactor`);
     await waitFor(() => expect(discountInput.getAttribute('value')).toBe('0.8000000000'));
+    // Typing the id also scheduled a debounced lookup, which the blur does not cancel. Let it
+    // land, so the count below is only the lookup the second blur runs.
+    await waitFor(() => expect(mockLookupById).toHaveBeenCalledTimes(2));
     await user.clear(discountInput);
     await user.type(discountInput, '0.5');
 
     // Blurring the synchronizer id runs its lookup again, as submitting does.
     await user.click(screen.getByTestId(`${prefix}-synchronizer-id`));
     await user.click(screen.getByTestId(`${prefix}-action`));
-    await waitFor(() => expect(mockLookupById).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockLookupById).toHaveBeenCalledTimes(3));
 
     expect(screen.getByTestId(`${prefix}-discountFactor`).getAttribute('value')).toBe('0.5');
   });
