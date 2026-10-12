@@ -98,15 +98,12 @@ case class SyncOperatorAppBackendConfig(
     parameters: SpliceParametersConfig = SpliceParametersConfig(batching = BatchingConfig()),
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration =
       NonNegativeFiniteDuration.ofSeconds(10),
-    // Bytes each member with a purchase on record may use past what has been bought for it. The
+    // Bytes each participant on this synchronizer may use past what has been bought for it. The
     // operator sets it while the global synchronizer is unavailable, so nothing can be bought, and
-    // removes it once it is back, each time followed by a restart: on start, every such member's
-    // limit is set to its purchased total plus this, or back to its purchased total when unset.
+    // removes it once it is back, each time followed by a restart. While it is set, this app keeps
+    // every participant's limit at its purchased total plus this, including participants with no
+    // purchase on record and ones that join meanwhile; while it is unset, at its purchased total.
     outageTrafficAllowance: Option[PositiveLong] = None,
-    // How often this app warns that the outage traffic allowance is set, and at most how often it
-    // warns about each member whose limit it could not set.
-    outageTrafficAllowanceWarningInterval: PositiveFiniteDuration =
-      PositiveFiniteDuration.ofMinutes(5),
     // Set to false to disable the DB-level exclusive lock that prevents two sync operator instances
     // from running concurrently against the same database.  Only disable for migration scenarios
     // where intentional overlap is required.
