@@ -6,22 +6,12 @@ package org.lfdecentralizedtrust.splice.integration.tests
 import com.digitalasset.canton.{HasExecutionContext, SequencerAlias, SynchronizerAlias}
 import com.digitalasset.canton.admin.api.client.data.{
   SubmissionRequestAmplification,
-  TrafficControlParameters,
+  SynchronizerConnectionConfig,
 }
-import com.digitalasset.canton.config.{
-  FullClientConfig,
-  PositiveFiniteDuration,
-  SequencerApiClientConfig,
-}
-import com.digitalasset.canton.config.RequireTypes.{
-  NonNegativeInt,
-  NonNegativeLong,
-  Port,
-  PositiveInt,
-}
+import com.digitalasset.canton.config.{FullClientConfig, SequencerApiClientConfig}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, Port}
 import com.digitalasset.canton.synchronizer.mediator.RemoteMediatorConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.RemoteSequencerConfig
-import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.GovernanceParameters
 import org.lfdecentralizedtrust.splice.config.Thresholds
@@ -63,17 +53,6 @@ class SyncOperatorBftIntegrationTest
 
   private val purchase = 2_000_000L
   private val synchronizerAlias = SynchronizerAlias.tryCreate("syncOperatorBft")
-
-  // Canton's defaults apart from a zero base rate, as bootstrap-canton.sc sets for splitwell.
-  private val trafficControl = TrafficControlParameters(
-    maxBaseTrafficAmount = NonNegativeLong.zero,
-    readVsWriteScalingFactor = PositiveInt.tryCreate(200),
-    maxBaseTrafficAccumulationDuration = PositiveFiniteDuration.ofMinutes(10),
-    setBalanceRequestSubmissionWindowSize = PositiveFiniteDuration.ofMinutes(5),
-    enforceRateLimiting = true,
-    baseEventCost = NonNegativeLong.zero,
-    freeConfirmationResponses = false,
-  )
 
   override def environmentDefinition: SpliceEnvironmentDefinition =
     EnvironmentDefinition
@@ -147,29 +126,16 @@ class SyncOperatorBftIntegrationTest
           }
         }
 
-        val participant = aliceValidatorBackend.participantClientWithAdminToken
-        val member = participant.id
-        // Joining vets Canton's admin workflows on the synchronizer, which a member without traffic
-        // could not, so the participant joins before traffic control is on.
-        clue(
-          "the participant connects to all four nodes, as a validator does on the global synchronizer"
-        ) {
-          participant.synchronizers.connect_bft(
-            nodes.map(n =>
-              n.sequencer.sequencerConnection.withAlias(SequencerAlias.tryCreate(n.sequencer.name))
-            ),
-            synchronizerAlias,
-            sequencerTrustThreshold = Thresholds.sequencerConnectionsSizeThreshold(nodes.size),
-            sequencerLivenessMargin = Thresholds.sequencerConnectionsLivenessMargin(nodes.size),
-            submissionRequestAmplification = SubmissionRequestAmplification(
-              Thresholds.sequencerSubmissionRequestAmplification(nodes.size),
-              ValidatorAppBackendConfig.DefaultSequencerRequestAmplificationPatience,
-            ),
-          )
-        }
-
-        clue("the owners turn on traffic control, which the operators require") {
-          enableTrafficControl(nodes, synchronizerId)
+        clue("every node runs traffic control with a zero base rate") {
+          // Each operator checks this on its own node when it starts.
+          eventually(1.minute) {
+            forAll(nodes)(
+              _.sequencer.topology.synchronizer_parameters
+                .get_dynamic_synchronizer_parameters(synchronizerId)
+                .trafficControl
+                .map(_.maxBaseTrafficAmount) shouldBe Some(NonNegativeLong.zero)
+            )
+          }
         }
 
         val operators = syncOperatorBackend +: (2 to 4).map(n => syncop(s"syncOperator$n"))
@@ -207,8 +173,39 @@ class SyncOperatorBftIntegrationTest
           sv1ScanBackend.lookupSynchronizerRegistration(synchronizerId.toProtoPrimitive).value
         }
 
-        // Alice's party is pushed to every synchronizer the participant is connected to, and this
-        // one refuses it until the participant has traffic.
+        val participant = aliceValidatorBackend.participantClientWithAdminToken
+        val member = participant.id
+        // The operators only grant traffic to members the synchronizer knows. Joining by handshake
+        // alone makes the participant one, and needs no traffic.
+        clue("the participant joins the synchronizer") {
+          participant.synchronizers.register_by_config(
+            SynchronizerConnectionConfig.tryGrpc(
+              synchronizerAlias,
+              nodes.map(n =>
+                n.sequencer.sequencerConnection.withAlias(
+                  SequencerAlias.tryCreate(n.sequencer.name)
+                )
+              ),
+              // As a validator connects to the global synchronizer.
+              sequencerTrustThreshold = Thresholds.sequencerConnectionsSizeThreshold(nodes.size),
+              sequencerLivenessMargin = Thresholds.sequencerConnectionsLivenessMargin(nodes.size),
+              submissionRequestAmplification = SubmissionRequestAmplification(
+                Thresholds.sequencerSubmissionRequestAmplification(nodes.size),
+                ValidatorAppBackendConfig.DefaultSequencerRequestAmplificationPatience,
+              ),
+            )
+          )
+          eventually() {
+            forAll(nodes)(
+              _.sequencer.topology.synchronizer_trust_certificates
+                .list(
+                  store = Some(TopologyStoreId.Synchronizer(synchronizerId)),
+                  filterUid = member.filterString,
+                ) should not be empty
+            )
+          }
+        }
+
         val aliceParty = onboardWalletUser(aliceWalletClient, aliceValidatorBackend)
         aliceWalletClient.tap(walletUsdToAmulet(200.0))
 
@@ -230,7 +227,12 @@ class SyncOperatorBftIntegrationTest
           _ => trafficOnEachNode().map(_.map(_._1)) shouldBe Seq.fill(nodes.size)(Some(purchase)),
         )
 
-        // Once granted, the refused push goes through and consumes the purchased traffic.
+        // Connecting vets Canton's admin workflows on the synchronizer and pushes the participant's
+        // parties, which the purchased traffic pays for.
+        clue("the participant connects to all four nodes with the traffic it bought") {
+          participant.synchronizers.reconnect(synchronizerAlias) shouldBe true
+        }
+
         clue("the nodes agree on the traffic the participant consumes") {
           eventually(1.minute) {
             val (purchased, consumed) = trafficOnEachNode().distinct.loneElement.value
@@ -268,29 +270,5 @@ class SyncOperatorBftIntegrationTest
         RemoteMediatorConfig(adminApi = FullClientConfig(port = Port.tryCreate(base + 7))),
       ),
     )
-  }
-
-  // The owners that sign topology changes, as many as the owner threshold in
-  // standalone-sync-operator-bft-bootstrap.sc.
-  private def signers(nodes: Seq[Node]): Seq[SequencerClientReference] =
-    nodes.map(_.sequencer).take(Thresholds.decentralizedNamespaceThreshold(nodes.size).value)
-
-  private def enableTrafficControl(nodes: Seq[Node], synchronizerId: SynchronizerId): Unit = {
-    signers(nodes).foreach(owner =>
-      owner.topology.synchronizer_parameters.propose_update(
-        synchronizerId,
-        _.update(trafficControl = Some(trafficControl)),
-        signedBy = Some(owner.id.uid.namespace.fingerprint),
-        synchronize = None,
-      )
-    )
-    // Each operator checks this on its own node when it starts.
-    eventually(1.minute) {
-      forAll(nodes)(
-        _.sequencer.topology.synchronizer_parameters
-          .get_dynamic_synchronizer_parameters(synchronizerId)
-          .trafficControl should not be empty
-      )
-    }
   }
 }
