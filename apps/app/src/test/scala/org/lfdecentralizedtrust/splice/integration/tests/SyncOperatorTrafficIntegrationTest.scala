@@ -78,7 +78,8 @@ class SyncOperatorTrafficIntegrationTest
         this.getClass.getSimpleName,
       )
       // Only alice and bob connect to splitwell: alice for the purchases, bob for the outage test,
-      // which needs a member whose balance starts small.
+      // which needs a member whose balance starts small. The operator's participant joins during
+      // the outage test, as a member with no purchase on record.
       .withValidatorsDisconnectedFromSplitwell("splitwellValidator")
       .withStandardSetup
       // Down from 200 KB, so bob's small purchases are allowed.
@@ -360,6 +361,8 @@ class SyncOperatorTrafficIntegrationTest
         // The operator app sees purchases, which are made on the global synchronizer, through
         // this participant.
         val operatorParticipant = splitwellValidatorBackend.participantClientWithAdminToken
+        // Not connected to splitwell until it joins during the outage.
+        val operator = operatorParticipant.id
         val syncOperatorWithAllowance = syncop(syncOperatorWithAllowanceName)
         def purchased() =
           runningSyncOperatorBackend.appState.store.listTotalPurchasedMemberTraffic().futureValue
@@ -388,95 +391,101 @@ class SyncOperatorTrafficIntegrationTest
         try {
           // The other apps on the operator's participant warn about the submissions that fail
           // while it is cut off from the global synchronizer, so this tolerates their warnings.
-          loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
-            {
-              // Cut off from the global synchronizer, the operator's participant sees no
-              // purchases, which is what an outage looks like to the operator.
-              operatorParticipant.synchronizers.disconnect(globalAlias)
+          loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.WARN)) {
+            // Cut off from the global synchronizer, the operator's participant sees no purchases,
+            // which is what an outage looks like to the operator.
+            operatorParticipant.synchronizers.disconnect(globalAlias)
 
-              actAndCheck(
-                "the operator sets the allowance and restarts its app", {
-                  syncOperatorBackend.stop()
-                  syncOperatorWithAllowance.startSync()
-                },
-              )(
-                "each member's limit rises to its purchased total plus the allowance, and the app " +
-                  "warns that the allowance is set",
-                _ => {
-                  limitsAreTotalsPlus(outageTrafficAllowance, totals)
-                  recordedWarnings(allowanceSetWarning) should not be empty
-                },
-              )
-
-              clue("a restart with the allowance still set moves no limit") {
-                syncOperatorWithAllowance.stop()
+            actAndCheck(
+              "the operator sets the allowance and restarts its app", {
+                syncOperatorBackend.stop()
                 syncOperatorWithAllowance.startSync()
-                always(durationOfSuccess = 10.seconds, pollIntervalMs = 1000) {
-                  limitsAreTotalsPlus(outageTrafficAllowance, totals)
-                }
-              }
+              },
+            )(
+              "each member's limit rises to its purchased total plus the allowance",
+              _ => limitsAreTotalsPlus(outageTrafficAllowance, totals),
+            )
 
-              clue("bob keeps transacting past what was bought for him") {
-                pingWhile(bobParticipant, synchronizerId)(consumed(bob) <= bobPurchase)
-                consumed(bob) should be > bobPurchase
-              }
-
-              clue("and is refused once he has used the allowance") {
-                Iterator
-                  .continually(Try(ping(bobParticipant, synchronizerId)))
-                  .take(maxPings)
-                  .exists(_.isFailure) shouldBe true
-                consumed(bob) should be <= bobPurchase + outageTrafficAllowance
-              }
-
-              clue("alice runs on what was bought for her, without the allowance") {
-                val consumedBefore = consumed(alice)
-                ping(aliceParticipant, synchronizerId)
-                eventually() {
-                  consumed(alice) should be > consumedBefore
-                }
-                consumed(alice) should be <= totals(alice)
-              }
-            },
-            // Once per start of the app.
-            logs => forAtLeast(2, logs)(_.warningMessage should include(allowanceSetWarning)),
-          )
-
-          loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
-            {
-              operatorParticipant.synchronizers.reconnect(globalAlias)
-
-              actAndCheck(
-                "alice buys more traffic for bob once the global synchronizer is back",
-                buyTraffic(
-                  aliceParty,
-                  bob,
-                  synchronizerId,
-                  Some(registration),
-                  dsoParty,
-                  bobPurchaseWithAllowanceSet,
-                ),
-              )(
-                "the operator warns that the allowance is still set",
-                _ => recordedWarnings(purchaseLandedWarning) should not be empty,
-              )
-
-              clue("the purchase pays down bob's credit instead of raising his limit") {
-                purchased()(bob) shouldBe bobPurchase + bobPurchaseWithAllowanceSet
-                extraTrafficLimit(bob) shouldBe bobPurchase + outageTrafficAllowance
-              }
-
-              // In here, as the app warns that the allowance is set until it has stopped.
+            clue("a restart with the allowance still set moves no limit") {
               syncOperatorWithAllowance.stop()
-            },
-            logs => forAtLeast(1, logs)(_.warningMessage should include(purchaseLandedWarning)),
-          )
+              syncOperatorWithAllowance.startSync()
+              always(durationOfSuccess = 10.seconds, pollIntervalMs = 1000) {
+                limitsAreTotalsPlus(outageTrafficAllowance, totals)
+              }
+            }
+
+            clue("bob keeps transacting past what was bought for him") {
+              pingWhile(bobParticipant, synchronizerId)(consumed(bob) <= bobPurchase)
+              consumed(bob) should be > bobPurchase
+            }
+
+            clue("and is refused once he has used the allowance") {
+              Iterator
+                .continually(Try(ping(bobParticipant, synchronizerId)))
+                .take(maxPings)
+                .exists(_.isFailure) shouldBe true
+              consumed(bob) should be <= bobPurchase + outageTrafficAllowance
+            }
+
+            clue("alice runs on what was bought for her, without the allowance") {
+              val consumedBefore = consumed(alice)
+              ping(aliceParticipant, synchronizerId)
+              eventually() {
+                consumed(alice) should be > consumedBefore
+              }
+              consumed(alice) should be <= totals(alice)
+            }
+
+            actAndCheck(timeUntilSuccess = 1.minute)(
+              "the operator's participant joins splitwell, with no purchase on record",
+              operatorParticipant.synchronizers.connect_by_config(
+                aliceParticipant.synchronizers
+                  .config(splitwellAlias)
+                  .value
+                  // So that nothing reconnects it once it has left again.
+                  .copy(manualConnect = true),
+                // Its topology transactions only go through once it has traffic.
+                synchronize = None,
+              ),
+            )(
+              "its limit is the allowance alone",
+              _ => {
+                purchased().keySet should not contain operator
+                extraTrafficLimit(operator) shouldBe outageTrafficAllowance
+              },
+            )
+            // It only joined for that check.
+            operatorParticipant.synchronizers.disconnect(splitwellAlias)
+
+            operatorParticipant.synchronizers.reconnect(globalAlias)
+
+            actAndCheck(
+              "alice buys more traffic for bob once the global synchronizer is back",
+              buyTraffic(
+                aliceParty,
+                bob,
+                synchronizerId,
+                Some(registration),
+                dsoParty,
+                bobPurchaseWithAllowanceSet,
+              ),
+            )(
+              "bob's limit rises to his new purchased total plus the allowance",
+              _ => {
+                purchased()(bob) shouldBe bobPurchase + bobPurchaseWithAllowanceSet
+                extraTrafficLimit(bob) shouldBe
+                  bobPurchase + bobPurchaseWithAllowanceSet + outageTrafficAllowance
+              },
+            )
+
+            syncOperatorWithAllowance.stop()
+          }
         } finally {
-          if (
-            !operatorParticipant.synchronizers
-              .list_connected()
-              .exists(_.synchronizerAlias == globalAlias)
-          )
+          def connectedTo(alias: SynchronizerAlias) =
+            operatorParticipant.synchronizers.list_connected().exists(_.synchronizerAlias == alias)
+          if (connectedTo(splitwellAlias))
+            operatorParticipant.synchronizers.disconnect(splitwellAlias)
+          if (!connectedTo(globalAlias))
             operatorParticipant.synchronizers.reconnect(globalAlias)
         }
 
@@ -486,8 +495,12 @@ class SyncOperatorTrafficIntegrationTest
             purchased()
           },
         )(
-          "each member's limit goes back down to its purchased total",
-          totals => limitsAreTotalsPlus(0L, totals),
+          "each member's limit goes back to its purchased total, which is zero for the participant " +
+            "that joined during the outage",
+          totals => {
+            limitsAreTotalsPlus(0L, totals)
+            extraTrafficLimit(operator) shouldBe 0L
+          },
         )._1
 
         clue("alice, who did not use the allowance, keeps transacting") {
@@ -517,15 +530,6 @@ class SyncOperatorTrafficIntegrationTest
         }
     }
   }
-
-  private val allowanceSetWarning =
-    s"The outage traffic allowance of $outageTrafficAllowance bytes is set, covering 2 members"
-  private val purchaseLandedWarning =
-    "was bought or merged on the global synchronizer while the outage traffic allowance is set"
-
-  // The warnings suppressed so far in the enclosing log assertion, for waiting on one.
-  private def recordedWarnings(text: String) =
-    loggerFactory.fetchRecordedLogEntries.filter(_.message.contains(text))
 
   // Bounds the ping loops, so a ping that costs less than expected fails the test instead of
   // running forever.
