@@ -13,7 +13,12 @@ import com.digitalasset.canton.config.{
   PositiveFiniteDuration,
   SequencerApiClientConfig,
 }
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, Port, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{
+  NonNegativeInt,
+  NonNegativeLong,
+  Port,
+  PositiveInt,
+}
 import com.digitalasset.canton.synchronizer.mediator.RemoteMediatorConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.RemoteSequencerConfig
 import com.digitalasset.canton.topology.SynchronizerId
@@ -99,7 +104,7 @@ class SyncOperatorBftIntegrationTest
 
         val synchronizerId = clue("the four nodes bootstrap the synchronizer") {
           // Each node reports the synchronizer it serves once the bootstrap script has run.
-          val synchronizerId = eventually(3.minutes) {
+          eventually(3.minutes) {
             forAll(nodes)(_.mediator.health.status.successOption should not be empty)
             nodes
               .map(_.sequencer.health.status.successOption.map(_.synchronizerId))
@@ -108,14 +113,28 @@ class SyncOperatorBftIntegrationTest
               .value
               .logical
           }
+        }
+
+        clue("the synchronizer runs on all four sequencers and mediators") {
           eventually(1.minute) {
-            nodes.head.sequencer.topology.sequencers
+            val sequencerState = nodes.head.sequencer.topology.sequencers
               .list(store = Some(TopologyStoreId.Synchronizer(synchronizerId)))
               .loneElement
               .item
-              .threshold shouldBe Thresholds.sequencerConnectionsSizeThreshold(nodes.size)
+            sequencerState.active.forgetNE should contain theSameElementsAs nodes.map(
+              _.sequencer.id
+            )
+            // The bootstrap script raises it from the one that genesis sets.
+            sequencerState.threshold shouldBe Thresholds.sequencerConnectionsSizeThreshold(
+              nodes.size
+            )
           }
-          synchronizerId
+          val mediatorState = nodes.head.sequencer.topology.mediators
+            .list(Some(synchronizerId), group = Some(NonNegativeInt.zero))
+            .loneElement
+            .item
+          mediatorState.active.forgetNE should contain theSameElementsAs nodes.map(_.mediator.id)
+          mediatorState.threshold shouldBe Thresholds.mediatorDomainStateThreshold(nodes.size)
         }
 
         clue("the four sequencers order together") {

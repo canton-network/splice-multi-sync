@@ -19,7 +19,7 @@ val synchronizerId = bootstrap.synchronizer(
     .toMap,
   synchronizerOwners = bftSequencers,
   synchronizerThreshold = PositiveInt.tryCreate(3),
-  staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.v35),
+  staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.v36),
   mediatorRequestAmplification = SubmissionRequestAmplification.NoAmplification,
   mediatorThreshold = PositiveInt.tryCreate(2),
 )
