@@ -34,7 +34,6 @@ import scala.jdk.CollectionConverters.*
   * registration disclosed, and checks the operator grants it on that synchronizer's sequencer.
   */
 @org.lfdecentralizedtrust.splice.util.scalatesttags.SpliceDsoGovernance_0_1_30
-@org.lfdecentralizedtrust.splice.util.scalatesttags.SpliceAmulet_0_1_24
 class SyncOperatorTrafficIntegrationTest
     extends IntegrationTest
     with SynchronizerFeesTestUtil
