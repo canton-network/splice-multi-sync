@@ -407,24 +407,42 @@ class SyncOperatorTrafficIntegrationTest
             )
 
             clue("a restart with the allowance still set moves no limit") {
+              // A grant moves the serial even where it sets the limit the member already has.
+              def serials() = totals.keys.map(member => member -> serial(member)).toMap
+              val serialsBefore = serials()
               syncOperatorWithAllowance.stop()
               syncOperatorWithAllowance.startSync()
-              always(durationOfSuccess = 10.seconds, pollIntervalMs = 1000) {
+              // Long enough for several of the restarted app's polls.
+              val window = 10.seconds
+              val pollingInterval = syncOperatorWithAllowance.config.automation.pollingInterval
+              pollingInterval.asFiniteApproximation * 3 should be < window
+              always(durationOfSuccess = window, pollIntervalMs = 1000) {
                 limitsAreTotalsPlus(outageTrafficAllowance, totals)
+                serials() shouldBe serialsBefore
               }
             }
 
-            clue("bob keeps transacting past what was bought for him") {
-              pingWhile(bobParticipant, synchronizerId)(consumed(bob) <= bobPurchase)
+            // The most one of bob's pings took his consumed traffic up by.
+            val pingCost = clue("bob keeps transacting past what was bought for him") {
+              val costs = pingWhile(bobParticipant, synchronizerId)(consumed(bob) <= bobPurchase)
               consumed(bob) should be > bobPurchase
+              costs.maxOption.getOrElse(fail("bob never pinged"))
             }
 
             clue("and is refused once he has used the allowance") {
-              Iterator
+              def headroom = bobPurchase + outageTrafficAllowance - consumed(bob)
+              // A ping can fail for other reasons too, so only a failure that leaves bob less than
+              // one ping's worth of traffic shows that he has used the allowance up. A few other
+              // failures are tolerated, rather than up to maxPings that can each take a timeout.
+              val refused = Iterator
                 .continually(Try(ping(bobParticipant, synchronizerId)))
                 .take(maxPings)
-                .exists(_.isFailure) shouldBe true
-              consumed(bob) should be <= bobPurchase + outageTrafficAllowance
+                .filter(_.isFailure)
+                .take(maxRefusals)
+                .exists(_ => headroom < pingCost)
+              withClue(s"bob has $headroom left, and one ping took up to $pingCost:") {
+                refused shouldBe true
+              }
             }
 
             clue("alice runs on what was bought for her, without the allowance") {
@@ -515,16 +533,19 @@ class SyncOperatorTrafficIntegrationTest
           )
         }
 
+        // Refused, bob consumes nothing more, so this is what his top-up finds.
+        val shortfall = consumed(bob) - totalsWithoutAllowance(bob)
         val topupTrigger =
           bobValidatorBackend.appState.automation.trigger[TopupMemberTrafficTrigger]
         setTriggersWithin(triggersToResumeAtStart = Seq(topupTrigger)) {
           clue("one top-up buys bob's shortfall with it, and he transacts again") {
-            // Inside bob's two-minute top-up interval, so a single purchase covered it.
+            // Inside bob's two-minute top-up interval, so no second top-up is bought meanwhile.
             eventually(100.seconds) {
               extraTrafficLimit(bob) should be > consumed(bob)
             }
-            // More than the top-up alone, which is less than the shortfall.
-            purchased()(bob) - totalsWithoutAllowance(bob) should be > bobTopupAmount
+            // One purchase of the top-up and the shortfall together, not the top-up alone or two
+            // top-ups.
+            purchased()(bob) - totalsWithoutAllowance(bob) shouldBe bobTopupAmount + shortfall
             ping(bobParticipant, synchronizerId)
           }
         }
@@ -535,20 +556,34 @@ class SyncOperatorTrafficIntegrationTest
   // running forever.
   private val maxPings = 300
 
+  // Bounds the failed pings the refusal check looks at.
+  private val maxRefusals = 5
+
   private def ping(participant: ParticipantClientReference, synchronizerId: SynchronizerId) =
     participant.health.ping(participant.id, synchronizerId = Some(synchronizerId))
 
+  /** Pings while `condition` holds, and returns how much each ping took the participant's
+    * consumed traffic up by.
+    */
   private def pingWhile(participant: ParticipantClientReference, synchronizerId: SynchronizerId)(
       condition: => Boolean
-  ): Unit =
+  )(implicit env: SpliceTestConsoleEnvironment): Seq[Long] =
     Iterator
       .continually(())
       .take(maxPings)
       .takeWhile(_ => condition)
-      .foreach(_ => ping(participant, synchronizerId))
+      .map { _ =>
+        val before = consumed(participant.id)
+        ping(participant, synchronizerId)
+        consumed(participant.id) - before
+      }
+      .toSeq
 
   private def consumed(member: Member)(implicit env: SpliceTestConsoleEnvironment): Long =
     trafficState(member).fold(0L)(_.extraTrafficConsumed.value)
+
+  private def serial(member: Member)(implicit env: SpliceTestConsoleEnvironment) =
+    trafficState(member).flatMap(_.state.serial)
 
   // The sync-operator CI job bootstraps splitwell with traffic control and a zero base rate;
   // see start-canton.sh -t.
