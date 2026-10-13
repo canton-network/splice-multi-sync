@@ -31,6 +31,7 @@ import scala.jdk.CollectionConverters.*
   * that every node grants a member's purchased traffic and that the nodes agree on what it
   * consumes.
   */
+@org.lfdecentralizedtrust.splice.util.scalatesttags.SpliceDsoGovernance_0_1_30
 class SyncOperatorBftIntegrationTest
     extends IntegrationTest
     with HasExecutionContext
