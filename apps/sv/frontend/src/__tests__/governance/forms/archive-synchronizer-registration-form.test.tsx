@@ -11,17 +11,13 @@ import {
   activeSynchronizerRegistrationPayload,
 } from '../../mocks/constants';
 
-// The lookups need an authenticated SV admin client, which the render wrapper does not set
+// The lookup needs an authenticated SV admin client, which the render wrapper does not set
 // up, so the sources the form reads are mocked and the component's own logic tested.
-const mockLookupById = vi.fn();
-const mockLookupByCid = vi.fn();
+const mockListRegistrations = vi.fn();
 const mockVoteRequests = vi.fn();
 vi.mock('../../../contexts/SvAdminServiceContext', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../contexts/SvAdminServiceContext')>()),
-  useSvAdminClient: () => ({
-    lookupSynchronizerRegistration: mockLookupById,
-    lookupSynchronizerRegistrationByContractId: mockLookupByCid,
-  }),
+  useSvAdminClient: () => ({ listSynchronizerRegistrations: mockListRegistrations }),
 }));
 vi.mock('../../../hooks/useListVoteRequests', () => ({
   useListDsoRulesVoteRequests: () => mockVoteRequests(),
@@ -30,6 +26,14 @@ vi.mock('../../../hooks/useListVoteRequests', () => ({
 const synchronizerId = activeSynchronizerRegistrationPayload.synchronizerId;
 const operator = activeSynchronizerRegistrationPayload.operator;
 const registrationCid = activeSynchronizerRegistration.contract_id;
+
+const duplicateOperator = 'operator::1220f00dfeed';
+const duplicateRegistration = {
+  ...activeSynchronizerRegistration,
+  contract_id: registrationCid.replace(/^00a1/, '00b2'),
+  payload: { ...activeSynchronizerRegistrationPayload, operator: duplicateOperator },
+};
+const duplicateCid = duplicateRegistration.contract_id;
 
 const openVoteOn = (tag: string, registeredSynchronizerCid: string) => ({
   data: [
@@ -46,8 +50,7 @@ const openVoteOn = (tag: string, registeredSynchronizerCid: string) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockLookupById.mockResolvedValue({ registration: { contract: activeSynchronizerRegistration } });
-  mockLookupByCid.mockResolvedValue({ registration: activeSynchronizerRegistration });
+  mockListRegistrations.mockResolvedValue({ registrations: [activeSynchronizerRegistration] });
   mockVoteRequests.mockReturnValue({ data: [] });
 });
 
@@ -64,8 +67,29 @@ const enter = async (user: ReturnType<typeof userEvent.setup>, testId: string, v
   await user.click(screen.getByTestId('archive-synchronizer-registration-action'));
 };
 
+const pickRegistration = (contractId: string) => {
+  const dropdown = screen.getByTestId('archive-synchronizer-registration-contract-id-dropdown');
+  fireEvent.change(dropdown, { target: { value: contractId } });
+  fireEvent.blur(dropdown);
+};
+
+const fillAndReview = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.type(
+    screen.getByTestId('archive-synchronizer-registration-summary'),
+    'Offboard a synchronizer'
+  );
+  await user.type(
+    screen.getByTestId('archive-synchronizer-registration-url'),
+    'https://example.com'
+  );
+  const submitButton = screen.getByTestId('submit-button');
+  await waitFor(() => expect(submitButton.getAttribute('disabled')).toBeNull());
+  await user.click(submitButton);
+  await screen.findByTestId('proposal-review');
+};
+
 describe('Offboard Dedicated Synchronizer Form', () => {
-  test('renders the form, looking the registration up by synchronizer id', () => {
+  test('renders the form, with no registration to pick before a synchronizer id', () => {
     renderForm();
 
     expect(screen.getByTestId('archive-synchronizer-registration-form')).toBeInTheDocument();
@@ -76,18 +100,18 @@ describe('Offboard Dedicated Synchronizer Form', () => {
       screen.getByTestId('archive-synchronizer-registration-synchronizer-id')
     ).toBeInTheDocument();
     expect(
-      screen.queryByTestId('archive-synchronizer-registration-contract-id')
-    ).not.toBeInTheDocument();
+      screen.getByTestId('archive-synchronizer-registration-contract-id-dropdown')
+    ).toBeDisabled();
   });
 
-  test('shows the registration a synchronizer id resolves to', async () => {
+  test('picks the only registration of a synchronizer id', async () => {
     const user = userEvent.setup();
     renderForm();
 
     await enter(user, 'archive-synchronizer-registration-synchronizer-id', synchronizerId);
 
     await screen.findByTestId('archive-synchronizer-registration-resolved');
-    expect(mockLookupById).toHaveBeenCalledWith(synchronizerId);
+    expect(mockListRegistrations).toHaveBeenCalledWith(synchronizerId);
     expect(
       screen.getByTestId('archive-synchronizer-registration-resolved-contract-id-field').textContent
     ).toBe(registrationCid);
@@ -96,8 +120,34 @@ describe('Offboard Dedicated Synchronizer Form', () => {
     ).toHaveTextContent(operator);
   });
 
+  test('lets the proposer pick among duplicate registrations', async () => {
+    mockListRegistrations.mockResolvedValue({
+      registrations: [activeSynchronizerRegistration, duplicateRegistration],
+    });
+    const user = userEvent.setup();
+    renderForm();
+
+    await enter(user, 'archive-synchronizer-registration-synchronizer-id', synchronizerId);
+
+    const dropdown = screen.getByTestId('archive-synchronizer-registration-contract-id-dropdown');
+    await waitFor(() => expect(dropdown).not.toBeDisabled());
+    expect(
+      screen.queryByTestId('archive-synchronizer-registration-resolved')
+    ).not.toBeInTheDocument();
+
+    pickRegistration(duplicateCid);
+
+    await screen.findByTestId('archive-synchronizer-registration-resolved');
+    expect(
+      screen.getByTestId('archive-synchronizer-registration-resolved-contract-id-field').textContent
+    ).toBe(duplicateCid);
+    expect(
+      screen.getByTestId('archive-synchronizer-registration-resolved-operator-party-id')
+    ).toHaveTextContent(duplicateOperator);
+  });
+
   test('rejects a synchronizer id that is not registered', async () => {
-    mockLookupById.mockResolvedValue(undefined);
+    mockListRegistrations.mockResolvedValue({ registrations: [] });
     const user = userEvent.setup();
     renderForm();
 
@@ -116,12 +166,12 @@ describe('Offboard Dedicated Synchronizer Form', () => {
     await enter(user, 'archive-synchronizer-registration-synchronizer-id', 'not-an-id');
 
     expect(await screen.findByText(/Invalid synchronizer id/)).toBeInTheDocument();
-    expect(mockLookupById).not.toHaveBeenCalled();
+    expect(mockListRegistrations).not.toHaveBeenCalled();
   });
 
   test('a failing lookup blocks the proposal, since there is no contract to target', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    mockLookupById.mockRejectedValue(new Error('scan is unreachable'));
+    mockListRegistrations.mockRejectedValue(new Error('the SV app is unreachable'));
     const user = userEvent.setup();
     renderForm();
 
@@ -142,60 +192,35 @@ describe('Offboard Dedicated Synchronizer Form', () => {
     expect(await screen.findByText(/Another open proposal/)).toBeInTheDocument();
   });
 
-  test('looks a registration up by contract id, which reaches a duplicate', async () => {
-    const user = userEvent.setup();
-    renderForm();
-
-    fireEvent.change(screen.getByTestId('archive-synchronizer-registration-lookup-by-dropdown'), {
-      target: { value: 'contract-id' },
-    });
-    await enter(user, 'archive-synchronizer-registration-contract-id', registrationCid);
-
-    await screen.findByTestId('archive-synchronizer-registration-resolved');
-    expect(mockLookupByCid).toHaveBeenCalledWith(registrationCid);
-    expect(mockLookupById).not.toHaveBeenCalled();
-    expect(
-      screen.getByTestId('archive-synchronizer-registration-resolved-synchronizer-id-field')
-        .textContent
-    ).toBe(synchronizerId);
-  });
-
-  test('rejects a contract id that is not an active registration', async () => {
-    mockLookupByCid.mockResolvedValue({});
-    const user = userEvent.setup();
-    renderForm();
-
-    fireEvent.change(screen.getByTestId('archive-synchronizer-registration-lookup-by-dropdown'), {
-      target: { value: 'contract-id' },
-    });
-    await enter(user, 'archive-synchronizer-registration-contract-id', registrationCid);
-
-    expect(
-      await screen.findByText(/No active registration has this contract id/)
-    ).toBeInTheDocument();
-  });
-
   test('reviews the resolved registration', async () => {
     const user = userEvent.setup();
     renderForm();
 
-    await user.type(
-      screen.getByTestId('archive-synchronizer-registration-summary'),
-      'Offboard a synchronizer'
-    );
-    await user.type(
-      screen.getByTestId('archive-synchronizer-registration-url'),
-      'https://example.com'
-    );
     await enter(user, 'archive-synchronizer-registration-synchronizer-id', synchronizerId);
     await screen.findByTestId('archive-synchronizer-registration-resolved');
+    await fillAndReview(user);
 
-    const submitButton = screen.getByTestId('submit-button');
-    await waitFor(() => expect(submitButton.getAttribute('disabled')).toBeNull());
-    await user.click(submitButton);
-
-    await screen.findByTestId('proposal-review');
     expect(screen.getByTestId('registeredSynchronizerCid-field').textContent).toBe(registrationCid);
     expect(screen.getByTestId('synchronizerId-field').textContent).toBe(synchronizerId);
+  });
+
+  test('a proposal pins the duplicate registration that was picked', async () => {
+    mockListRegistrations.mockResolvedValue({
+      registrations: [activeSynchronizerRegistration, duplicateRegistration],
+    });
+    const user = userEvent.setup();
+    renderForm();
+
+    await enter(user, 'archive-synchronizer-registration-synchronizer-id', synchronizerId);
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('archive-synchronizer-registration-contract-id-dropdown')
+      ).not.toBeDisabled()
+    );
+    pickRegistration(duplicateCid);
+    await screen.findByTestId('archive-synchronizer-registration-resolved');
+    await fillAndReview(user);
+
+    expect(screen.getByTestId('registeredSynchronizerCid-field').textContent).toBe(duplicateCid);
   });
 });

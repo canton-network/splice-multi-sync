@@ -20,6 +20,7 @@ import {
   ListDsoRulesVoteRequestsResponse,
   ListDsoRulesVoteResultsResponse,
   ListFeaturedAppRightsByProviderResponse,
+  ListSynchronizerRegistrationsResponse,
   LookupFeaturedAppRightByContractIdResponse,
   LookupSynchronizerRegistrationResponse,
   LookupSynchronizerRegistrationByContractIdResponse,
@@ -109,6 +110,9 @@ export interface SvAdminClient {
   lookupSynchronizerRegistration: (
     synchronizerId: string
   ) => Promise<LookupSynchronizerRegistrationResponse | undefined>;
+  listSynchronizerRegistrations: (
+    synchronizerId: string
+  ) => Promise<ListSynchronizerRegistrationsResponse>;
   lookupSynchronizerRegistrationByContractId: (
     contractId: string
   ) => Promise<LookupSynchronizerRegistrationByContractIdResponse>;
@@ -280,6 +284,11 @@ export const SvAdminClientProvider: React.FC<React.PropsWithChildren<SvAdminProp
           }
           throw e;
         }
+      },
+      listSynchronizerRegistrations: async (
+        synchronizerId: string
+      ): Promise<ListSynchronizerRegistrationsResponse> => {
+        return await svAdminClient.listSynchronizerRegistrations(synchronizerId);
       },
       lookupSynchronizerRegistrationByContractId: async (
         contractId: string

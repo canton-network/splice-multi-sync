@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { SetSynchronizerGovernanceParametersForm } from '../../../components/forms/SetSynchronizerGovernanceParametersForm';
@@ -11,16 +11,13 @@ import {
   activeSynchronizerRegistrationPayload,
 } from '../../mocks/constants';
 
-// The lookups need an authenticated SV admin client, which the render wrapper does not set
+// The lookup needs an authenticated SV admin client, which the render wrapper does not set
 // up, so the sources the form reads are mocked and the component's own logic tested.
-const mockLookupById = vi.fn();
+const mockListRegistrations = vi.fn();
 const mockVoteRequests = vi.fn();
 vi.mock('../../../contexts/SvAdminServiceContext', async importOriginal => ({
   ...(await importOriginal<typeof import('../../../contexts/SvAdminServiceContext')>()),
-  useSvAdminClient: () => ({
-    lookupSynchronizerRegistration: mockLookupById,
-    lookupSynchronizerRegistrationByContractId: vi.fn(),
-  }),
+  useSvAdminClient: () => ({ listSynchronizerRegistrations: mockListRegistrations }),
 }));
 vi.mock('../../../hooks/useListVoteRequests', () => ({
   useListDsoRulesVoteRequests: () => mockVoteRequests(),
@@ -30,9 +27,19 @@ const synchronizerId = activeSynchronizerRegistrationPayload.synchronizerId;
 const registrationCid = activeSynchronizerRegistration.contract_id;
 const prefix = 'set-synchronizer-governance-parameters';
 
+const duplicateRegistration = {
+  ...activeSynchronizerRegistration,
+  contract_id: registrationCid.replace(/^00a1/, '00b2'),
+  payload: {
+    ...activeSynchronizerRegistrationPayload,
+    governanceParameters: { discountFactor: '0.6000000000' },
+  },
+};
+const duplicateCid = duplicateRegistration.contract_id;
+
 beforeEach(() => {
   vi.clearAllMocks();
-  mockLookupById.mockResolvedValue({ registration: { contract: activeSynchronizerRegistration } });
+  mockListRegistrations.mockResolvedValue({ registrations: [activeSynchronizerRegistration] });
   mockVoteRequests.mockReturnValue({ data: [] });
 });
 
@@ -68,7 +75,7 @@ describe('Set Dedicated Synchronizer Parameters Form', () => {
     await enterSynchronizerId(user, synchronizerId);
 
     await screen.findByTestId(`${prefix}-resolved`);
-    expect(mockLookupById).toHaveBeenCalledWith(synchronizerId);
+    expect(mockListRegistrations).toHaveBeenCalledWith(synchronizerId);
     expect(screen.getByTestId(`${prefix}-resolved-contract-id-field`).textContent).toBe(
       registrationCid
     );
@@ -82,8 +89,48 @@ describe('Set Dedicated Synchronizer Parameters Form', () => {
     );
   });
 
+  test('picks the only registration without a duplicates warning', async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await enterSynchronizerId(user, synchronizerId);
+
+    await screen.findByTestId(`${prefix}-resolved`);
+    expect(screen.getByTestId(`${prefix}-contract-id`)).toHaveTextContent(registrationCid);
+    expect(screen.queryByTestId(`${prefix}-duplicates-warning`)).not.toBeInTheDocument();
+  });
+
+  test('warns about duplicate registrations and lets the proposer pick one', async () => {
+    mockListRegistrations.mockResolvedValue({
+      registrations: [activeSynchronizerRegistration, duplicateRegistration],
+    });
+    const user = userEvent.setup();
+    renderForm();
+
+    await enterSynchronizerId(user, synchronizerId);
+
+    expect(await screen.findByTestId(`${prefix}-duplicates-warning`)).toHaveTextContent(
+      /2 registrations/
+    );
+    expect(screen.queryByTestId(`${prefix}-resolved`)).not.toBeInTheDocument();
+
+    const dropdown = screen.getByTestId(`${prefix}-contract-id-dropdown`);
+    fireEvent.change(dropdown, { target: { value: duplicateCid } });
+    fireEvent.blur(dropdown);
+
+    await screen.findByTestId(`${prefix}-resolved`);
+    expect(screen.getByTestId(`${prefix}-resolved-contract-id-field`).textContent).toBe(
+      duplicateCid
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId(`${prefix}-discountFactor`).getAttribute('value')).toBe(
+        '0.6000000000'
+      )
+    );
+  });
+
   test('rejects a synchronizer id that is not registered', async () => {
-    mockLookupById.mockResolvedValue(undefined);
+    mockListRegistrations.mockResolvedValue({ registrations: [] });
     const user = userEvent.setup();
     renderForm();
 
@@ -100,12 +147,12 @@ describe('Set Dedicated Synchronizer Parameters Form', () => {
     await enterSynchronizerId(user, 'not-an-id');
 
     expect(await screen.findByText(/Invalid synchronizer id/)).toBeInTheDocument();
-    expect(mockLookupById).not.toHaveBeenCalled();
+    expect(mockListRegistrations).not.toHaveBeenCalled();
   });
 
   test('a failing lookup blocks the proposal, since there is no contract to target', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    mockLookupById.mockRejectedValue(new Error('scan is unreachable'));
+    mockListRegistrations.mockRejectedValue(new Error('scan is unreachable'));
     const user = userEvent.setup();
     renderForm();
 
@@ -205,14 +252,14 @@ describe('Set Dedicated Synchronizer Parameters Form', () => {
     await waitFor(() => expect(discountInput.getAttribute('value')).toBe('0.8000000000'));
     // Typing the id also scheduled a debounced lookup, which the blur does not cancel. Let it
     // land, so the count below is only the lookup the second blur runs.
-    await waitFor(() => expect(mockLookupById).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockListRegistrations).toHaveBeenCalledTimes(2));
     await user.clear(discountInput);
     await user.type(discountInput, '0.5');
 
     // Blurring the synchronizer id runs its lookup again, as submitting does.
     await user.click(screen.getByTestId(`${prefix}-synchronizer-id`));
     await user.click(screen.getByTestId(`${prefix}-action`));
-    await waitFor(() => expect(mockLookupById).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(mockListRegistrations).toHaveBeenCalledTimes(3));
 
     expect(screen.getByTestId(`${prefix}-discountFactor`).getAttribute('value')).toBe('0.5');
   });
@@ -230,13 +277,10 @@ describe('Set Dedicated Synchronizer Parameters Form', () => {
     await user.type(discountInput, '0.5');
 
     // Submitting re-runs the lookup; against a real backend it answers after a delay.
-    mockLookupById.mockImplementation(
+    mockListRegistrations.mockImplementation(
       () =>
         new Promise(resolve =>
-          setTimeout(
-            () => resolve({ registration: { contract: activeSynchronizerRegistration } }),
-            50
-          )
+          setTimeout(() => resolve({ registrations: [activeSynchronizerRegistration] }), 50)
         )
     );
     const submitButton = screen.getByTestId('submit-button');

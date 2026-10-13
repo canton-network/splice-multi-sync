@@ -3,6 +3,8 @@
 
 import dayjs from 'dayjs';
 import { useEffect, useRef, useState } from 'react';
+import { Alert } from '@mui/material';
+import { useStore } from '@tanstack/react-form';
 import { dateTimeFormatISO } from '@canton-network/splice-common-frontend-utils';
 import { ContractId } from '@daml/types';
 import { RegisteredSynchronizer } from '@daml.js/splice-amulet/lib/Splice/DecentralizedSynchronizer';
@@ -11,7 +13,7 @@ import { ActionRequiringConfirmation } from '@daml.js/splice-dso-governance/lib/
 import { useAppForm } from '../../hooks/form';
 import { useDsoInfos } from '../../contexts/SvContext';
 import { useProposalMutation } from '../../hooks/useProposalMutation';
-import { useSynchronizerRegistrationLookup } from '../../hooks/useSynchronizerRegistrationLookup';
+import { useSynchronizerRegistrationPicker } from '../../hooks/useSynchronizerRegistrationPicker';
 import { createProposalActions, getInitialExpiration } from '../../utils/governance';
 import { CommonProposalFormData } from '../../utils/types';
 import {
@@ -46,6 +48,7 @@ import { ResolvedSynchronizerRegistrationFields } from './ResolvedSynchronizerRe
 
 interface ExtraFormField {
   synchronizerId: string;
+  registrationCid: string;
   governanceParameters: GovernanceParameterValues;
 }
 
@@ -61,7 +64,7 @@ export const SetSynchronizerGovernanceParametersForm: React.FC = _ => {
   const initialEffectiveDate = dayjs(initialExpiration).add(1, 'day');
   const [showConfirmation, setShowConfirmation] = useState(false);
   const mutation = useProposalMutation();
-  const lookup = useSynchronizerRegistrationLookup();
+  const picker = useSynchronizerRegistrationPicker();
   const idPrefix = 'set-synchronizer-governance-parameters';
 
   const createProposalAction = createProposalActions.find(
@@ -78,6 +81,7 @@ export const SetSynchronizerGovernanceParametersForm: React.FC = _ => {
     url: '',
     summary: '',
     synchronizerId: '',
+    registrationCid: '',
     governanceParameters: emptyGovernanceParameterValues,
   };
 
@@ -85,7 +89,7 @@ export const SetSynchronizerGovernanceParametersForm: React.FC = _ => {
     defaultValues,
 
     onSubmit: async ({ value }) => {
-      const resolved = lookup.getResolved();
+      const resolved = picker.find(value.registrationCid);
       if (!resolved) return;
       const action: ActionRequiringConfirmation = {
         tag: 'ARC_DsoRules',
@@ -119,7 +123,7 @@ export const SetSynchronizerGovernanceParametersForm: React.FC = _ => {
         });
         if (dateError) return dateError;
 
-        const resolved = lookup.getResolved();
+        const resolved = picker.find(value.registrationCid);
         if (!resolved) return undefined;
         const current = toGovernanceParameterValues(resolved.governanceParameters);
         const proposed = toGovernanceParameterValues(
@@ -133,7 +137,15 @@ export const SetSynchronizerGovernanceParametersForm: React.FC = _ => {
     },
   });
 
-  const resolved = lookup.resolved;
+  useEffect(() => {
+    const current = form.state.values.registrationCid;
+    if (picker.options.some(option => option.value === current)) return;
+    const next = picker.options.length === 1 ? picker.options[0].value : '';
+    if (next !== current) form.setFieldValue('registrationCid', next);
+  }, [form, picker.options]);
+
+  const registrationCid = useStore(form.store, state => state.values.registrationCid);
+  const resolved = picker.find(registrationCid);
   const prefilledFor = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!resolved || prefilledFor.current === resolved.contractId) return;
@@ -151,7 +163,7 @@ export const SetSynchronizerGovernanceParametersForm: React.FC = _ => {
       actionName={form.state.values.action}
       isReviewStep={showConfirmation}
     >
-      {showConfirmation && lookup.resolved ? (
+      {showConfirmation && resolved ? (
         <ProposalSummary
           actionName={form.state.values.action}
           url={form.state.values.url}
@@ -159,7 +171,7 @@ export const SetSynchronizerGovernanceParametersForm: React.FC = _ => {
           expiryDate={form.state.values.expiryDate}
           effectiveDate={form.state.values.effectiveDate.effectiveDate}
           formType="set-synchronizer-governance-parameters"
-          registration={lookup.resolved}
+          registration={resolved}
           newGovernanceParameters={fromGovernanceParameterValues(
             form.state.values.governanceParameters
           )}
@@ -183,8 +195,8 @@ export const SetSynchronizerGovernanceParametersForm: React.FC = _ => {
               onBlur: ({ value }) => validateSynchronizerId(value.trim()),
               onChange: ({ value }) => validateSynchronizerId(value.trim()),
               onChangeAsyncDebounceMs: 500,
-              onChangeAsync: ({ value }) => lookup.resolveAndValidate('synchronizer-id', value),
-              onBlurAsync: ({ value }) => lookup.resolveAndValidate('synchronizer-id', value),
+              onChangeAsync: ({ value }) => picker.loadAndValidate(value),
+              onBlurAsync: ({ value }) => picker.loadAndValidate(value),
             }}
           >
             {field => (
@@ -192,16 +204,52 @@ export const SetSynchronizerGovernanceParametersForm: React.FC = _ => {
                 title="Synchronizer ID"
                 id={`${idPrefix}-synchronizer-id`}
                 subtitle="The id of the dedicated synchronizer whose parameters to set, as name::fingerprint"
-                onChange={() => lookup.reset()}
+                onChange={() => picker.reset()}
               />
             )}
           </form.AppField>
 
-          {lookup.resolved && (
+          <form.AppField
+            name="registrationCid"
+            validators={{
+              onBlur: ({ value }) => picker.validateSelection(value),
+              onChange: ({ value }) => picker.validateSelection(value),
+            }}
+          >
+            {field => (
+              <field.SelectField
+                title="Registration Contract ID"
+                id={`${idPrefix}-contract-id`}
+                options={picker.options}
+                scrollableIdentifier
+                disabled={picker.options.length === 0}
+                placeholder={
+                  picker.options.length === 0
+                    ? 'Enter a synchronizer id to list its registrations'
+                    : undefined
+                }
+              />
+            )}
+          </form.AppField>
+
+          {picker.options.length > 1 && (
+            <Alert
+              severity="warning"
+              variant="outlined"
+              data-testid={`${idPrefix}-duplicates-warning`}
+            >
+              This synchronizer id has {picker.options.length} registrations. Scan resolves it to
+              the one with the lowest contract id, and changing the parameters recreates the
+              registration under a new contract id, which can change which one that is. Consider
+              offboarding the duplicates first.
+            </Alert>
+          )}
+
+          {resolved && (
             <>
               <ResolvedSynchronizerRegistrationFields
                 id={`${idPrefix}-resolved`}
-                registration={lookup.resolved}
+                registration={resolved}
                 showParameters
               />
 

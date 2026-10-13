@@ -13,7 +13,7 @@ import {
   THRESHOLD_DEADLINE_SUBTITLE,
 } from '../../utils/constants';
 import type { GovernanceParameters } from '@daml.js/splice-amulet/lib/Splice/DecentralizedSynchronizer';
-import type { ResolvedSynchronizerRegistration } from '../../hooks/useSynchronizerRegistrationLookup';
+import type { ResolvedSynchronizerRegistration } from '../../hooks/useSynchronizerRegistrationPicker';
 import type { ConfigChange } from '../../utils/types';
 import { governanceParameterChanges } from '../forms/governanceParameterFields';
 import { ConfigValuesChanges } from './ConfigValuesChanges';

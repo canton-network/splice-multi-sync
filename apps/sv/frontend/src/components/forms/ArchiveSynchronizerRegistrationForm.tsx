@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import dayjs from 'dayjs';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore } from '@tanstack/react-form';
 import { dateTimeFormatISO } from '@canton-network/splice-common-frontend-utils';
 import { ContractId } from '@daml/types';
@@ -12,10 +12,7 @@ import { ActionRequiringConfirmation } from '@daml.js/splice-dso-governance/lib/
 import { useAppForm } from '../../hooks/form';
 import { useDsoInfos } from '../../contexts/SvContext';
 import { useProposalMutation } from '../../hooks/useProposalMutation';
-import {
-  RegistrationLookupBy,
-  useSynchronizerRegistrationLookup,
-} from '../../hooks/useSynchronizerRegistrationLookup';
+import { useSynchronizerRegistrationPicker } from '../../hooks/useSynchronizerRegistrationPicker';
 import { createProposalActions, getInitialExpiration } from '../../utils/governance';
 import { CommonProposalFormData } from '../../utils/types';
 import {
@@ -28,7 +25,6 @@ import {
   THRESHOLD_DEADLINE_SUBTITLE,
 } from '../../utils/constants';
 import {
-  validateContractId,
   validateEffectiveDate,
   validateExpiration,
   validateExpiryEffectiveDate,
@@ -43,22 +39,11 @@ import { FormLayout } from './FormLayout';
 import { ResolvedSynchronizerRegistrationFields } from './ResolvedSynchronizerRegistration';
 
 interface ExtraFormField {
-  lookupBy: RegistrationLookupBy;
-  /** A synchronizer id or a registration contract id, depending on lookupBy. */
-  registration: string;
+  synchronizerId: string;
+  registrationCid: string;
 }
 
 export type ArchiveSynchronizerRegistrationFormData = CommonProposalFormData & ExtraFormField;
-
-const lookupByOptions: { key: string; value: RegistrationLookupBy }[] = [
-  { key: 'Synchronizer ID', value: 'synchronizer-id' },
-  { key: 'Registration Contract ID', value: 'contract-id' },
-];
-
-const validateRegistrationInput = (by: RegistrationLookupBy, value: string) =>
-  by === 'synchronizer-id'
-    ? validateSynchronizerId(value.trim())
-    : validateContractId(value.trim());
 
 export const ArchiveSynchronizerRegistrationForm: React.FC = _ => {
   const dsoInfosQuery = useDsoInfos();
@@ -66,7 +51,7 @@ export const ArchiveSynchronizerRegistrationForm: React.FC = _ => {
   const initialEffectiveDate = dayjs(initialExpiration).add(1, 'day');
   const [showConfirmation, setShowConfirmation] = useState(false);
   const mutation = useProposalMutation();
-  const lookup = useSynchronizerRegistrationLookup();
+  const picker = useSynchronizerRegistrationPicker();
   const idPrefix = 'archive-synchronizer-registration';
 
   const createProposalAction = createProposalActions.find(
@@ -82,16 +67,15 @@ export const ArchiveSynchronizerRegistrationForm: React.FC = _ => {
     },
     url: '',
     summary: '',
-    lookupBy: 'synchronizer-id',
-    registration: '',
+    synchronizerId: '',
+    registrationCid: '',
   };
 
   const form = useAppForm({
     defaultValues,
 
     onSubmit: async ({ value }) => {
-      // The field's async validator resolved it; without it there is nothing to target.
-      const resolved = lookup.getResolved();
+      const resolved = picker.find(value.registrationCid);
       if (!resolved) return;
       const action: ActionRequiringConfirmation = {
         tag: 'ARC_DsoRules',
@@ -124,7 +108,15 @@ export const ArchiveSynchronizerRegistrationForm: React.FC = _ => {
     },
   });
 
-  const lookupBy = useStore(form.store, state => state.values.lookupBy);
+  useEffect(() => {
+    const current = form.state.values.registrationCid;
+    if (picker.options.some(option => option.value === current)) return;
+    const next = picker.options.length === 1 ? picker.options[0].value : '';
+    if (next !== current) form.setFieldValue('registrationCid', next);
+  }, [form, picker.options]);
+
+  const registrationCid = useStore(form.store, state => state.values.registrationCid);
+  const resolved = picker.find(registrationCid);
 
   return (
     <FormLayout
@@ -133,7 +125,7 @@ export const ArchiveSynchronizerRegistrationForm: React.FC = _ => {
       actionName={form.state.values.action}
       isReviewStep={showConfirmation}
     >
-      {showConfirmation && lookup.resolved ? (
+      {showConfirmation && resolved ? (
         <ProposalSummary
           actionName={form.state.values.action}
           url={form.state.values.url}
@@ -141,7 +133,7 @@ export const ArchiveSynchronizerRegistrationForm: React.FC = _ => {
           expiryDate={form.state.values.expiryDate}
           effectiveDate={form.state.values.effectiveDate.effectiveDate}
           formType="archive-synchronizer-registration"
-          registration={lookup.resolved}
+          registration={resolved}
           onEdit={() => setShowConfirmation(false)}
           onSubmit={() => {}}
         />
@@ -157,61 +149,52 @@ export const ArchiveSynchronizerRegistrationForm: React.FC = _ => {
           </form.AppField>
 
           <form.AppField
-            name="lookupBy"
-            listeners={{
-              onChange: () => {
-                // The input means something else now, so it is looked up afresh.
-                form.resetField('registration');
-                lookup.reset();
-              },
+            name="synchronizerId"
+            validators={{
+              onBlur: ({ value }) => validateSynchronizerId(value.trim()),
+              onChange: ({ value }) => validateSynchronizerId(value.trim()),
+              onChangeAsyncDebounceMs: 500,
+              onChangeAsync: ({ value }) => picker.loadAndValidate(value),
+              onBlurAsync: ({ value }) => picker.loadAndValidate(value),
             }}
           >
             {field => (
-              <field.SelectField
-                title="Find the Registration By"
-                id={`${idPrefix}-lookup-by`}
-                options={lookupByOptions}
+              <field.TextField
+                title="Synchronizer ID"
+                id={`${idPrefix}-synchronizer-id`}
+                subtitle="The id of the dedicated synchronizer to offboard, as name::fingerprint"
+                onChange={() => picker.reset()}
               />
             )}
           </form.AppField>
 
           <form.AppField
-            name="registration"
+            name="registrationCid"
             validators={{
-              onBlur: ({ value, fieldApi }) =>
-                validateRegistrationInput(fieldApi.form.getFieldValue('lookupBy'), value),
-              onChange: ({ value, fieldApi }) =>
-                validateRegistrationInput(fieldApi.form.getFieldValue('lookupBy'), value),
-              onChangeAsyncDebounceMs: 500,
-              onChangeAsync: ({ value, fieldApi }) =>
-                lookup.resolveAndValidate(fieldApi.form.getFieldValue('lookupBy'), value),
-              onBlurAsync: ({ value, fieldApi }) =>
-                lookup.resolveAndValidate(fieldApi.form.getFieldValue('lookupBy'), value),
+              onBlur: ({ value }) => picker.validateSelection(value),
+              onChange: ({ value }) => picker.validateSelection(value),
             }}
           >
-            {field =>
-              lookupBy === 'synchronizer-id' ? (
-                <field.TextField
-                  title="Synchronizer ID"
-                  id={`${idPrefix}-synchronizer-id`}
-                  subtitle="The id of the dedicated synchronizer to offboard, as name::fingerprint"
-                  onChange={() => lookup.reset()}
-                />
-              ) : (
-                <field.TextField
-                  title="Registration Contract ID"
-                  id={`${idPrefix}-contract-id`}
-                  subtitle="The contract id of the registration to archive. Use it to offboard a duplicate registration, which the synchronizer id does not reach."
-                  onChange={() => lookup.reset()}
-                />
-              )
-            }
+            {field => (
+              <field.SelectField
+                title="Registration Contract ID"
+                id={`${idPrefix}-contract-id`}
+                options={picker.options}
+                scrollableIdentifier
+                disabled={picker.options.length === 0}
+                placeholder={
+                  picker.options.length === 0
+                    ? 'Enter a synchronizer id to list its registrations'
+                    : undefined
+                }
+              />
+            )}
           </form.AppField>
 
-          {lookup.resolved && (
+          {resolved && (
             <ResolvedSynchronizerRegistrationFields
               id={`${idPrefix}-resolved`}
-              registration={lookup.resolved}
+              registration={resolved}
             />
           )}
 
