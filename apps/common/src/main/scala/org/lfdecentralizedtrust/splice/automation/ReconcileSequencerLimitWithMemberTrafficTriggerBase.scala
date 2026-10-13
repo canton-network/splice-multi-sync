@@ -19,10 +19,11 @@ import org.lfdecentralizedtrust.splice.util.AssignedContract
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Grants the traffic purchased via `MemberTraffic` contracts on the sequencer this trigger's
-  * connection serves, skipping contracts that name another synchronizer. One instance per
-  * sequencer, so a BFT synchronizer runs one operator app per sequencer.
+  * connection serves, skipping contracts that name another synchronizer. Only the SV app's
+  * `ReconcileSequencerLimitWithMemberTrafficTrigger` extends it: each SV runs one, which grants on
+  * that SV's own sequencer of the decentralized synchronizer.
   *
-  * This trigger currently relies on enough nodes working on the same set traffic balance request
+  * This trigger currently relies on enough SVs working on the same set traffic balance request
   * around the same time. It also depends on the sorting of tasks done in OnAssignedContractTrigger
   * to make this more likely to succeed.
   *

@@ -4,6 +4,7 @@
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
 import cats.syntax.apply.*
+import com.daml.grpc.{GrpcException, GrpcStatus}
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveLong}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -48,7 +49,8 @@ import scala.concurrent.{ExecutionContext, Future}
   *
   * On a synchronizer whose sequencers several operators run, a limit changes only once the
   * sequencer group's threshold of operators set the same one, so they set and remove the allowance
-  * together.
+  * together. A grant not applied within `trafficBalanceReconciliationDelay` is sent again on the
+  * next poll.
   */
 class ReconcileDedicatedSequencerTrafficTrigger(
     override protected val context: TriggerContext,
@@ -106,6 +108,22 @@ class ReconcileDedicatedSequencerTrafficTrigger(
                 s"Set the traffic limit of ${task.member} from $limit to ${current.target}"
               )
             )
+            // Where a grant needs more than one sequencer, it is not applied until enough of the
+            // sequencers' operators send the same limit, so a timeout is expected while they
+            // disagree. Retrying the task would resend it until the retries run out and then log
+            // an error, so the next poll sends it again instead. Where one sequencer is enough, a
+            // timeout is a real failure and is handled as any other.
+            .recover {
+              case GrpcException(GrpcStatus(Status.Code.DEADLINE_EXCEEDED, _), _)
+                  if sequencerState.mapping.threshold.value > 1 =>
+                logger.info(
+                  s"The grant of a traffic limit of ${current.target} for ${task.member} was not " +
+                    s"applied within $trafficBalanceReconciliationDelay: it needs " +
+                    s"${sequencerState.mapping.threshold.value} of the synchronizer's sequencers to " +
+                    "send the same limit. The next poll sends it again."
+                )
+                TaskNoop
+            }
     } yield outcome
 
   override protected def isStaleTask(task: Task)(implicit tc: TraceContext): Future[Boolean] =
@@ -150,7 +168,7 @@ object ReconcileDedicatedSequencerTrafficTrigger {
     * path and is granted unlimited traffic by [[MediatorUnlimitedTrafficTrigger]], which a purchase
     * someone made for it must not lower, and a sequencer is not charged traffic.
     */
-  def isCovered(member: Member): Boolean = member match {
+  private[automation] def isCovered(member: Member): Boolean = member match {
     case _: ParticipantId => true
     case _ => false
   }
