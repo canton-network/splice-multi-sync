@@ -19,10 +19,8 @@ export interface ResolvedSynchronizerRegistration {
   governanceParameters: GovernanceParameters;
 }
 
-/** A registration is found by its synchronizer id, or by contract id to reach a duplicate. */
 export type RegistrationLookupBy = 'synchronizer-id' | 'contract-id';
 
-/** The contract id an open offboard or set-parameters vote pins, if it is one of those. */
 export const pinnedRegistrationCid = (voteRequest: VoteRequest): string | undefined => {
   const action = voteRequest.action;
   if (action.tag !== 'ARC_DsoRules') return undefined;
@@ -37,11 +35,8 @@ export const pinnedRegistrationCid = (voteRequest: VoteRequest): string | undefi
 };
 
 interface SynchronizerRegistrationLookup {
-  /** For rendering. */
   resolved: ResolvedSynchronizerRegistration | undefined;
-  /** For submitting: current even before the re-render that follows a lookup. */
   getResolved: () => ResolvedSynchronizerRegistration | undefined;
-  /** An async field validator: resolves the registration, or returns why it cannot be targeted. */
   resolveAndValidate: (by: RegistrationLookupBy, value: string) => Promise<string | undefined>;
   reset: () => void;
 }
@@ -55,7 +50,6 @@ export const useSynchronizerRegistrationLookup = (): SynchronizerRegistrationLoo
   const voteRequestsQuery = useListDsoRulesVoteRequests();
   const [resolved, setResolvedState] = useState<ResolvedSynchronizerRegistration | undefined>();
   const resolvedRef = useRef<ResolvedSynchronizerRegistration | undefined>(undefined);
-  // The input the current registration was resolved from.
   const resolvedInput = useRef('');
   const setResolved = (
     registration: ResolvedSynchronizerRegistration | undefined,
@@ -65,18 +59,14 @@ export const useSynchronizerRegistrationLookup = (): SynchronizerRegistrationLoo
     resolvedInput.current = registration ? inputKey : '';
     setResolvedState(registration);
   };
-  // The input whose lookup is current, so a slower, older lookup cannot overwrite it.
   const latestInput = useRef('');
 
   const resolveAndValidate = async (by: RegistrationLookupBy, value: string) => {
     const input = value.trim();
     const inputKey = `${by}:${input}`;
     latestInput.current = inputKey;
-    // Submitting runs every validator again, so the same input is often looked up twice. It
-    // keeps its registration meanwhile: the form must not see it disappear and come back.
     if (resolvedInput.current !== inputKey) setResolved(undefined);
 
-    // The field's synchronous validator reports a malformed input.
     const syntaxError =
       by === 'synchronizer-id' ? validateSynchronizerId(input) : validateContractId(input);
     if (syntaxError) return undefined;
@@ -104,8 +94,6 @@ export const useSynchronizerRegistrationLookup = (): SynchronizerRegistrationLoo
 
     const registration = Contract.decodeOpenAPI(contract, RegisteredSynchronizer);
 
-    // Executing either vote archives the registration, so a second open vote on the same
-    // contract would fail when executed.
     const targeted = (voteRequestsQuery.data ?? []).some(
       vr => pinnedRegistrationCid(vr.payload) === registration.contractId
     );
@@ -114,7 +102,6 @@ export const useSynchronizerRegistrationLookup = (): SynchronizerRegistrationLoo
       return 'Another open proposal already targets this registration. Only one of them can be executed.';
     }
 
-    // The same contract found again is kept as it is, so nothing that depends on it re-runs.
     if (resolvedRef.current?.contractId === registration.contractId) {
       resolvedInput.current = inputKey;
       return undefined;

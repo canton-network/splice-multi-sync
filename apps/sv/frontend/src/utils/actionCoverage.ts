@@ -69,5 +69,4 @@ type UiVoteTag = UiVoteTagsOf<typeof dsoActionCoverage> | UiVoteTagsOf<typeof am
 type Exactly<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assert<T extends true> = T;
 
-/** Fails to compile unless the UI votes above are exactly SupportedActionTag. */
 export type UiVoteCoverageCheck = Assert<Exactly<UiVoteTag, SupportedActionTag>>;

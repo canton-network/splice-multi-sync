@@ -106,11 +106,9 @@ export interface SvAdminClient {
   lookupFeaturedAppRightByContractId: (
     contractId: string
   ) => Promise<LookupFeaturedAppRightByContractIdResponse>;
-  /** Resolves to undefined when the synchronizer is not registered (the endpoint 404s). */
   lookupSynchronizerRegistration: (
     synchronizerId: string
   ) => Promise<LookupSynchronizerRegistrationResponse | undefined>;
-  /** `registration` is absent when the contract is no longer active. */
   lookupSynchronizerRegistrationByContractId: (
     contractId: string
   ) => Promise<LookupSynchronizerRegistrationByContractIdResponse>;

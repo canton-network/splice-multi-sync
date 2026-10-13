@@ -6,8 +6,6 @@ import type { ConfigChange } from '../../utils/types';
 import { validateDiscountFactor } from './formValidators';
 
 export type GovernanceParameterKey = keyof GovernanceParameters;
-
-/** The form's string value for each parameter. */
 export type GovernanceParameterValues = Record<GovernanceParameterKey, string>;
 
 type GovernanceParameterFields = {
@@ -20,9 +18,6 @@ type GovernanceParameterFields = {
   };
 };
 
-// One entry per field of the Daml GovernanceParameters record. A set-parameters vote replaces
-// the whole record, so a field added in Daml has to be stated too: this stops compiling until
-// it has an entry, and the form renders one input per entry rather than a fixed list.
 export const governanceParameterFields: GovernanceParameterFields = {
   discountFactor: {
     label: 'Traffic Discount',
@@ -55,7 +50,6 @@ export const fromGovernanceParameterValues = (
     governanceParameterKeys.map(key => [key, governanceParameterFields[key].fromForm(values[key])])
   ) as GovernanceParameters;
 
-/** One row per parameter; the current value is left empty when it is not known. */
 export const governanceParameterChanges = (
   current: GovernanceParameters | undefined,
   proposed: GovernanceParameters

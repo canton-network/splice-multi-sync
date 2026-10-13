@@ -14,10 +14,6 @@ import { CopyableIdentifier, MemberIdentifier } from '../../beta';
 import { ConfigValuesChanges } from '../ConfigValuesChanges';
 import { DetailItem } from './DetailItem';
 
-// Both votes pin a registration by contract id, which is all their payload carries. The
-// registration itself gives the synchronizer id, operator and current parameters, but only
-// while it is active: once archived (offboarded, or replaced by a parameters change) it
-// cannot be looked up any more.
 const useRegistrationByContractId = (contractId: string) => {
   const svAdminClient = useSvAdminClient();
   return useQuery({
@@ -34,7 +30,6 @@ const useRegistrationByContractId = (contractId: string) => {
 interface PinnedRegistrationProps {
   idPrefix: string;
   registeredSynchronizerCid: string;
-  /** Whether the vote can still be executed, which is when an archived registration matters. */
   isOpen: boolean;
   registration: RegisteredSynchronizer | null | undefined;
   isLoaded: boolean;

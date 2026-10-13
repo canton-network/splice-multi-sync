@@ -46,7 +46,6 @@ import { ResolvedSynchronizerRegistrationFields } from './ResolvedSynchronizerRe
 
 interface ExtraFormField {
   synchronizerId: string;
-  /** The whole record: the vote replaces it, so every parameter is stated. */
   governanceParameters: GovernanceParameterValues;
 }
 
@@ -86,7 +85,6 @@ export const SetSynchronizerGovernanceParametersForm: React.FC = _ => {
     defaultValues,
 
     onSubmit: async ({ value }) => {
-      // The field's async validator resolved it; without it there is nothing to target.
       const resolved = lookup.getResolved();
       if (!resolved) return;
       const action: ActionRequiringConfirmation = {
@@ -135,8 +133,6 @@ export const SetSynchronizerGovernanceParametersForm: React.FC = _ => {
     },
   });
 
-  // Start from the registration's current parameters, so the SV edits what is there. Only once
-  // per registration: looking the same one up again (submitting does) keeps the SV's edits.
   const resolved = lookup.resolved;
   const prefilledFor = useRef<string | undefined>(undefined);
   useEffect(() => {

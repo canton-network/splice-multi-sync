@@ -11,11 +11,9 @@ import { governanceParameterFields, governanceParameterKeys } from './governance
 interface ResolvedSynchronizerRegistrationProps {
   id: string;
   registration: ResolvedSynchronizerRegistration;
-  /** Also list the registration's current governance parameters. */
   showParameters?: boolean;
 }
 
-/** What a proposal would target, shown before the SV proposes it. */
 export const ResolvedSynchronizerRegistrationFields: React.FC<
   ResolvedSynchronizerRegistrationProps
 > = ({ id, registration, showParameters = false }) => (
