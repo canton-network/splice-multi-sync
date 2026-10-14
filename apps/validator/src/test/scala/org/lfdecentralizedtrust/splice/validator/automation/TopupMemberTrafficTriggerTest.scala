@@ -109,21 +109,135 @@ class TopupMemberTrafficTriggerTest extends AnyWordSpec with BaseTest {
 
   "TopupMemberTrafficTrigger.fundedTasks" should {
 
-    // Costs only; what they are attached to does not affect the allocation.
-    val candidates = Seq(globalAlias -> BigDecimal(100), dedicatedAlias -> BigDecimal(100))
+    // A purchase, and whether it leaves its member able to submit. What else it is attached to
+    // does not affect the allocation.
+    final case class Purchase(name: String, unblocks: Boolean = true)
+    def fundedTasks(candidates: Seq[Seq[(Purchase, BigDecimal)]], budget: Option[BigDecimal]) =
+      TopupMemberTrafficTrigger.fundedTasks(candidates, budget)(_.unblocks)
+
+    val global = Purchase("global")
+    val dedicated = Purchase("dedicated")
+    val candidates = Seq(Seq(global -> BigDecimal(100)), Seq(dedicated -> BigDecimal(100)))
 
     "fund only what the balance covers, in order" in {
       // Enough for either one alone, not for both, so the second one misses out.
-      val (funded, unfunded) =
-        TopupMemberTrafficTrigger.fundedTasks(candidates, Some(BigDecimal(150)))
-      funded shouldBe Seq(globalAlias)
-      unfunded shouldBe Seq(dedicatedAlias)
+      fundedTasks(candidates, Some(BigDecimal(150))) shouldBe (Seq(global), Seq(dedicated))
     }
 
     "fund every target when the balance does not bound the purchases" in {
-      val (funded, unfunded) = TopupMemberTrafficTrigger.fundedTasks(candidates, None)
-      funded shouldBe Seq(globalAlias, dedicatedAlias)
-      unfunded shouldBe empty
+      fundedTasks(candidates, None) shouldBe (Seq(global, dedicated), Seq.empty)
+    }
+
+    // A member below zero: its shortfall with the top-up, or the top-up alone, which leaves it
+    // below zero where the shortfall is larger than the top-up.
+    val topupAndShortfall = Purchase("top-up and shortfall")
+    val topupBelowZero = Purchase("top-up", unblocks = false)
+    val withShortfall =
+      Seq(topupAndShortfall -> BigDecimal(300), topupBelowZero -> BigDecimal(100))
+
+    "buy the shortfall with the top-up where the balance covers both" in {
+      fundedTasks(Seq(withShortfall), Some(BigDecimal(300))) shouldBe
+        (Seq(topupAndShortfall), Seq.empty)
+    }
+
+    "fall back to the top-up alone where the balance does not cover the shortfall too" in {
+      fundedTasks(Seq(withShortfall), Some(BigDecimal(150))) shouldBe
+        (Seq(topupBelowZero), Seq.empty)
+    }
+
+    "report the top-up alone where the balance does not cover even that" in {
+      fundedTasks(Seq(withShortfall), Some(BigDecimal(50))) shouldBe
+        (Seq.empty, Seq(topupBelowZero))
+    }
+
+    "buy the shortfall with the top-up where the balance does not bound the purchases" in {
+      fundedTasks(Seq(withShortfall), None) shouldBe (Seq(topupAndShortfall), Seq.empty)
+    }
+
+    // A member 500 below zero with a top-up of 100, ahead of a healthy target whose top-up costs
+    // 100 too.
+    val blocked = Seq(
+      Purchase("blocked: top-up and shortfall") -> BigDecimal(600),
+      Purchase("blocked: top-up", unblocks = false) -> BigDecimal(100),
+    )
+    val healthy = Purchase("healthy")
+    val healthyTarget = Seq(healthy -> BigDecimal(100))
+
+    "fund a later target before a top-up that leaves an earlier member below zero" in {
+      // Enough for one top-up: the healthy target's keeps it submitting, the other would not get
+      // its member submitting again.
+      fundedTasks(Seq(blocked, healthyTarget), Some(BigDecimal(150))) shouldBe
+        (Seq(healthy), Seq(blocked.last._1))
+    }
+
+    "fund a top-up that leaves its member below zero with what the other targets leave" in {
+      fundedTasks(Seq(blocked, healthyTarget), Some(BigDecimal(250))) shouldBe
+        (Seq(blocked.last._1, healthy), Seq.empty)
+    }
+
+    "fund a top-up that covers the shortfall alone ahead of later targets" in {
+      // A shortfall smaller than the top-up, so the top-up alone gets the member submitting again.
+      val coveredByTopup = Purchase("top-up covering the shortfall")
+      val smallShortfall = Seq(
+        Purchase("top-up and small shortfall") -> BigDecimal(120),
+        coveredByTopup -> BigDecimal(100),
+      )
+      // Enough for one top-up, which goes to the first target.
+      fundedTasks(Seq(smallShortfall, healthyTarget), Some(BigDecimal(110))) shouldBe
+        (Seq(coveredByTopup), Seq(healthy))
+    }
+
+    "fund each candidate's first purchase where the balance does not bound the purchases" in {
+      fundedTasks(Seq(blocked, healthyTarget), None) shouldBe
+        (Seq(blocked.head._1, healthy), Seq.empty)
+    }
+  }
+
+  "TopupMemberTrafficTrigger.shortfall" should {
+
+    "be what a balance below zero needs to reach zero" in {
+      TopupMemberTrafficTrigger.shortfall(-300L) shouldBe 300L
+    }
+
+    "be zero for a balance at or above zero" in {
+      TopupMemberTrafficTrigger.shortfall(0L) shouldBe 0L
+      TopupMemberTrafficTrigger.shortfall(500L) shouldBe 0L
+    }
+  }
+
+  "TopupMemberTrafficTrigger.unblocks" should {
+
+    "hold for a purchase that takes the balance above zero" in {
+      TopupMemberTrafficTrigger.unblocks(
+        trafficToBuy = 2_300L,
+        extraTrafficRemainder = -300L,
+      ) shouldBe true
+      TopupMemberTrafficTrigger.unblocks(
+        trafficToBuy = 301L,
+        extraTrafficRemainder = -300L,
+      ) shouldBe true
+    }
+
+    "not hold for a purchase that leaves the balance at or below zero" in {
+      TopupMemberTrafficTrigger.unblocks(
+        trafficToBuy = 300L,
+        extraTrafficRemainder = -300L,
+      ) shouldBe false
+      TopupMemberTrafficTrigger.unblocks(
+        trafficToBuy = 2_000L,
+        extraTrafficRemainder = -2_001L,
+      ) shouldBe false
+    }
+
+    "hold for any purchase at a balance at or above zero" in {
+      TopupMemberTrafficTrigger.unblocks(
+        trafficToBuy = 2_000L,
+        extraTrafficRemainder = 0L,
+      ) shouldBe true
+      TopupMemberTrafficTrigger.unblocks(
+        trafficToBuy = 2_000L,
+        extraTrafficRemainder = 500L,
+      ) shouldBe true
     }
   }
 }

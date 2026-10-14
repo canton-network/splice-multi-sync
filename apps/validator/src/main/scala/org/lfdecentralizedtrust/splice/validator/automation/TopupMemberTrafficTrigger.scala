@@ -116,34 +116,56 @@ class TopupMemberTrafficTrigger(
       )
       validatorWallet <- ValidatorUtil.getValidatorWallet(store, walletManager)
       budget <- TopupUtil.topupBudget(scanConnection, validatorWallet.store)
-      candidates <- MonadUtil.sequentialTraverseFilter(targets)(target =>
+      candidates <- MonadUtil.sequentialTraverse(targets)(target =>
         // The traversal is sequential, so a failure would otherwise cost every remaining target
         // its top-up for this poll. Info, not warn: a synchronizer is legitimately unreachable
         // for a stretch of polls while it is being upgraded or recovered.
         retrieveTaskFor(target, activeSynchronizerId).recover { case ex =>
           logger.info(s"Skipping the top-up for ${target.alias} in this poll", ex)
-          None
+          Seq.empty
         }
       )
-      (funded, unfunded) = TopupMemberTrafficTrigger.fundedTasks(candidates, budget)
+      (funded, unfunded) = TopupMemberTrafficTrigger.fundedTasks(
+        candidates.filter(_.nonEmpty),
+        budget,
+      )(_.unblocks)
       // we do not even submit the topup tx if the validator does not have sufficient funds because we know
       // the tx would fail but it would still drain synchronizer traffic which we would like to avoid (see #11915).
       _ = unfunded.foreach(task =>
         logger.warn(
           s"Insufficient funds to buy configured traffic amount. Please ensure that the validator's wallet has enough amulets to purchase " +
-            s"${BigDecimal(task.target.topupParameters.topupAmount) / 1e6} MB of traffic on ${task.target.alias} to continue healthy operation."
+            s"${BigDecimal(task.trafficToBuy) / 1e6} MB of traffic on ${task.target.alias} to continue healthy operation." +
+            (if (task.shortfall > 0)
+               s" This member is also ${BigDecimal(task.shortfall) / 1e6} MB below zero there: for one purchase to get it submitting again, the wallet needs enough amulets for " +
+                 s"${BigDecimal(task.trafficToBuy + task.shortfall) / 1e6} MB, the top-up and the shortfall together."
+             else "")
         )
       )
+      // A member below zero that gets the top-up alone, because the wallet does not cover both.
+      _ = funded
+        .filter(task => task.shortfall > 0 && task.extraTraffic == 0)
+        .foreach(task =>
+          logger.warn(
+            s"Insufficient funds to buy the ${BigDecimal(task.shortfall) / 1e6} MB of traffic this member is below zero on ${task.target.alias} " +
+              "together with the configured top-up, so only the top-up is bought" +
+              (if (task.unblocks) ". "
+               else ", and the member cannot submit there until its top-ups have covered it. ") +
+              "Please ensure that the validator's wallet has enough amulets to buy both."
+          )
+        )
     } yield funded
   }
 
-  /** The task this target is due, paired with what it would cost the wallet. */
+  /** The purchases this target is due, preferred first, each paired with what it would cost the
+    * wallet: for a member below zero, its shortfall together with the configured top-up, and the
+    * top-up alone in case the wallet does not cover both.
+    */
   private def retrieveTaskFor(
       target: TopupMemberTrafficTrigger.Target,
       submissionSynchronizerId: SynchronizerId,
   )(implicit
       tc: TraceContext
-  ): Future[Option[(TopupMemberTrafficTrigger.Task, BigDecimal)]] =
+  ): Future[Seq[(TopupMemberTrafficTrigger.Task, BigDecimal)]] =
     for {
       currentTrafficState <- participantAdminConnection.getParticipantTrafficState(
         target.synchronizerId
@@ -151,44 +173,54 @@ class TopupMemberTrafficTrigger(
       registration <-
         if (!target.needsRegistration) Future.successful(None)
         else scanConnection.lookupSynchronizerRegistration(target.synchronizerId.toProtoPrimitive)
-      task <-
+      purchases <-
         if (target.needsRegistration && registration.isEmpty) {
           // A buy without it is rejected on-ledger, and lastPurchasedAt never advances, so
           // nothing would stop the retry.
           logger.info(
             s"Not topping up ${target.alias}: Scan serves no registration for ${target.synchronizerId}"
           )
-          Future.successful(None)
+          Future.successful(Seq.empty)
         } else
           for {
             topupState <- getOrCreateValidatorTopupState(target, submissionSynchronizerId)
-            cost <-
-              if (!wantsTopup(target, currentTrafficState, topupState)) Future.successful(None)
-              else
-                TopupUtil
-                  // The cost is derived from this target's throughput and interval.
-                  .minWalletBalanceForTopup(
-                    scanConnection,
-                    target.topupConfig,
-                    clock,
-                    registration,
-                  )
-                  .map(Some(_))
-          } yield cost.map(
-            TopupMemberTrafficTrigger.Task(
-              target,
-              topupState,
-              currentTrafficState,
-              registration,
-            ) -> _
-          )
-    } yield task
+            tasks <-
+              if (!wantsTopup(target, currentTrafficState, topupState)) Future.successful(Seq.empty)
+              else {
+                val shortfall =
+                  TopupMemberTrafficTrigger.shortfall(currentTrafficState.extraTrafficRemainder)
+                // The top-up alone still pays a shortfall down, one interval at a time.
+                val extraTrafficOptions = if (shortfall > 0) Seq(shortfall, 0L) else Seq(0L)
+                // The cost is derived from this target's throughput and interval, plus the
+                // extra traffic bought with the top-up.
+                Future.traverse(extraTrafficOptions)(extraTraffic =>
+                  TopupUtil
+                    .minWalletBalanceForTopup(
+                      scanConnection,
+                      target.topupConfig,
+                      clock,
+                      registration,
+                      extraTraffic,
+                    )
+                    .map(
+                      TopupMemberTrafficTrigger.Task(
+                        target,
+                        topupState,
+                        currentTrafficState,
+                        registration,
+                        extraTraffic,
+                      ) -> _
+                    )
+                )
+              }
+          } yield tasks
+    } yield purchases
 
   override protected def completeTask(
       task: TopupMemberTrafficTrigger.Task
   )(implicit tc: TraceContext): Future[TaskOutcome] = {
     val coBuyMemberTraffic = new CO_BuyMemberTraffic(
-      task.target.topupParameters.topupAmount,
+      task.trafficToBuy,
       task.topupState.payload.memberId,
       task.topupState.payload.synchronizerId,
       task.topupState.payload.migrationId,
@@ -354,23 +386,43 @@ object TopupMemberTrafficTrigger {
     )
   }
 
-  /** Splits candidates into the ones the balance covers and the ones it does not, in target order.
-    * Every buy draws on the same wallet, so a target is only funded once the ones before it are.
-    * A `None` budget does not bound the purchases.
+  /** Splits candidates into the purchases the balance covers and the candidates it covers none
+    * of, both in target order. Each candidate lists its purchases preferred first, and every buy
+    * draws on the same wallet, so the balance is allocated in two passes, each in target order.
+    * The first gives each candidate its first purchase that the balance covers and that `unblocks`
+    * its member, leaving it able to submit. The second gives each candidate still unfunded its
+    * first purchase the rest covers, such as a top-up that pays a shortfall down without covering
+    * it. A purchase that leaves its member blocked thus cannot take the balance from one that keeps
+    * a later target submitting. A candidate the balance covers none of is reported by its last,
+    * cheapest, purchase. A `None` budget funds each candidate's first purchase.
     */
   private[automation] def fundedTasks[A](
-      candidates: Seq[(A, BigDecimal)],
+      candidates: Seq[Seq[(A, BigDecimal)]],
       budget: Option[BigDecimal],
-  ): (Seq[A], Seq[A]) = budget match {
-    case None => (candidates.map(_._1), Seq.empty)
+  )(unblocks: A => Boolean): (Seq[A], Seq[A]) = budget match {
+    case None => (candidates.flatMap(_.headOption.map(_._1)), Seq.empty)
     case Some(balance) =>
-      val (funded, unfunded, _) =
-        candidates.foldLeft((Seq.empty[A], Seq.empty[A], balance)) {
-          case ((funded, unfunded, remaining), (task, cost)) =>
-            if (cost <= remaining) (funded :+ task, unfunded, remaining - cost)
-            else (funded, unfunded :+ task, remaining)
+      // One pass in target order: each candidate not funded yet gets its first purchase that the
+      // balance left covers and that is `eligible`.
+      def fund(
+          chosen: Seq[Option[A]],
+          balanceLeft: BigDecimal,
+          eligible: A => Boolean,
+      ): (Seq[Option[A]], BigDecimal) =
+        candidates.zip(chosen).foldLeft((Seq.empty[Option[A]], balanceLeft)) {
+          case ((done, remaining), (_, Some(task))) => (done :+ Some(task), remaining)
+          case ((done, remaining), (purchases, None)) =>
+            purchases.find { case (task, cost) => cost <= remaining && eligible(task) } match {
+              case Some((task, cost)) => (done :+ Some(task), remaining - cost)
+              case None => (done :+ None, remaining)
+            }
         }
-      (funded, unfunded)
+      val (unblocking, balanceLeft) = fund(candidates.map(_ => Option.empty[A]), balance, unblocks)
+      val (funded, _) = fund(unblocking, balanceLeft, _ => true)
+      val unfunded = candidates.zip(funded).collect { case (purchases, None) =>
+        purchases.lastOption.map(_._1)
+      }
+      (funded.flatten, unfunded.flatten)
   }
 
   /** Resolves the configured top-up targets against the synchronizers the participant is
@@ -422,6 +474,17 @@ object TopupMemberTrafficTrigger {
       // Two aliases can resolve to one synchronizer; topupTargets is global-first, so global wins.
       .distinctBy(_.synchronizerId)
 
+  /** Traffic below zero, as once a dedicated synchronizer's operator removes an outage traffic
+    * allowance the member used. The member cannot submit until its purchases cover it.
+    */
+  def shortfall(extraTrafficRemainder: Long): Long = math.max(0L, -extraTrafficRemainder)
+
+  /** Whether buying `trafficToBuy` leaves a member with `extraTrafficRemainder` able to submit,
+    * that is above zero: at zero, with no base rate, it still cannot.
+    */
+  def unblocks(trafficToBuy: Long, extraTrafficRemainder: Long): Boolean =
+    trafficToBuy > shortfall(extraTrafficRemainder)
+
   final case class Task(
       target: Target,
       topupState: Contract[ValidatorTopUpState.ContractId, ValidatorTopUpState],
@@ -429,12 +492,26 @@ object TopupMemberTrafficTrigger {
       registration: Option[
         ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
       ],
+      // Bought together with the configured top-up: the member's shortfall, so that one purchase
+      // covers it, or 0 for the top-up alone. That is every ordinary top-up, and the fallback
+      // where the wallet does not cover both.
+      extraTraffic: Long,
   ) extends PrettyPrinting {
+
+    def shortfall: Long = TopupMemberTrafficTrigger.shortfall(trafficState.extraTrafficRemainder)
+
+    def trafficToBuy: Long = target.topupParameters.topupAmount + extraTraffic
+
+    /** Whether the member can submit once this purchase is granted. */
+    def unblocks: Boolean =
+      TopupMemberTrafficTrigger.unblocks(trafficToBuy, trafficState.extraTrafficRemainder)
+
     override def pretty: Pretty[Task] =
       prettyOfClass[Task](
         param("target", _.target),
         param("topupState", _.topupState),
         param("trafficState", _.trafficState),
+        param("extraTraffic", _.extraTraffic),
       )
   }
 }
