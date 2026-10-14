@@ -9,20 +9,15 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveLon
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
-import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 import org.lfdecentralizedtrust.splice.automation.{
   PollingParallelTaskExecutionTrigger,
-  TaskNoop,
   TaskOutcome,
   TaskSuccess,
   TriggerContext,
 }
-import org.lfdecentralizedtrust.splice.environment.{
-  SequencerAdminConnection,
-  SynchronizerNodeService,
-}
+import org.lfdecentralizedtrust.splice.environment.SynchronizerNodeService
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
 import org.lfdecentralizedtrust.splice.syncoperator.SyncOperatorSynchronizerNode
 import org.lfdecentralizedtrust.splice.syncoperator.automation.ReconcileDedicatedSequencerTrafficTrigger.Task
@@ -53,8 +48,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * stay stable if that threshold is above half the active sequencers: with a lower one, the
   * sequencers on each side can reach it and override each other's limits on every poll. Above
   * half, a split where neither side reaches it leaves the limits where they are until enough of
-  * them send the same limit. A grant not applied within `trafficBalanceReconciliationDelay` is sent
-  * again on the next poll.
+  * them send the same limit.
   */
 class ReconcileDedicatedSequencerTrafficTrigger(
     override protected val context: TriggerContext,
@@ -72,7 +66,7 @@ class ReconcileDedicatedSequencerTrafficTrigger(
 
   override protected def retrieveTasks()(implicit tc: TraceContext): Future[Seq[Task]] =
     for {
-      connection <- sequencerAdminConnection()
+      connection <- synchronizerNodeService.sequencerAdminConnection()
       (states, totals) <- (
         // An empty filter lists every member the sequencer knows.
         connection.listSequencerTrafficControlState(),
@@ -86,7 +80,7 @@ class ReconcileDedicatedSequencerTrafficTrigger(
 
   override protected def completeTask(task: Task)(implicit tc: TraceContext): Future[TaskOutcome] =
     for {
-      connection <- sequencerAdminConnection()
+      connection <- synchronizerNodeService.sequencerAdminConnection()
       // Read again, so the grant carries the serial the sequencer expects next.
       (trafficState, sequencerState) <- (
         connection.getSequencerTrafficControlState(task.member),
@@ -96,48 +90,18 @@ class ReconcileDedicatedSequencerTrafficTrigger(
       // the total, or its grant moved the serial and this one is refused and retried.
       current <- currentTask(task)
       limit = trafficState.extraTrafficLimit.value
-      outcome <-
-        if (current.isDone(limit)) Future.successful(TaskNoop)
-        else
-          connection
-            .attemptSetSequencerTrafficControlState(
-              trafficState,
-              sequencerState,
-              NonNegativeLong.tryCreate(current.target),
-              context.pollingClock,
-              trafficBalanceReconciliationDelay,
-            )
-            .flatMap { status =>
-              status.getCode match {
-                case Status.Code.OK =>
-                  Future.successful(
-                    TaskSuccess(
-                      s"Set the traffic limit of ${task.member} from $limit to ${current.target}"
-                    )
-                  )
-                // Where a grant needs more than one sequencer, it is not applied until enough of
-                // the sequencers' operators send the same limit, so it not being applied in time is
-                // expected while they disagree. Retrying the task would resend it until the retries
-                // run out and then log an error, so the next poll sends it again instead. A call to
-                // the sequencer that times out fails the future rather than returning this status,
-                // so it is handled as any other failure, as is a grant not applied in time where
-                // one sequencer is enough.
-                case Status.Code.DEADLINE_EXCEEDED if sequencerState.mapping.threshold.value > 1 =>
-                  logger.info(
-                    s"The grant of a traffic limit of ${current.target} for ${task.member} was " +
-                      s"not applied within $trafficBalanceReconciliationDelay: it needs " +
-                      s"${sequencerState.mapping.threshold.value} of the synchronizer's " +
-                      "sequencers to send the same limit. The next poll sends it again."
-                  )
-                  Future.successful(TaskNoop)
-                case _ => Future.failed(status.asRuntimeException())
-              }
-            }
-    } yield outcome
+      _ <- connection.setSequencerTrafficControlState(
+        trafficState,
+        sequencerState,
+        NonNegativeLong.tryCreate(current.target),
+        context.pollingClock,
+        trafficBalanceReconciliationDelay,
+      )
+    } yield TaskSuccess(s"Set the traffic limit of ${task.member} from $limit to ${current.target}")
 
   override protected def isStaleTask(task: Task)(implicit tc: TraceContext): Future[Boolean] =
     for {
-      connection <- sequencerAdminConnection()
+      connection <- synchronizerNodeService.sequencerAdminConnection()
       state <- connection.lookupSequencerTrafficControlState(task.member)
       current <- currentTask(task)
     } yield state.forall(state => current.isDone(state.extraTrafficLimit.value))
@@ -146,29 +110,6 @@ class ReconcileDedicatedSequencerTrafficTrigger(
   // was retrieved is not taken back.
   private def currentTask(task: Task)(implicit tc: TraceContext): Future[Task] =
     store.getTotalPurchasedMemberTraffic(task.member).map(total => task.copy(total = total))
-
-  // The purchased totals are this operator's synchronizer's, so limits are only set on a sequencer
-  // that serves it: the one this app started with, or its successor once an upgrade switched over.
-  private def sequencerAdminConnection()(implicit
-      tc: TraceContext
-  ): Future[SequencerAdminConnection] =
-    for {
-      connection <- synchronizerNodeService.sequencerAdminConnection()
-      served <- connection.getStatus.map(_.successOption.map(_.synchronizerId.logical))
-    } yield served match {
-      case Some(synchronizerId) if synchronizerId == store.key.synchronizerId => connection
-      case Some(synchronizerId) =>
-        throw Status.FAILED_PRECONDITION
-          .withDescription(
-            s"The sequencer serves $synchronizerId, not this operator's synchronizer " +
-              s"${store.key.synchronizerId}"
-          )
-          .asRuntimeException()
-      case None =>
-        throw Status.FAILED_PRECONDITION
-          .withDescription("Sequencer is not yet initialized")
-          .asRuntimeException()
-    }
 }
 
 object ReconcileDedicatedSequencerTrafficTrigger {

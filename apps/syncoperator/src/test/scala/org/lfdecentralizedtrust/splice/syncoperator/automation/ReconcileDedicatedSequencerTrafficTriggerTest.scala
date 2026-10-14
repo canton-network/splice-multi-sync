@@ -5,22 +5,10 @@ package org.lfdecentralizedtrust.splice.syncoperator.automation
 
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.admin.api.client.data.{
-  NodeStatus,
-  SequencerAdminStatus,
-  SequencerHealthStatus,
-  SequencerStatus,
-  TopologyQueueStatus,
-}
 import com.digitalasset.canton.admin.api.client.data.topology.BaseResult
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, ProcessingTimeout}
-import com.digitalasset.canton.config.RequireTypes.{
-  NonNegativeInt,
-  NonNegativeLong,
-  PositiveInt,
-  PositiveLong,
-}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt, PositiveLong}
 import com.digitalasset.canton.crypto.{Fingerprint, TestHash}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol
@@ -32,18 +20,14 @@ import com.digitalasset.canton.topology.{
   MediatorId,
   Member,
   ParticipantId,
-  PartyId,
-  PhysicalSynchronizerId,
   SequencerId,
   SynchronizerId,
   UniqueIdentifier,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext}
 import io.grpc.{Status, StatusRuntimeException}
 import org.lfdecentralizedtrust.splice.automation.{
-  TaskNoop,
   TaskOutcome,
   TaskSuccess,
   TriggerContext,
@@ -89,7 +73,6 @@ class ReconcileDedicatedSequencerTrafficTriggerTest
   private val aliceTotal = 100L
 
   private val synchronizerId = SynchronizerId.tryFromString("dedicated::default")
-  private val otherSynchronizerId = SynchronizerId.tryFromString("other::default")
 
   "ReconcileDedicatedSequencerTrafficTrigger.tasks" should {
 
@@ -233,74 +216,45 @@ class ReconcileDedicatedSequencerTrafficTriggerTest
     val target = 150L
 
     "set a participant's limit to its target" in {
-      val f = new Fixture(threshold = 1, limit = 0L)
-      f.grantReturns(Future.successful(Status.OK))
+      val f = new Fixture(limit = 0L)
+      f.grantReturns(Future.unit)
       f.trigger.complete(task).futureValue shouldBe a[TaskSuccess]
-      verify(f.connection).attemptSetSequencerTrafficControlState(
-        any[TrafficState],
-        any[TopologyResult[SequencerSynchronizerState]],
-        eqTo(NonNegativeLong.tryCreate(target)),
-        any[Clock],
-        any[NonNegativeFiniteDuration],
-      )(any[TraceContext])
+      f.verifyGrant(target)
     }
 
-    "send no grant when the participant's current total already puts it at its target" in {
-      // Retrieved before a purchase of the whole total, which has been granted since.
-      val f = new Fixture(threshold = 1, limit = target)
-      f.trigger.complete(task.copy(total = 0L)).futureValue shouldBe TaskNoop
-      f.verifyNoGrant()
+    "set the target from the participant's total as it is now" in {
+      // Retrieved before a purchase of the whole total was ingested.
+      val f = new Fixture(limit = 0L)
+      f.grantReturns(Future.unit)
+      f.trigger.complete(task.copy(total = 0L)).futureValue shouldBe a[TaskSuccess]
+      f.verifyGrant(target)
     }
 
-    "leave a grant not applied in time to the next poll where it needs several sequencers" in {
-      val f = new Fixture(threshold = 2, limit = 0L)
-      f.grantReturns(Future.successful(Status.DEADLINE_EXCEEDED))
-      f.trigger.complete(task).futureValue shouldBe TaskNoop
-    }
-
-    "fail a grant not applied in time where one sequencer is enough" in {
-      val f = new Fixture(threshold = 1, limit = 0L)
-      f.grantReturns(Future.successful(Status.DEADLINE_EXCEEDED))
-      failureCode(f.trigger.complete(task)) shouldBe Status.Code.DEADLINE_EXCEEDED
-    }
-
-    "fail a grant whose sequencer call times out, even where several sequencers are needed" in {
-      val f = new Fixture(threshold = 2, limit = 0L)
+    "fail a grant that fails, so that it is retried" in {
+      val f = new Fixture(limit = 0L)
       f.grantReturns(Future.failed(Status.DEADLINE_EXCEEDED.asRuntimeException()))
       failureCode(f.trigger.complete(task)) shouldBe Status.Code.DEADLINE_EXCEEDED
     }
 
-    "fail a grant a concurrent change aborted, so that it is retried" in {
-      val f = new Fixture(threshold = 2, limit = 0L)
-      f.grantReturns(Future.successful(Status.ABORTED))
-      failureCode(f.trigger.complete(task)) shouldBe Status.Code.ABORTED
-    }
-
-    "set no limit on a sequencer that serves another synchronizer" in {
-      val f = new Fixture(threshold = 1, limit = 0L, served = otherSynchronizerId)
-      failureCode(f.trigger.complete(task)) shouldBe Status.Code.FAILED_PRECONDITION
-      f.verifyNoGrant()
-    }
-
     "treat a task as stale once the participant is at its target" in {
-      new Fixture(threshold = 1, limit = target).trigger.stale(task).futureValue shouldBe true
+      new Fixture(limit = target).trigger.stale(task).futureValue shouldBe true
     }
 
     "treat a task as stale once the participant's current total puts it at its target" in {
       // Retrieved before a purchase of the whole total, which has been granted since.
-      new Fixture(threshold = 1, limit = target).trigger
+      new Fixture(limit = target).trigger
         .stale(task.copy(total = 0L))
         .futureValue shouldBe true
     }
 
     "treat a task as stale once the participant has no traffic state" in {
-      new Fixture(threshold = 1, limit = 0L, hasTrafficState = false).trigger
+      new Fixture(limit = 0L, hasTrafficState = false).trigger
         .stale(task)
         .futureValue shouldBe true
     }
 
     "not treat a task as stale while the participant is not at its target" in {
-      new Fixture(threshold = 1, limit = 0L).trigger.stale(task).futureValue shouldBe false
+      new Fixture(limit = 0L).trigger.stale(task).futureValue shouldBe false
     }
   }
 
@@ -319,30 +273,14 @@ class ReconcileDedicatedSequencerTrafficTriggerTest
   private def failureCode(outcome: Future[TaskOutcome]): Status.Code =
     inside(outcome.failed.futureValue) { case e: StatusRuntimeException => e.getStatus.getCode }
 
-  /** The trigger on a mocked sequencer, store and node service, with alice at `limit` on a
-    * sequencer group of `threshold` sequencers that serves `served`.
-    */
-  private class Fixture(
-      threshold: Int,
-      limit: Long,
-      hasTrafficState: Boolean = true,
-      served: SynchronizerId = synchronizerId,
-  ) {
+  /** The trigger on a mocked sequencer, store and node service, with alice at `limit`. */
+  private class Fixture(limit: Long, hasTrafficState: Boolean = true) {
     val connection: SequencerAdminConnection = mock[SequencerAdminConnection]
     private val store = mock[SyncOperatorStore]
     private val nodeService = mock[SynchronizerNodeService[SyncOperatorSynchronizerNode]]
 
     when(nodeService.sequencerAdminConnection()(any[TraceContext]))
       .thenReturn(Future.successful(connection))
-    when(connection.getStatus(any[TraceContext]))
-      .thenReturn(Future.successful(sequencerStatus(served)))
-    when(store.key).thenReturn(
-      SyncOperatorStore.Key(
-        PartyId.tryFromProtoPrimitive("operator::default"),
-        PartyId.tryFromProtoPrimitive("dso::default"),
-        synchronizerId,
-      )
-    )
     when(store.getTotalPurchasedMemberTraffic(eqTo(alice))(any[TraceContext]))
       .thenReturn(Future.successful(aliceTotal))
     private val trafficState = TrafficState(
@@ -362,26 +300,26 @@ class ReconcileDedicatedSequencerTrafficTriggerTest
     when(connection.lookupSequencerTrafficControlState(eqTo(alice))(any[TraceContext]))
       .thenReturn(Future.successful(Option.when(hasTrafficState)(trafficState)))
     when(connection.getSequencerSynchronizerState(any[TopologySnapshot])(any[TraceContext]))
-      .thenReturn(Future.successful(sequencerState(threshold)))
+      .thenReturn(Future.successful(sequencerState(threshold = 1)))
 
     val trigger = new TestTrigger(store, nodeService)
 
-    def grantReturns(status: Future[Status]): Unit =
+    def grantReturns(result: Future[Unit]): Unit =
       when(
-        connection.attemptSetSequencerTrafficControlState(
+        connection.setSequencerTrafficControlState(
           any[TrafficState],
           any[TopologyResult[SequencerSynchronizerState]],
           any[NonNegativeLong],
           any[Clock],
           any[NonNegativeFiniteDuration],
         )(any[TraceContext])
-      ).thenReturn(status)
+      ).thenReturn(result)
 
-    def verifyNoGrant(): Unit =
-      verify(connection, never).attemptSetSequencerTrafficControlState(
+    def verifyGrant(target: Long): Unit =
+      verify(connection).setSequencerTrafficControlState(
         any[TrafficState],
         any[TopologyResult[SequencerSynchronizerState]],
-        any[NonNegativeLong],
+        eqTo(NonNegativeLong.tryCreate(target)),
         any[Clock],
         any[NonNegativeFiniteDuration],
       )(any[TraceContext])
@@ -401,26 +339,6 @@ class ReconcileDedicatedSequencerTrafficTriggerTest
     def stale(task: Task): Future[Boolean] = isStaleTask(task)
   }
 
-  private def sequencerStatus(served: SynchronizerId): NodeStatus[SequencerStatus] =
-    NodeStatus.Success(
-      SequencerStatus(
-        uid = UniqueIdentifier.tryCreate("sequencer", "default"),
-        synchronizerId =
-          PhysicalSynchronizerId(served, NonNegativeInt.tryCreate(0), ProtocolVersion.latest),
-        uptime = java.time.Duration.ZERO,
-        ports = Map.empty,
-        connectedParticipants = Seq.empty,
-        connectedMediators = Seq.empty,
-        sequencer = SequencerHealthStatus(isActive = true),
-        topologyQueue = TopologyQueueStatus(0, 0, 0),
-        admin = SequencerAdminStatus(acceptsAdminChanges = true),
-        components = Seq.empty,
-        version = ReleaseVersion.current,
-        protocolVersion = ProtocolVersion.latest,
-      )
-    )
-
-  // A group of `threshold` sequencers, all of which have to send a grant.
   private def sequencerState(threshold: Int): TopologyResult[SequencerSynchronizerState] =
     TopologyResult(
       BaseResult(
