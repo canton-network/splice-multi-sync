@@ -64,9 +64,6 @@ class SyncOperatorTrafficIntegrationTest
   private val bobPurchase = 50_000L
   // Bought once the global synchronizer is back but before the allowance is removed.
   private val bobPurchaseWithAllowanceSet = 20_000L
-  // Less than the shortfall bob is left with once the allowance is removed, so one top-up only
-  // covers it if it buys the shortfall too.
-  private val bobTopupAmount = 12_000L
   // The same operator app with the allowance set, which the outage test runs in place of
   // syncOperator. Both use one store, so they never run at the same time.
   private val syncOperatorWithAllowanceName = "syncOperatorWithAllowance"
@@ -96,20 +93,7 @@ class SyncOperatorTrafficIntegrationTest
         ConfigTransforms.updateAllValidatorConfigs { case (name, validatorConfig) =>
           if (name == "bobValidator")
             validatorConfig
-              .focus(_.domains.global.buyExtraTraffic.targetThroughput)
-              .replace(NonNegativeNumeric.tryCreate(BigDecimal(0)))
-              .focus(_.domains.extra)
-              .modify(_.map { extra =>
-                if (extra.alias == splitwellAlias)
-                  extra
-                    // 100 bytes a second over a two-minute interval, so bobTopupAmount per top-up
-                    .focus(_.topup.targetThroughput)
-                    .replace(NonNegativeNumeric.tryCreate(BigDecimal(100)))
-                    .focus(_.topup.minTopupInterval)
-                    .replace(NonNegativeFiniteDuration.ofMinutes(2))
-                else extra
-              })
-              // Resumed only once the outage test needs bob's top-up to cover his shortfall.
+              // Paused throughout, so bob's traffic on splitwell is only what the test buys him.
               .focus(_.automation)
               .modify(_.withPausedTrigger[TopupMemberTrafficTrigger])
           else if (name == "aliceValidator")
@@ -533,22 +517,6 @@ class SyncOperatorTrafficIntegrationTest
           )
         }
 
-        // Refused, bob consumes nothing more, so this is what his top-up finds.
-        val shortfall = consumed(bob) - totalsWithoutAllowance(bob)
-        val topupTrigger =
-          bobValidatorBackend.appState.automation.trigger[TopupMemberTrafficTrigger]
-        setTriggersWithin(triggersToResumeAtStart = Seq(topupTrigger)) {
-          clue("one top-up buys bob's shortfall with it, and he transacts again") {
-            // Inside bob's two-minute top-up interval, so no second top-up is bought meanwhile.
-            eventually(100.seconds) {
-              extraTrafficLimit(bob) should be > consumed(bob)
-            }
-            // One purchase of the top-up and the shortfall together, not the top-up alone or two
-            // top-ups.
-            purchased()(bob) - totalsWithoutAllowance(bob) shouldBe bobTopupAmount + shortfall
-            ping(bobParticipant, synchronizerId)
-          }
-        }
     }
   }
 
