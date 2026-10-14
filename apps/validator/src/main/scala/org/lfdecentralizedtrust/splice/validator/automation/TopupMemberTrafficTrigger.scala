@@ -85,8 +85,12 @@ class TopupMemberTrafficTrigger(
 
   // Per target, the traffic state that its last shortfall purchase bought the shortfall of. The
   // participant's traffic state only reflects a purchase once the synchronizer's operator has
-  // granted it, so until that state is updated, the shortfall it shows is already bought. In
-  // memory only: after a restart, a shortfall whose purchase is not granted yet is bought again.
+  // granted it, so until that state is updated, the shortfall it shows is already bought. Any
+  // traffic update ends that, also a grant of some other purchase while ours is still pending,
+  // and the remaining shortfall is then bought again: that traffic stays in the member's balance,
+  // so it is only bought early. Only a purchase seen to succeed is recorded, and only in memory,
+  // so after a restart, or after a shortfall purchase whose outcome was not seen, a shortfall whose
+  // purchase is not granted yet is also bought again.
   private val lastShortfallPurchases = TrieMap.empty[SynchronizerId, TrafficState]
 
   override protected def retrieveTasks()(implicit
@@ -160,15 +164,18 @@ class TopupMemberTrafficTrigger(
         .filter(task =>
           task.shortfall > 0 && !task.shortfallAwaitingGrant && task.extraTraffic == 0
         )
-        .foreach(task =>
-          logger.warn(
+        .foreach { task =>
+          val message =
             s"Insufficient funds to buy the ${BigDecimal(task.shortfall) / 1e6} MB of traffic this member is below zero on ${task.target.alias} " +
-              "together with the configured top-up, so only the top-up will be bought" +
-              (if (task.unblocks) ". "
-               else ", and the member cannot submit there until its top-ups have covered it. ") +
-              "Please ensure that the validator's wallet has enough amulets to buy both."
-          )
-        )
+              "together with the configured top-up, so only the top-up will be bought"
+          // The top-up alone takes the member above zero, so it can submit all the same.
+          if (task.unblocks) logger.info(s"$message, which covers it.")
+          else
+            logger.warn(
+              s"$message, and the member cannot submit there until its top-ups have covered it. " +
+                "Please ensure that the validator's wallet has enough amulets to buy both."
+            )
+        }
     } yield funded
   }
 
@@ -422,8 +429,10 @@ object TopupMemberTrafficTrigger {
     * The first gives each candidate its first purchase that the balance covers and that
     * `isUnblocking` accepts, one that takes its member's extra-traffic remainder above zero. The
     * second gives each candidate still unfunded its first purchase the rest covers, such as a
-    * top-up that pays a shortfall down without covering it. A purchase that leaves its member below
-    * zero thus cannot take the balance from one that keeps a later target above it. A candidate the
+    * top-up that pays a shortfall down without covering it, or, while an earlier shortfall purchase
+    * is not granted yet, a top-up bought alone that is smaller than that shortfall, as it is ranked
+    * by the traffic state before that grant. A purchase that leaves its member below zero thus
+    * cannot take the balance from one that keeps a later target above it. A candidate the
     * balance covers none of is reported by its last, cheapest, purchase. A `None` budget funds each
     * candidate's first purchase.
     */
@@ -523,6 +532,7 @@ object TopupMemberTrafficTrigger {
     * the target's last shortfall purchase, `lastShortfallPurchase`, bought the shortfall of a
     * traffic state with the same serial. Each grant moves the serial, as the participant only
     * applies a traffic update with a higher one, so no grant has reached the participant since.
+    * Any grant ends this, also one of some other purchase while ours is still pending.
     */
   private[automation] def shortfallAwaitingGrant(
       trafficState: TrafficState,

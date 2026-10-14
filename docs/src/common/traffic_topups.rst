@@ -19,9 +19,11 @@ The next top-up gets triggered when all of the following conditions are met:
   (except on DevNet, where the validator app will automatically tap enough coin to purchase traffic).
   A shortfall is only bought along with it if the wallet covers both.
 
-If the validator's extra traffic balance on a synchronizer is below zero, as can happen once the synchronizer's operator
-removes an outage traffic allowance that the validator used, a top-up also buys that shortfall,
+If the validator's extra traffic balance on a synchronizer is below zero, a top-up also buys that shortfall,
 so that a single purchase lets the validator submit there again.
+This can happen on a dedicated synchronizer whose operator, while the Global Synchronizer is unavailable,
+lets validators use more traffic than they bought (an outage traffic allowance),
+and then removes that allowance after a validator used it.
 
 
 Validators receive a small amount of free traffic from the Super Validators, which suffices for submitting the

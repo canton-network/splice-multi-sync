@@ -56,9 +56,10 @@ final case class BuyExtraTrafficConfig(
     /** target throughput in bytes per second
       *
       * The top-up trigger uses this to determine how much extra traffic to purchase each time.
-      * Where the extra traffic balance is below zero, as once a synchronizer's operator removes an
-      * outage traffic allowance the validator used, a top-up also buys that shortfall if the
-      * wallet covers both.
+      * Where the extra traffic balance is below zero, as once a dedicated synchronizer's operator
+      * removes an outage traffic allowance the validator used (traffic past what was bought,
+      * allowed while the Global Synchronizer is unavailable), a top-up also buys that shortfall if
+      * the wallet covers both.
       * A value of zero implies that no extra traffic will be purchased automatically and
       * the throughput will be limited to the base rate.
       */

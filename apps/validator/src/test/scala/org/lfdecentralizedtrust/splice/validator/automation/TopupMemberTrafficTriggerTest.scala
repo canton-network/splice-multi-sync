@@ -115,8 +115,8 @@ class TopupMemberTrafficTriggerTest extends AnyWordSpec with BaseTest {
 
   "TopupMemberTrafficTrigger.fundedTasks" should {
 
-    // A purchase, and whether it leaves its member able to submit. What else it is attached to
-    // does not affect the allocation.
+    // A purchase, and whether it takes its member's extra-traffic remainder above zero. What else
+    // it is attached to does not affect the allocation.
     final case class Purchase(name: String, unblocks: Boolean = true)
     def fundedTasks(candidates: Seq[Seq[(Purchase, BigDecimal)]], budget: Option[BigDecimal]) =
       TopupMemberTrafficTrigger.fundedTasks(candidates, budget)(_.unblocks)
@@ -135,7 +135,7 @@ class TopupMemberTrafficTriggerTest extends AnyWordSpec with BaseTest {
     }
 
     // A member below zero: its shortfall with the top-up, or the top-up alone, which leaves it
-    // below zero where the shortfall is larger than the top-up.
+    // at or below zero where the shortfall is at least the top-up.
     val topupAndShortfall = Purchase("top-up and shortfall")
     val topupBelowZero = Purchase("top-up", unblocks = false)
     val withShortfall =
@@ -266,7 +266,8 @@ class TopupMemberTrafficTriggerTest extends AnyWordSpec with BaseTest {
     }
 
     "not hold once a grant has moved the serial, even with the member still below zero" in {
-      // A grant that still leaves the member below zero, so the shortfall it shows is bought.
+      // A grant of something else, +200, that leaves the member 300 below zero: the hold ends,
+      // and those 300 are bought again.
       val updated = trafficState(purchased = 1_200L, consumed = 1_500L, serial = 4)
       TopupMemberTrafficTrigger.shortfallAwaitingGrant(updated, Some(boughtFor)) shouldBe false
     }
@@ -290,7 +291,7 @@ class TopupMemberTrafficTriggerTest extends AnyWordSpec with BaseTest {
       ) shouldBe Seq(500L, 0L)
     }
 
-    "offer only the top-up alone while the shortfall is awaiting the grant of an earlier purchase" in {
+    "offer the top-up alone while the grant of an earlier shortfall purchase is pending" in {
       TopupMemberTrafficTrigger.extraTrafficOptions(
         shortfall = 500L,
         shortfallAwaitingGrant = true,
