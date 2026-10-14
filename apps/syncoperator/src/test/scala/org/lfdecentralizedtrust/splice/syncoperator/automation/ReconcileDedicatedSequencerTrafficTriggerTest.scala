@@ -245,7 +245,7 @@ class ReconcileDedicatedSequencerTrafficTriggerTest
       )(any[TraceContext])
     }
 
-    "leave a participant alone that its total as it is now already puts at its target" in {
+    "send no grant when the participant's current total already puts it at its target" in {
       // Retrieved before a purchase of the whole total, which has been granted since.
       val f = new Fixture(threshold = 1, limit = target)
       f.trigger.complete(task.copy(total = 0L)).futureValue shouldBe TaskNoop
@@ -264,7 +264,7 @@ class ReconcileDedicatedSequencerTrafficTriggerTest
       failureCode(f.trigger.complete(task)) shouldBe Status.Code.DEADLINE_EXCEEDED
     }
 
-    "fail a grant whose call to the sequencer times out, also where it needs several sequencers" in {
+    "fail a grant whose sequencer call times out, even where several sequencers are needed" in {
       val f = new Fixture(threshold = 2, limit = 0L)
       f.grantReturns(Future.failed(Status.DEADLINE_EXCEEDED.asRuntimeException()))
       failureCode(f.trigger.complete(task)) shouldBe Status.Code.DEADLINE_EXCEEDED
@@ -284,6 +284,13 @@ class ReconcileDedicatedSequencerTrafficTriggerTest
 
     "treat a task as stale once the participant is at its target" in {
       new Fixture(threshold = 1, limit = target).trigger.stale(task).futureValue shouldBe true
+    }
+
+    "treat a task as stale once the participant's current total puts it at its target" in {
+      // Retrieved before a purchase of the whole total, which has been granted since.
+      new Fixture(threshold = 1, limit = target).trigger
+        .stale(task.copy(total = 0L))
+        .futureValue shouldBe true
     }
 
     "treat a task as stale once the participant has no traffic state" in {

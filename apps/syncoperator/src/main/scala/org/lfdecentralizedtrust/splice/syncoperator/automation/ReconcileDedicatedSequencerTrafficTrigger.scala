@@ -39,19 +39,21 @@ import scala.concurrent.{ExecutionContext, Future}
   * alone. Mediators are left to [[MediatorUnlimitedTrafficTrigger]], and sequencers are not charged
   * traffic.
   *
-  * Limits are set exactly, both ways: setting the allowance raises them, and removing it lowers them
-  * back to the purchased totals, so a participant that used the allowance is below zero until its
-  * purchases cover what it consumed.
+  * Limits are set exactly, both ways: setting the allowance raises them, and removing it lowers
+  * them back to the purchased totals, so a participant that used the allowance is below zero until
+  * its purchases cover what it consumed.
   *
   * Reading every member on each poll is fine for the few members of a dedicated synchronizer, but
   * would not scale to the global synchronizer.
   *
   * On a synchronizer whose sequencers several operators run, a limit changes only once the
-  * sequencer group's threshold of operators have sent the same one, and the operators have to set
-  * and remove the allowance together. While only some of them have it set, limits only stay stable
-  * if the threshold is above half the active sequencers: with a lower threshold, the operators with
-  * the allowance and the ones without it can each reach the threshold, and override each other's
-  * limits on every poll. A grant not applied within `trafficBalanceReconciliationDelay` is sent
+  * sequencer group's threshold of its sequencers have sent the same one, so the operators have to
+  * set and remove the allowance together. Whenever their targets differ, as while only some have
+  * the allowance set or while one operator's store has not ingested a purchase yet, limits only
+  * stay stable if that threshold is above half the active sequencers: with a lower one, the
+  * sequencers on each side can reach it and override each other's limits on every poll. Above
+  * half, a split where neither side reaches it leaves the limits where they are until enough of
+  * them send the same limit. A grant not applied within `trafficBalanceReconciliationDelay` is sent
   * again on the next poll.
   */
 class ReconcileDedicatedSequencerTrafficTrigger(

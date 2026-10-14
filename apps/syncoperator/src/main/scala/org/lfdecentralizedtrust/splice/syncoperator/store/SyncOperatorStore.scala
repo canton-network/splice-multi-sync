@@ -114,10 +114,10 @@ object SyncOperatorStore {
               // to avoid killing the entire ingestion pipeline as a result
               .fold(
                 error => {
-                  // Ingestion has no trace context to log with.
+                  // The row encoder gets no trace context.
                   logger.warn(
-                    s"Skipping the purchased traffic in ${contract.contractId.contractId} of member " +
-                      s"${contract.payload.memberId}, which does not parse: $error"
+                    s"Skipping the purchased traffic in ${contract.contractId.contractId} of " +
+                      s"member ${contract.payload.memberId}, which does not parse: $error"
                   )(TraceContext.empty)
                   None
                 },
