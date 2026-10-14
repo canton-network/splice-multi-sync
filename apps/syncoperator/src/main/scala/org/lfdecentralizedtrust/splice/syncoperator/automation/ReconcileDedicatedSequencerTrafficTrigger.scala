@@ -4,7 +4,6 @@
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
 import cats.syntax.apply.*
-import com.daml.grpc.{GrpcException, GrpcStatus}
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveLong}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -48,9 +47,12 @@ import scala.concurrent.{ExecutionContext, Future}
   * would not scale to the global synchronizer.
   *
   * On a synchronizer whose sequencers several operators run, a limit changes only once the
-  * sequencer group's threshold of operators set the same one, so they set and remove the allowance
-  * together. A grant not applied within `trafficBalanceReconciliationDelay` is sent again on the
-  * next poll.
+  * sequencer group's threshold of operators have sent the same one, and the operators have to set
+  * and remove the allowance together. While only some of them have it set, limits only stay stable
+  * if the threshold is above half the active sequencers: with a lower threshold, the operators with
+  * the allowance and the ones without it can each reach the threshold, and override each other's
+  * limits on every poll. A grant not applied within `trafficBalanceReconciliationDelay` is sent
+  * again on the next poll.
   */
 class ReconcileDedicatedSequencerTrafficTrigger(
     override protected val context: TriggerContext,
@@ -96,33 +98,38 @@ class ReconcileDedicatedSequencerTrafficTrigger(
         if (current.isDone(limit)) Future.successful(TaskNoop)
         else
           connection
-            .setSequencerTrafficControlState(
+            .attemptSetSequencerTrafficControlState(
               trafficState,
               sequencerState,
               NonNegativeLong.tryCreate(current.target),
               context.pollingClock,
               trafficBalanceReconciliationDelay,
             )
-            .map[TaskOutcome](_ =>
-              TaskSuccess(
-                s"Set the traffic limit of ${task.member} from $limit to ${current.target}"
-              )
-            )
-            // Where a grant needs more than one sequencer, it is not applied until enough of the
-            // sequencers' operators send the same limit, so a timeout is expected while they
-            // disagree. Retrying the task would resend it until the retries run out and then log
-            // an error, so the next poll sends it again instead. Where one sequencer is enough, a
-            // timeout is a real failure and is handled as any other.
-            .recover {
-              case GrpcException(GrpcStatus(Status.Code.DEADLINE_EXCEEDED, _), _)
-                  if sequencerState.mapping.threshold.value > 1 =>
-                logger.info(
-                  s"The grant of a traffic limit of ${current.target} for ${task.member} was not " +
-                    s"applied within $trafficBalanceReconciliationDelay: it needs " +
-                    s"${sequencerState.mapping.threshold.value} of the synchronizer's sequencers to " +
-                    "send the same limit. The next poll sends it again."
-                )
-                TaskNoop
+            .flatMap { status =>
+              status.getCode match {
+                case Status.Code.OK =>
+                  Future.successful(
+                    TaskSuccess(
+                      s"Set the traffic limit of ${task.member} from $limit to ${current.target}"
+                    )
+                  )
+                // Where a grant needs more than one sequencer, it is not applied until enough of
+                // the sequencers' operators send the same limit, so it not being applied in time is
+                // expected while they disagree. Retrying the task would resend it until the retries
+                // run out and then log an error, so the next poll sends it again instead. A call to
+                // the sequencer that times out fails the future rather than returning this status,
+                // so it is handled as any other failure, as is a grant not applied in time where
+                // one sequencer is enough.
+                case Status.Code.DEADLINE_EXCEEDED if sequencerState.mapping.threshold.value > 1 =>
+                  logger.info(
+                    s"The grant of a traffic limit of ${current.target} for ${task.member} was " +
+                      s"not applied within $trafficBalanceReconciliationDelay: it needs " +
+                      s"${sequencerState.mapping.threshold.value} of the synchronizer's " +
+                      "sequencers to send the same limit. The next poll sends it again."
+                  )
+                  Future.successful(TaskNoop)
+                case _ => Future.failed(status.asRuntimeException())
+              }
             }
     } yield outcome
 

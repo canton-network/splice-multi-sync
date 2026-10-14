@@ -60,7 +60,10 @@ trait MemberTrafficQueries extends AcsJdbcTypes with LimitHelpers { this: NamedL
       ec: ExecutionContext,
       tc: TraceContext,
       closeContext: CloseContext,
-  ): Future[Map[Member, Long]] =
+  ): Future[Map[Member, Long]] = {
+    // Throws on a member that does not parse: ingestion stores a member only once it parses, so
+    // that would be a corrupt row.
+    import Member.DbStorageImplicits.getResultMember
     for {
       rows <- storage
         .query(
@@ -76,19 +79,10 @@ trait MemberTrafficQueries extends AcsJdbcTypes with LimitHelpers { this: NamedL
                 and member_traffic_domain = $synchronizerId
                 and member_traffic_member is not null
                group by member_traffic_member
-             """.as[(String, Long)],
+             """.as[(Member, Long)],
           // the callers' method name, which is what the DB retry logs report
           "listTotalPurchasedMemberTraffic",
         )
-    } yield rows.flatMap { case (member, total) =>
-      Member.fromProtoPrimitive_(member) match {
-        case Right(parsed) => Some(parsed -> total)
-        case Left(error) =>
-          // Ingestion only stores members that parse, so this is not expected.
-          logger.warn(
-            s"Skipping the purchased traffic of member $member, which does not parse: $error"
-          )
-          None
-      }
-    }.toMap
+    } yield rows.toMap
+  }
 }

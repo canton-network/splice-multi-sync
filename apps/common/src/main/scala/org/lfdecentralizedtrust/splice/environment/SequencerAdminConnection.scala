@@ -431,7 +431,31 @@ class SequencerAdminConnection(
       timeout: NonNegativeFiniteDuration,
   )(implicit
       traceContext: TraceContext
-  ): Future[Unit] = {
+  ): Future[Unit] =
+    attemptSetSequencerTrafficControlState(
+      currentTrafficState,
+      currentSequencerState,
+      newTotalExtraTrafficLimit,
+      clock,
+      timeout,
+    ).flatMap(status =>
+      if (status.isOk) Future.unit else Future.failed(status.asRuntimeException())
+    )
+
+  /** As [[setSequencerTrafficControlState]], but returns its outcome as a status instead of
+    * failing on it: OK once the limit is set, DEADLINE_EXCEEDED if it was not set within
+    * `timeout`, and ABORTED on a concurrent change. Any other error, such as a call to the
+    * sequencer that keeps failing, still fails the returned future.
+    */
+  def attemptSetSequencerTrafficControlState(
+      currentTrafficState: TrafficState,
+      currentSequencerState: TopologyResult[SequencerSynchronizerState],
+      newTotalExtraTrafficLimit: NonNegativeLong,
+      clock: Clock,
+      timeout: NonNegativeFiniteDuration,
+  )(implicit
+      traceContext: TraceContext
+  ): Future[io.grpc.Status] = {
     val msgPrefix =
       s"setting traffic state for ${currentTrafficState.member} to $newTotalExtraTrafficLimit with next serial ${currentTrafficState.nextSerial}:"
     val deadline = clock.now.plus(timeout.asJavaApproximation)
@@ -486,9 +510,6 @@ class SequencerAdminConnection(
           serial = currentTrafficState.nextSerial,
         ).map(_ => ()),
         logger,
-      )
-      .flatMap(status =>
-        if (status.isOk) Future.unit else Future.failed(status.asRuntimeException())
       )
   }
 
