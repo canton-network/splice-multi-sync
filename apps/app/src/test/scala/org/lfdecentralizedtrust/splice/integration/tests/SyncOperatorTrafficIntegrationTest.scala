@@ -33,6 +33,7 @@ import org.lfdecentralizedtrust.splice.util.{
 }
 import org.lfdecentralizedtrust.splice.validator.automation.TopupMemberTrafficTrigger
 import org.lfdecentralizedtrust.splice.wallet.store.TxLogEntry
+import org.lfdecentralizedtrust.splice.wallet.util.ExtraTrafficTopupParameters
 import org.slf4j.event.Level
 
 import scala.concurrent.duration.*
@@ -64,9 +65,6 @@ class SyncOperatorTrafficIntegrationTest
   private val bobPurchase = 50_000L
   // Bought once the global synchronizer is back but before the allowance is removed.
   private val bobPurchaseWithAllowanceSet = 20_000L
-  // Less than the shortfall bob is left with once the allowance is removed, so one top-up only
-  // covers it if it buys the shortfall too.
-  private val bobTopupAmount = 12_000L
   // The same operator app with the allowance set, which the outage test runs in place of
   // syncOperator. Both use one store, so they never run at the same time.
   private val syncOperatorWithAllowanceName = "syncOperatorWithAllowance"
@@ -102,7 +100,9 @@ class SyncOperatorTrafficIntegrationTest
               .modify(_.map { extra =>
                 if (extra.alias == splitwellAlias)
                   extra
-                    // 100 bytes a second over a two-minute interval, so bobTopupAmount per top-up
+                    // 100 bytes a second over a two-minute interval: less per top-up than the
+                    // shortfall bob is left with once the allowance is removed, so one top-up only
+                    // covers it if it buys the shortfall too.
                     .focus(_.topup.targetThroughput)
                     .replace(NonNegativeNumeric.tryCreate(BigDecimal(100)))
                     .focus(_.topup.minTopupInterval)
@@ -543,6 +543,33 @@ class SyncOperatorTrafficIntegrationTest
 
         // Refused, bob consumes nothing more, so this is what his top-up finds.
         val shortfall = consumed(bob) - totalsWithoutAllowance(bob)
+        // As bob's top-up trigger derives it from his splitwell target.
+        val bobTopupAmount = {
+          val topup = bobValidatorBackend.config.domains.extra
+            .find(_.alias == splitwellAlias)
+            .value
+            .topup
+          ExtraTrafficTopupParameters(
+            topup.targetThroughput,
+            topup.minTopupInterval,
+            sv1ScanBackend
+              .getAmuletConfigAsOf(env.environment.clock.now)
+              .decentralizedSynchronizer
+              .fees
+              .minTopupAmount,
+            bobValidatorBackend.config.automation.topupTriggerPollingInterval_,
+          ).topupAmount
+        }
+        clue("bob's shortfall is more than his top-up, so the top-up alone does not cover it") {
+          shortfall should be > bobTopupAmount
+        }
+        clue("bob's participant, whose view his top-up reads, sees the same shortfall") {
+          eventually() {
+            bobParticipant.traffic_control
+              .traffic_state(synchronizerId)
+              .extraTrafficRemainder shouldBe -shortfall
+          }
+        }
         val topupTrigger =
           bobValidatorBackend.appState.automation.trigger[TopupMemberTrafficTrigger]
         setTriggersWithin(triggersToResumeAtStart = Seq(topupTrigger)) {

@@ -4,7 +4,7 @@
    SPDX-License-Identifier: Apache-2.0
 
 On each successful top-up, the validator app purchases a `top-up amount` of roughly ``targetThroughput * minTopupInterval`` bytes of traffic
-(specific amount can vary due to rounding-up).
+(specific amount can vary due to rounding-up), plus any shortfall described below.
 The ``minTopupInterval`` allows validator operators to control the upper-bound frequency at which automated top-ups happen.
 If the top-up amount is below the synchronizer-wide ``minTopupAmount`` (see :ref:`traffic_parameters`),
 ``minTopupInterval`` is automatically stretched so that at least ``minTopupAmount`` bytes of traffic are
@@ -17,6 +17,11 @@ The next top-up gets triggered when all of the following conditions are met:
 - At least ``minTopupInterval`` has elapsed since the last top-up.
 - The validator has sufficient CC in its wallet to buy the top-up amount worth on traffic
   (except on DevNet, where the validator app will automatically tap enough coin to purchase traffic).
+  A shortfall is only bought along with it if the wallet covers both.
+
+If the validator's extra traffic balance on a synchronizer is below zero, as can happen once the synchronizer's operator
+removes an outage traffic allowance that the validator used, a top-up also buys that shortfall,
+so that a single purchase lets the validator submit there again.
 
 
 Validators receive a small amount of free traffic from the Super Validators, which suffices for submitting the

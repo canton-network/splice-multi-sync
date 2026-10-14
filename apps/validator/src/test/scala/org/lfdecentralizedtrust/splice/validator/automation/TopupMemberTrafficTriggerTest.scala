@@ -4,7 +4,13 @@
 package org.lfdecentralizedtrust.splice.validator.automation
 
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.config.RequireTypes.NonNegativeNumeric
+import com.digitalasset.canton.config.RequireTypes.{
+  NonNegativeLong,
+  NonNegativeNumeric,
+  PositiveInt,
+}
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.sequencing.protocol.TrafficState
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.{BaseTest, SynchronizerAlias}
 import org.lfdecentralizedtrust.splice.validator.config.BuyExtraTrafficConfig
@@ -238,6 +244,64 @@ class TopupMemberTrafficTriggerTest extends AnyWordSpec with BaseTest {
         trafficToBuy = 2_000L,
         extraTrafficRemainder = 500L,
       ) shouldBe true
+    }
+  }
+
+  "TopupMemberTrafficTrigger.shortfallAwaitingGrant" should {
+
+    def trafficState(purchased: Long, consumed: Long, serial: Int) =
+      TrafficState
+        .empty(CantonTimestamp.Epoch)
+        .copy(
+          extraTrafficPurchased = NonNegativeLong.tryCreate(purchased),
+          extraTrafficConsumed = NonNegativeLong.tryCreate(consumed),
+          serial = Some(PositiveInt.tryCreate(serial)),
+        )
+
+    // 500 below zero, the state whose shortfall was bought.
+    val boughtFor = trafficState(purchased = 1_000L, consumed = 1_500L, serial = 3)
+
+    "hold while the participant has received no traffic update since the shortfall was bought" in {
+      TopupMemberTrafficTrigger.shortfallAwaitingGrant(boughtFor, Some(boughtFor)) shouldBe true
+    }
+
+    "not hold once a grant has moved the serial, even with the member still below zero" in {
+      // A grant that still leaves the member below zero, so the shortfall it shows is bought.
+      val updated = trafficState(purchased = 1_200L, consumed = 1_500L, serial = 4)
+      TopupMemberTrafficTrigger.shortfallAwaitingGrant(updated, Some(boughtFor)) shouldBe false
+    }
+
+    "not hold with no shortfall purchase on record, as after a restart" in {
+      TopupMemberTrafficTrigger.shortfallAwaitingGrant(boughtFor, None) shouldBe false
+    }
+
+    "not hold for a member that is not below zero" in {
+      val aboveZero = trafficState(purchased = 2_000L, consumed = 1_500L, serial = 3)
+      TopupMemberTrafficTrigger.shortfallAwaitingGrant(aboveZero, Some(boughtFor)) shouldBe false
+    }
+  }
+
+  "TopupMemberTrafficTrigger.extraTrafficOptions" should {
+
+    "offer the shortfall with the top-up first, then the top-up alone" in {
+      TopupMemberTrafficTrigger.extraTrafficOptions(
+        shortfall = 500L,
+        shortfallAwaitingGrant = false,
+      ) shouldBe Seq(500L, 0L)
+    }
+
+    "offer only the top-up alone while the shortfall is awaiting the grant of an earlier purchase" in {
+      TopupMemberTrafficTrigger.extraTrafficOptions(
+        shortfall = 500L,
+        shortfallAwaitingGrant = true,
+      ) shouldBe Seq(0L)
+    }
+
+    "offer only the top-up alone for a member that is not below zero" in {
+      TopupMemberTrafficTrigger.extraTrafficOptions(
+        shortfall = 0L,
+        shortfallAwaitingGrant = false,
+      ) shouldBe Seq(0L)
     }
   }
 }

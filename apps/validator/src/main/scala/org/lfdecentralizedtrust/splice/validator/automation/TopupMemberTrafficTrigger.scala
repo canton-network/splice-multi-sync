@@ -60,6 +60,7 @@ import org.apache.pekko.stream.Materializer
 
 import java.time.Instant
 import java.util.Optional
+import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
@@ -81,6 +82,12 @@ class TopupMemberTrafficTrigger(
 ) extends PollingParallelTaskExecutionTrigger[TopupMemberTrafficTrigger.Task] {
 
   private val validator = store.key.validatorParty
+
+  // Per target, the traffic state that its last shortfall purchase bought the shortfall of. The
+  // participant's traffic state only reflects a purchase once the synchronizer's operator has
+  // granted it, so until that state is updated, the shortfall it shows is already bought. In
+  // memory only: after a restart, a shortfall whose purchase is not granted yet is bought again.
+  private val lastShortfallPurchases = TrieMap.empty[SynchronizerId, TrafficState]
 
   override protected def retrieveTasks()(implicit
       tc: TraceContext
@@ -131,23 +138,32 @@ class TopupMemberTrafficTrigger(
       )(_.unblocks)
       // we do not even submit the topup tx if the validator does not have sufficient funds because we know
       // the tx would fail but it would still drain synchronizer traffic which we would like to avoid (see #11915).
-      _ = unfunded.foreach(task =>
+      _ = unfunded.foreach { task =>
+        val topupAmount = task.target.topupParameters.topupAmount
         logger.warn(
           s"Insufficient funds to buy configured traffic amount. Please ensure that the validator's wallet has enough amulets to purchase " +
-            s"${BigDecimal(task.trafficToBuy) / 1e6} MB of traffic on ${task.target.alias} to continue healthy operation." +
-            (if (task.shortfall > 0)
+            s"${BigDecimal(topupAmount) / 1e6} MB of traffic on ${task.target.alias} to continue healthy operation." +
+            (if (
+               task.shortfall > 0 && !task.shortfallAwaitingGrant &&
+               !TopupMemberTrafficTrigger.unblocks(
+                 topupAmount,
+                 task.trafficState.extraTrafficRemainder,
+               )
+             )
                s" This member is also ${BigDecimal(task.shortfall) / 1e6} MB below zero there: for one purchase to get it submitting again, the wallet needs enough amulets for " +
-                 s"${BigDecimal(task.trafficToBuy + task.shortfall) / 1e6} MB, the top-up and the shortfall together."
+                 s"${BigDecimal(topupAmount + task.shortfall) / 1e6} MB, the top-up and the shortfall together."
              else "")
         )
-      )
+      }
       // A member below zero that gets the top-up alone, because the wallet does not cover both.
       _ = funded
-        .filter(task => task.shortfall > 0 && task.extraTraffic == 0)
+        .filter(task =>
+          task.shortfall > 0 && !task.shortfallAwaitingGrant && task.extraTraffic == 0
+        )
         .foreach(task =>
           logger.warn(
             s"Insufficient funds to buy the ${BigDecimal(task.shortfall) / 1e6} MB of traffic this member is below zero on ${task.target.alias} " +
-              "together with the configured top-up, so only the top-up is bought" +
+              "together with the configured top-up, so only the top-up will be bought" +
               (if (task.unblocks) ". "
                else ", and the member cannot submit there until its top-ups have covered it. ") +
               "Please ensure that the validator's wallet has enough amulets to buy both."
@@ -158,7 +174,8 @@ class TopupMemberTrafficTrigger(
 
   /** The purchases this target is due, preferred first, each paired with what it would cost the
     * wallet: for a member below zero, its shortfall together with the configured top-up, and the
-    * top-up alone in case the wallet does not cover both.
+    * top-up alone in case the wallet does not cover both. Only the top-up alone while an earlier
+    * purchase of that shortfall is not granted yet.
     */
   private def retrieveTaskFor(
       target: TopupMemberTrafficTrigger.Target,
@@ -189,11 +206,20 @@ class TopupMemberTrafficTrigger(
               else {
                 val shortfall =
                   TopupMemberTrafficTrigger.shortfall(currentTrafficState.extraTrafficRemainder)
-                // The top-up alone still pays a shortfall down, one interval at a time.
-                val extraTrafficOptions = if (shortfall > 0) Seq(shortfall, 0L) else Seq(0L)
+                val shortfallAwaitingGrant = TopupMemberTrafficTrigger.shortfallAwaitingGrant(
+                  currentTrafficState,
+                  lastShortfallPurchases.get(target.synchronizerId),
+                )
+                if (shortfallAwaitingGrant)
+                  logger.info(
+                    s"Not buying the ${BigDecimal(shortfall) / 1e6} MB of traffic this member is below zero on ${target.alias} " +
+                      "with its top-up again: the participant has received no traffic update since that shortfall was bought, so that purchase is not granted yet"
+                  )
                 // The cost is derived from this target's throughput and interval, plus the
                 // extra traffic bought with the top-up.
-                Future.traverse(extraTrafficOptions)(extraTraffic =>
+                Future.traverse(
+                  TopupMemberTrafficTrigger.extraTrafficOptions(shortfall, shortfallAwaitingGrant)
+                )(extraTraffic =>
                   TopupUtil
                     .minWalletBalanceForTopup(
                       scanConnection,
@@ -209,6 +235,7 @@ class TopupMemberTrafficTrigger(
                         currentTrafficState,
                         registration,
                         extraTraffic,
+                        shortfallAwaitingGrant,
                       ) -> _
                     )
                 )
@@ -240,6 +267,9 @@ class TopupMemberTrafficTrigger(
         )
         .map {
           case outcome: COO_BuyMemberTraffic =>
+            // Only once bought, so a purchase that fails is retried with the shortfall.
+            if (task.extraTraffic > 0)
+              lastShortfallPurchases.update(task.target.synchronizerId, task.trafficState)
             TaskSuccess(s"Successfully bought extra traffic: $outcome")
           case error: COO_Error =>
             throw Status.ABORTED
@@ -389,17 +419,18 @@ object TopupMemberTrafficTrigger {
   /** Splits candidates into the purchases the balance covers and the candidates it covers none
     * of, both in target order. Each candidate lists its purchases preferred first, and every buy
     * draws on the same wallet, so the balance is allocated in two passes, each in target order.
-    * The first gives each candidate its first purchase that the balance covers and that `unblocks`
-    * its member, leaving it able to submit. The second gives each candidate still unfunded its
-    * first purchase the rest covers, such as a top-up that pays a shortfall down without covering
-    * it. A purchase that leaves its member blocked thus cannot take the balance from one that keeps
-    * a later target submitting. A candidate the balance covers none of is reported by its last,
-    * cheapest, purchase. A `None` budget funds each candidate's first purchase.
+    * The first gives each candidate its first purchase that the balance covers and that
+    * `isUnblocking` accepts, one that takes its member's extra-traffic remainder above zero. The
+    * second gives each candidate still unfunded its first purchase the rest covers, such as a
+    * top-up that pays a shortfall down without covering it. A purchase that leaves its member below
+    * zero thus cannot take the balance from one that keeps a later target above it. A candidate the
+    * balance covers none of is reported by its last, cheapest, purchase. A `None` budget funds each
+    * candidate's first purchase.
     */
   private[automation] def fundedTasks[A](
       candidates: Seq[Seq[(A, BigDecimal)]],
       budget: Option[BigDecimal],
-  )(unblocks: A => Boolean): (Seq[A], Seq[A]) = budget match {
+  )(isUnblocking: A => Boolean): (Seq[A], Seq[A]) = budget match {
     case None => (candidates.flatMap(_.headOption.map(_._1)), Seq.empty)
     case Some(balance) =>
       // One pass in target order: each candidate not funded yet gets its first purchase that the
@@ -417,7 +448,8 @@ object TopupMemberTrafficTrigger {
               case None => (done :+ None, remaining)
             }
         }
-      val (unblocking, balanceLeft) = fund(candidates.map(_ => Option.empty[A]), balance, unblocks)
+      val (unblocking, balanceLeft) =
+        fund(candidates.map(_ => Option.empty[A]), balance, isUnblocking)
       val (funded, _) = fund(unblocking, balanceLeft, _ => true)
       val unfunded = candidates.zip(funded).collect { case (purchases, None) =>
         purchases.lastOption.map(_._1)
@@ -479,11 +511,36 @@ object TopupMemberTrafficTrigger {
     */
   def shortfall(extraTrafficRemainder: Long): Long = math.max(0L, -extraTrafficRemainder)
 
-  /** Whether buying `trafficToBuy` leaves a member with `extraTrafficRemainder` able to submit,
-    * that is above zero: at zero, with no base rate, it still cannot.
+  /** Whether buying `trafficToBuy` takes a member's extra-traffic remainder of
+    * `extraTrafficRemainder` strictly above zero. It ignores the base traffic and what a
+    * submission costs, so it only approximates whether the member can submit again, which is
+    * enough to rank purchases.
     */
   def unblocks(trafficToBuy: Long, extraTrafficRemainder: Long): Boolean =
     trafficToBuy > shortfall(extraTrafficRemainder)
+
+  /** Whether the shortfall `trafficState` shows is already bought, by a purchase not granted yet:
+    * the target's last shortfall purchase, `lastShortfallPurchase`, bought the shortfall of a
+    * traffic state with the same serial. Each grant moves the serial, as the participant only
+    * applies a traffic update with a higher one, so no grant has reached the participant since.
+    */
+  private[automation] def shortfallAwaitingGrant(
+      trafficState: TrafficState,
+      lastShortfallPurchase: Option[TrafficState],
+  ): Boolean =
+    shortfall(trafficState.extraTrafficRemainder) > 0 &&
+      lastShortfallPurchase.exists(_.serial == trafficState.serial)
+
+  /** The extra traffic each purchase due buys with the top-up, preferred first: the member's
+    * shortfall, and 0 for the top-up alone, which still pays a shortfall down one interval at a
+    * time. Only the top-up alone while the shortfall is awaiting the grant of an earlier purchase,
+    * so that it is not bought twice.
+    */
+  private[automation] def extraTrafficOptions(
+      shortfall: Long,
+      shortfallAwaitingGrant: Boolean,
+  ): Seq[Long] =
+    if (shortfall > 0 && !shortfallAwaitingGrant) Seq(shortfall, 0L) else Seq(0L)
 
   final case class Task(
       target: Target,
@@ -493,16 +550,20 @@ object TopupMemberTrafficTrigger {
         ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]
       ],
       // Bought together with the configured top-up: the member's shortfall, so that one purchase
-      // covers it, or 0 for the top-up alone. That is every ordinary top-up, and the fallback
-      // where the wallet does not cover both.
+      // covers it, or 0 for the top-up alone. That is every ordinary top-up, the fallback where
+      // the wallet does not cover both, and a top-up while the shortfall is awaiting a grant.
       extraTraffic: Long,
+      // Whether the member's shortfall is already bought, by a purchase not granted yet.
+      shortfallAwaitingGrant: Boolean,
   ) extends PrettyPrinting {
 
     def shortfall: Long = TopupMemberTrafficTrigger.shortfall(trafficState.extraTrafficRemainder)
 
     def trafficToBuy: Long = target.topupParameters.topupAmount + extraTraffic
 
-    /** Whether the member can submit once this purchase is granted. */
+    /** Whether this purchase, once granted, takes the member's extra-traffic remainder strictly
+      * above zero.
+      */
     def unblocks: Boolean =
       TopupMemberTrafficTrigger.unblocks(trafficToBuy, trafficState.extraTrafficRemainder)
 
@@ -512,6 +573,7 @@ object TopupMemberTrafficTrigger {
         param("topupState", _.topupState),
         param("trafficState", _.trafficState),
         param("extraTraffic", _.extraTraffic),
+        param("shortfallAwaitingGrant", _.shortfallAwaitingGrant),
       )
   }
 }

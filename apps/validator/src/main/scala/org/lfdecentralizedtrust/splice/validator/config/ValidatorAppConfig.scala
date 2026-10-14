@@ -56,6 +56,9 @@ final case class BuyExtraTrafficConfig(
     /** target throughput in bytes per second
       *
       * The top-up trigger uses this to determine how much extra traffic to purchase each time.
+      * Where the extra traffic balance is below zero, as once a synchronizer's operator removes an
+      * outage traffic allowance the validator used, a top-up also buys that shortfall if the
+      * wallet covers both.
       * A value of zero implies that no extra traffic will be purchased automatically and
       * the throughput will be limited to the base rate.
       */
@@ -65,8 +68,9 @@ final case class BuyExtraTrafficConfig(
     /** minimum interval between extra traffic purchases in seconds
       *
       * This allows validator operators to control the frequency at which the top-up trigger
-      * will charge them domain fees making spends more predictable. This should be greater than the
-      * polling interval of the top-up trigger.
+      * will charge them domain fees making spends more predictable, though a top-up that also buys
+      * a shortfall (see `targetThroughput`) costs more than the others. This should be greater
+      * than the polling interval of the top-up trigger.
       *
       * Note that the actual interval between top-ups might be larger due to the DSO requiring
       * a minimal top-up amount larger than `targetThroughput * minTopupInterval`.
