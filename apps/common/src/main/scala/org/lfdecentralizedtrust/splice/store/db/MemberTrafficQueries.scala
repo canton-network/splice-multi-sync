@@ -81,7 +81,14 @@ trait MemberTrafficQueries extends AcsJdbcTypes with LimitHelpers { this: NamedL
           "listTotalPurchasedMemberTraffic",
         )
     } yield rows.flatMap { case (member, total) =>
-      // ingestion stores only members that parse, so this never drops a row in practice
-      Member.fromProtoPrimitive_(member).toOption.map(_ -> total)
+      Member.fromProtoPrimitive_(member) match {
+        case Right(parsed) => Some(parsed -> total)
+        case Left(error) =>
+          // Ingestion only stores members that parse, so this is not expected.
+          logger.warn(
+            s"Skipping the purchased traffic of member $member, which does not parse: $error"
+          )
+          None
+      }
     }.toMap
 }
