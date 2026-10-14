@@ -76,7 +76,7 @@ class DbSyncOperatorStore(
   override lazy val acsContractFilter: MultiDomainAcsStore.ContractFilter[
     SyncOperatorAcsStoreRowData,
     AcsInterfaceViewRowData.NoInterfacesIngested,
-  ] = SyncOperatorStore.contractFilter(key)
+  ] = SyncOperatorStore.contractFilter(key, logger)
 
   import multiDomainAcsStore.waitUntilAcsIngested
 

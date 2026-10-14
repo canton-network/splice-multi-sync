@@ -373,9 +373,17 @@ class SyncOperatorTrafficIntegrationTest
         totals.keySet shouldBe Set(alice, bob)
 
         try {
-          // The other apps on the operator's participant warn about the submissions that fail
-          // while it is cut off from the global synchronizer, so this tolerates their warnings.
-          loggerFactory.suppress(SuppressionRule.LevelAndAbove(Level.WARN)) {
+          // Suppresses only what is expected while the operator's participant is cut off from the
+          // global synchronizer, so the sync operator apps' own warnings and errors still show:
+          // the warnings of the operator's validator, whose triggers fail meanwhile, and the
+          // errors the test console (created in EnvironmentDefinition) logs for bob's refused
+          // pings.
+          loggerFactory.suppress(
+            (SuppressionRule.LoggerNameContains("validator=splitwellValidator") &&
+              SuppressionRule.Level(Level.WARN)) ||
+              (SuppressionRule.forLogger[EnvironmentDefinition] &&
+                SuppressionRule.Level(Level.ERROR))
+          ) {
             // Cut off from the global synchronizer, the operator's participant sees no purchases,
             // which is what an outage looks like to the operator.
             operatorParticipant.synchronizers.disconnect(globalAlias)

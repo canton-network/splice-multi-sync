@@ -526,8 +526,8 @@ case class EnvironmentDefinition(
   def withOnlyAliceValidatorConnectingToSplitwell: EnvironmentDefinition =
     withValidatorsDisconnectedFromSplitwell("bobValidator", "splitwellValidator")
 
-  /** Drops the splitwell apps and disconnects the given validators from the splitwell
-    * synchronizer.
+  /** Drops all splitwell apps, and clears all of the given validators' extra synchronizers, not
+    * just splitwell, so the global synchronizer is the only one they connect to.
     */
   def withValidatorsDisconnectedFromSplitwell(validators: String*): EnvironmentDefinition =
     this
