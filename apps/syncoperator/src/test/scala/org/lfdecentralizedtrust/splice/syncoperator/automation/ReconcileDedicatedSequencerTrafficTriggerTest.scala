@@ -4,7 +4,7 @@
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.data.topology.BaseResult
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{NonNegativeFiniteDuration, ProcessingTimeout}
