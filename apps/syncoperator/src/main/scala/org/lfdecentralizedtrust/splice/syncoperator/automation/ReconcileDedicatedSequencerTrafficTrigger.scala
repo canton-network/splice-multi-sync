@@ -7,12 +7,13 @@ import cats.syntax.apply.*
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveLong}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.topology.{Member, ParticipantId}
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 import org.lfdecentralizedtrust.splice.automation.{
   PollingParallelTaskExecutionTrigger,
+  ReconcileSequencerLimitWithMemberTrafficTriggerBase,
   TaskOutcome,
   TaskSuccess,
   TriggerContext,
@@ -114,15 +115,6 @@ class ReconcileDedicatedSequencerTrafficTrigger(
 
 object ReconcileDedicatedSequencerTrafficTrigger {
 
-  /** Whether this trigger sets the member's limit. Only participants: a mediator has no purchase
-    * path and is granted unlimited traffic by [[MediatorUnlimitedTrafficTrigger]], which a purchase
-    * someone made for it must not lower, and a sequencer is not charged traffic.
-    */
-  private[automation] def isCovered(member: Member): Boolean = member match {
-    case _: ParticipantId => true
-    case _ => false
-  }
-
   /** The grants that bring each participant on the sequencer to its target, in a fixed order.
     *
     * @param limits
@@ -137,7 +129,9 @@ object ReconcileDedicatedSequencerTrafficTrigger {
       allowance: Option[Long],
   ): Seq[Task] =
     limits.toSeq
-      .filter { case (member, _) => isCovered(member) }
+      .filter { case (member, _) =>
+        ReconcileSequencerLimitWithMemberTrafficTriggerBase.reconcilesPurchasedTraffic(member)
+      }
       .sortBy { case (member, _) => member.toProtoPrimitive }
       .flatMap { case (member, limit) =>
         val task = Task(member, totals.getOrElse(member, 0L), allowance)
