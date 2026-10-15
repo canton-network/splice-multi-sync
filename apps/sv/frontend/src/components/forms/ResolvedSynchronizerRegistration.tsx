@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Box } from '@mui/material';
-import { MemberIdentifier } from '../beta';
-import { IDENTIFIER_COMPACT_MAX_WIDTH_PX } from '../beta/identifierStyles';
+import { MemberIdentifier } from '../ui';
+import { IDENTIFIER_COMPACT_MAX_WIDTH_PX } from '../ui/identifierStyles';
 import { ProposalReviewField } from '../governance/ProposalReviewField';
 import type { ResolvedSynchronizerRegistration } from '../../hooks/useSynchronizerRegistrationPicker';
 import { governanceParameterFields, governanceParameterKeys } from './governanceParameterFields';

@@ -10,7 +10,7 @@ import {
 } from '@daml.js/splice-amulet/lib/Splice/DecentralizedSynchronizer';
 import { useSvAdminClient } from '../../../contexts/SvAdminServiceContext';
 import { governanceParameterChanges } from '../../forms/governanceParameterFields';
-import { CopyableIdentifier, MemberIdentifier } from '../../beta';
+import { CopyableIdentifier, MemberIdentifier } from '../../ui';
 import { ConfigValuesChanges } from '../ConfigValuesChanges';
 import { DetailItem } from './DetailItem';
 

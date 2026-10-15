@@ -3,8 +3,8 @@
 
 import { Box, Typography } from '@mui/material';
 import type { ReactNode } from 'react';
-import { MemberIdentifier } from '../beta';
-import { IDENTIFIER_COMPACT_MAX_WIDTH_PX } from '../beta/identifierStyles';
+import { MemberIdentifier } from '../ui';
+import { IDENTIFIER_COMPACT_MAX_WIDTH_PX } from '../ui/identifierStyles';
 import {
   EFFECTIVE_AT_LABEL,
   CREATE_PROPOSAL_LABEL_PROPOSAL_TYPE,
@@ -16,6 +16,7 @@ import type { GovernanceParameters } from '@daml.js/splice-amulet/lib/Splice/Dec
 import type { ResolvedSynchronizerRegistration } from '../../hooks/useSynchronizerRegistrationPicker';
 import type { ConfigChange } from '../../utils/types';
 import { governanceParameterChanges } from '../forms/governanceParameterFields';
+import { formatDatetimeWithOffset } from '../../utils/dateFormat';
 import { ConfigValuesChanges } from './ConfigValuesChanges';
 import { ProposalReviewField } from './ProposalReviewField';
 
@@ -327,7 +328,11 @@ export const ProposalSummary: React.FC<ProposalSummaryProps> = props => {
               }
             />
             <ProposalReviewField id="amount" label="Amount" value={props.amount} />
-            <ProposalReviewField id="expiresAt" label="Must Mint Before" value={props.expiresAt} />
+            <ProposalReviewField
+              id="expiresAt"
+              label="Must Mint Before"
+              value={formatDatetimeWithOffset(props.expiresAt)}
+            />
           </>
         )}
 
@@ -335,13 +340,13 @@ export const ProposalSummary: React.FC<ProposalSummaryProps> = props => {
           id="expiryDate"
           label={THRESHOLD_DEADLINE_LABEL}
           subtitle={THRESHOLD_DEADLINE_SUBTITLE}
-          value={expiryDate}
+          value={formatDatetimeWithOffset(expiryDate)}
         />
 
         <ProposalReviewField
           id="effectiveDate"
           label={EFFECTIVE_AT_LABEL}
-          value={effectiveDate ? effectiveDate : 'Threshold'}
+          value={effectiveDate ? formatDatetimeWithOffset(effectiveDate) : 'Threshold'}
         />
 
         <ProposalReviewField id="summary" label="Proposal Summary" value={summary} />
