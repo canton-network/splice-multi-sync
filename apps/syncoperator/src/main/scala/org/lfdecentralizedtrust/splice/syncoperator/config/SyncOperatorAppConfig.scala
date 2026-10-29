@@ -13,6 +13,7 @@ import org.lfdecentralizedtrust.splice.config.{
   SpliceParametersConfig,
   SplicePostgresConfig,
 }
+import org.lfdecentralizedtrust.splice.scan.config.ScanAppClientConfig
 
 // The sequencer of a synchronizer node this operator runs.
 case class SyncOperatorSequencerConfig(
@@ -35,6 +36,7 @@ case class SyncOperatorAppBackendConfig(
     // Ledger API user of the operator party.
     operatorUser: String,
     participantClient: ParticipantClientConfig,
+    scanClient: ScanAppClientConfig,
     synchronizerNodes: SyncOperatorSynchronizerNodesConfig,
     override val automation: AutomationConfig = AutomationConfig(),
     parameters: SpliceParametersConfig = SpliceParametersConfig(batching = BatchingConfig()),
