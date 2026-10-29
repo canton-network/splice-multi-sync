@@ -39,10 +39,11 @@ updateAction registeredSynchronizerCid newOperator newPaymaster newMaxActivityWe
   ARC_DsoRules with
     dsoAction = SRARC_UpdateSynchronizerRegistration DsoRules_UpdateSynchronizerRegistration with
       registeredSynchronizerCid
-      newOperator
-      newPaymaster
-      newMaxActivityWeight
-      newMaxAssetActivityWeight
+      update = RegisteredSynchronizer_Update with
+        newOperator
+        newPaymaster
+        newMaxActivityWeight
+        newMaxAssetActivityWeight
 
 archiveAction : ContractId RegisteredSynchronizer -> ActionRequiringConfirmation
 archiveAction registeredSynchronizerCid =
@@ -95,13 +96,11 @@ test_RegisterSynchronizer_viaVote = do
     maxActivityWeight = 1.0
     maxAssetActivityWeight = 0.5
 
-  -- Operator and paymaster both observe the registration.
-  operatorView <- query @RegisteredSynchronizer operator
-  operatorView === [(registrationCid, registration)]
+  -- The paymaster observes the registration. The operator and an unrelated party do not.
   paymasterView <- query @RegisteredSynchronizer paymaster
   paymasterView === [(registrationCid, registration)]
-
-  -- An unrelated party does not.
+  operatorView <- query @RegisteredSynchronizer operator
+  operatorView === []
   other <- allocateParty "other"
   otherView <- query @RegisteredSynchronizer other
   otherView === []
@@ -130,15 +129,13 @@ test_UpdateSynchronizerRegistration_viaVote = do
     maxActivityWeight = 0.25
     maxAssetActivityWeight = 0.0
 
-  -- The new operator and paymaster see the registration, the old ones no longer do.
-  newOperatorView <- query @RegisteredSynchronizer newOperator
-  newOperatorView === [(updatedCid, updated)]
+  -- The new paymaster sees the registration, the old one no longer does. Neither operator does.
   newPaymasterView <- query @RegisteredSynchronizer newPaymaster
   newPaymasterView === [(updatedCid, updated)]
-  oldOperatorView <- query @RegisteredSynchronizer operator
-  oldOperatorView === []
   oldPaymasterView <- query @RegisteredSynchronizer paymaster
   oldPaymasterView === []
+  newOperatorView <- query @RegisteredSynchronizer newOperator
+  newOperatorView === []
 
   -- A vote naming the replaced registration can no longer execute.
   acceptedVoteFailsToExecute app svs $ updateAction registrationCid operator paymaster 1.0 1.0
@@ -159,8 +156,6 @@ test_ArchiveSynchronizerRegistration_viaVote = do
 
   registrations <- query @RegisteredSynchronizer dso
   registrations === []
-  operatorView <- query @RegisteredSynchronizer operator
-  operatorView === []
   paymasterView <- query @RegisteredSynchronizer paymaster
   paymasterView === []
 
