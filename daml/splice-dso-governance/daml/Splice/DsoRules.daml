@@ -31,7 +31,7 @@ import Splice.Round
 import Splice.Types
 import Splice.ValidatorLicense
 import Splice.Wallet.Subscriptions
-import Splice.DecentralizedSynchronizer (MemberTraffic, RegisteredSynchronizer(..), RegisteredSynchronizer_Update(..))
+import Splice.DecentralizedSynchronizer (MemberTraffic, RegisteredSynchronizer(..), RegisteredSynchronizer_Update(..), RegisteredSynchronizer_UpdateResult)
 
 import qualified Splice.CometBft as CometBft
 import Splice.Ans
@@ -435,7 +435,7 @@ data DsoRules_RegisterSynchronizerResult = DsoRules_RegisterSynchronizerResult w
   deriving (Serializable)
 
 data DsoRules_UpdateSynchronizerRegistrationResult = DsoRules_UpdateSynchronizerRegistrationResult with
-    registeredSynchronizerCid : ContractId RegisteredSynchronizer
+    result : RegisteredSynchronizer_UpdateResult
   deriving (Serializable)
 
 data DsoRules_ArchiveSynchronizerRegistrationResult = DsoRules_ArchiveSynchronizerRegistrationResult
@@ -2013,20 +2013,12 @@ template DsoRules with
       -- archived after the vote was requested.
       with
         registeredSynchronizerCid : ContractId RegisteredSynchronizer
-        newOperator : Party
-        newPaymaster : Party
-        newMaxActivityWeight : Decimal
-        newMaxAssetActivityWeight : Decimal
+        update : RegisteredSynchronizer_Update
       controller dso
       do
         void $ fetchChecked (ForDso with dso) registeredSynchronizerCid
-        result <- exercise registeredSynchronizerCid RegisteredSynchronizer_Update with
-          newOperator
-          newPaymaster
-          newMaxActivityWeight
-          newMaxAssetActivityWeight
-        pure DsoRules_UpdateSynchronizerRegistrationResult with
-          registeredSynchronizerCid = result.registeredSynchronizerCid
+        result <- exercise registeredSynchronizerCid update
+        pure DsoRules_UpdateSynchronizerRegistrationResult with result
 
     nonconsuming choice DsoRules_ArchiveSynchronizerRegistration : DsoRules_ArchiveSynchronizerRegistrationResult
       -- ^ Offboards a registered synchronizer by archiving its registration, after which the
