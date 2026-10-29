@@ -5,7 +5,10 @@ package org.lfdecentralizedtrust.splice.integration.tests
 
 import com.digitalasset.canton.SynchronizerAlias
 import org.lfdecentralizedtrust.splice.integration.EnvironmentDefinition
-import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.IntegrationTest
+import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
+  IntegrationTest,
+  SpliceTestConsoleEnvironment,
+}
 
 class SyncOperatorIntegrationTest extends IntegrationTest {
 
@@ -36,5 +39,33 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
         .logical
       syncOperatorBackend.appState.synchronizerId shouldBe served
     }
+
+    "charge traffic the way the global synchronizer does" in { implicit env =>
+      clue("the synchronizer runs traffic control with a zero base rate") {
+        synchronizerParameters.trafficControl.map(_.maxBaseTrafficAmount.value) shouldBe Some(0L)
+      }
+
+      clue("the synchronizer charges traffic the way the global synchronizer does") {
+        val participant = aliceValidatorBackend.participantClientWithAdminToken
+        val globalSynchronizerId =
+          participant.synchronizers.id_of(SynchronizerAlias.tryCreate("global")).logical
+        eventually() {
+          val global = participant.topology.synchronizer_parameters
+            .get_dynamic_synchronizer_parameters(globalSynchronizerId)
+            .trafficControl
+            .value
+          val dedicated = synchronizerParameters.trafficControl.value
+          dedicated.readVsWriteScalingFactor shouldBe global.readVsWriteScalingFactor
+          dedicated.freeConfirmationResponses shouldBe global.freeConfirmationResponses
+        }
+      }
+    }
   }
+
+  private def synchronizerParameters(implicit env: SpliceTestConsoleEnvironment) =
+    syncOperatorBackend.appState.sequencerAdminConnection
+      .getSynchronizerParametersState(syncOperatorBackend.appState.synchronizerId)
+      .futureValue
+      .mapping
+      .parameters
 }
