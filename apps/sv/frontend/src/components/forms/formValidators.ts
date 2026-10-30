@@ -53,6 +53,21 @@ export const partyIdSchema = z
     message: 'Invalid PartyId format. Expected format: identifier::fingerprint',
   });
 
+// A synchronizer id is name::namespace, where the namespace is a key fingerprint, so it is
+// checked for shape here rather than only for being non-empty as the Daml choice does.
+export const synchronizerIdSchema = z
+  .string()
+  .min(1, { message: 'Required' })
+  .regex(/^[a-zA-Z0-9_-]+::[a-zA-Z0-9_-]+$/, {
+    message: 'Invalid synchronizer id. Expected format: name::fingerprint',
+  });
+
+// Canton contract ids are hex strings.
+export const contractIdSchema = z
+  .string()
+  .min(1, { message: 'Required' })
+  .regex(/^[0-9a-fA-F]+$/, { message: 'Invalid contract id. Expected a hex string' });
+
 export const svWeightSchema = z
   .string()
   .min(1, { message: 'Weight is required' })
@@ -201,6 +216,16 @@ export const validateUrl = (value: string): string | false => {
 
 export const validateRevokeFeaturedAppRight = (value: string): string | false => {
   const result = revokeFeaturedAppRightSchema.safeParse(value);
+  return result.success ? false : result.error.issues[0].message;
+};
+
+export const validateSynchronizerId = (value: string): string | false => {
+  const result = synchronizerIdSchema.safeParse(value);
+  return result.success ? false : result.error.issues[0].message;
+};
+
+export const validateContractId = (value: string): string | false => {
+  const result = contractIdSchema.safeParse(value);
   return result.success ? false : result.error.issues[0].message;
 };
 
