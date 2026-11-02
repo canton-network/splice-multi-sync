@@ -350,10 +350,12 @@ describe('Update Dedicated Synchronizer Registration Form', () => {
           tag: 'SRARC_UpdateSynchronizerRegistration',
           value: {
             registeredSynchronizerCid: registrationCid,
-            newOperator: activeSynchronizerRegistrationPayload.operator,
-            newPaymaster: 'new-paymaster::1220abcdef',
-            newMaxActivityWeight: '1.0',
-            newMaxAssetActivityWeight: '0.5',
+            update: {
+              newOperator: activeSynchronizerRegistrationPayload.operator,
+              newPaymaster: 'new-paymaster::1220abcdef',
+              newMaxActivityWeight: '1.0',
+              newMaxAssetActivityWeight: '0.5',
+            },
           },
         },
       },

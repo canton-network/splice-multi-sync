@@ -298,11 +298,12 @@ function createArchiveSynchronizerRegistrationProposal(
   return { registeredSynchronizerCid };
 }
 
-function createUpdateSynchronizerRegistrationProposal(
-  update: DsoRules_UpdateSynchronizerRegistration
-): UpdateSynchronizerRegistrationProposal {
+function createUpdateSynchronizerRegistrationProposal({
+  registeredSynchronizerCid,
+  update,
+}: DsoRules_UpdateSynchronizerRegistration): UpdateSynchronizerRegistrationProposal {
   return {
-    registeredSynchronizerCid: update.registeredSynchronizerCid,
+    registeredSynchronizerCid,
     newFields: {
       operator: update.newOperator,
       paymaster: update.newPaymaster,

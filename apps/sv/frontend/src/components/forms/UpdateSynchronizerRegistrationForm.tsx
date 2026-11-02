@@ -99,10 +99,12 @@ export const UpdateSynchronizerRegistrationForm: React.FC = _ => {
             tag: 'SRARC_UpdateSynchronizerRegistration',
             value: {
               registeredSynchronizerCid: resolved.contractId as ContractId<RegisteredSynchronizer>,
-              newOperator: proposed.operator,
-              newPaymaster: proposed.paymaster,
-              newMaxActivityWeight: proposed.maxActivityWeight,
-              newMaxAssetActivityWeight: proposed.maxAssetActivityWeight,
+              update: {
+                newOperator: proposed.operator,
+                newPaymaster: proposed.paymaster,
+                newMaxActivityWeight: proposed.maxActivityWeight,
+                newMaxAssetActivityWeight: proposed.maxAssetActivityWeight,
+              },
             },
           },
         },
