@@ -129,10 +129,9 @@ data DsoRules_ActionRequiringConfirmation
   | SRARC_CreateFeaturedAppConfigUpdateInstruction DsoRules_CreateFeaturedAppConfigUpdateInstruction
     -- ^ Voted action to change to a featured app right's config.
   | SRARC_RegisterSynchronizer DsoRules_RegisterSynchronizer
-    -- ^ Voted action to register a dedicated synchronizer with its operator and paymaster.
+    -- ^ Voted action to register a dedicated synchronizer with its paymaster.
   | SRARC_UpdateSynchronizerRegistration DsoRules_UpdateSynchronizerRegistration
-    -- ^ Voted action to change the operator, paymaster or activity weights of a registered
-    -- synchronizer.
+    -- ^ Voted action to change the paymaster or activity weights of a registered synchronizer.
   | SRARC_ArchiveSynchronizerRegistration DsoRules_ArchiveSynchronizerRegistration
     -- ^ Voted action to offboard a registered synchronizer by archiving its registration.
   deriving (Eq, Show, Serializable)
@@ -1989,7 +1988,6 @@ template DsoRules with
       -- Registration is the only way the registry is populated.
       with
         synchronizerId : Text -- ^ Id of the dedicated synchronizer to register.
-        operator : Party -- ^ The party operating the dedicated synchronizer.
         paymaster : Party -- ^ The party paying for the synchronizer's traffic.
         maxActivityWeight : Decimal
           -- ^ Highest weight with which the synchronizer's traffic earns app activity.
@@ -2000,17 +1998,17 @@ template DsoRules with
         registeredSynchronizerCid <- create RegisteredSynchronizer with
           dso
           synchronizerId
-          operator
           paymaster
           maxActivityWeight
           maxAssetActivityWeight
         pure DsoRules_RegisterSynchronizerResult with registeredSynchronizerCid
 
     nonconsuming choice DsoRules_UpdateSynchronizerRegistration : DsoRules_UpdateSynchronizerRegistrationResult
-      -- ^ Replaces the operator, paymaster and activity weights of a registered synchronizer.
+      -- ^ Replaces the paymaster and activity weights of a registered synchronizer.
       -- The synchronizer id is the identity of the registration and does not change. The vote
       -- names the registration's contract id, so it fails if the registration was changed or
-      -- archived after the vote was requested.
+      -- archived after the vote was requested. We expect registrations to change very rarely,
+      -- so this is acceptable.
       with
         registeredSynchronizerCid : ContractId RegisteredSynchronizer
         update : RegisteredSynchronizer_Update
@@ -2022,7 +2020,9 @@ template DsoRules with
 
     nonconsuming choice DsoRules_ArchiveSynchronizerRegistration : DsoRules_ArchiveSynchronizerRegistrationResult
       -- ^ Offboards a registered synchronizer by archiving its registration, after which the
-      -- registration can no longer be used to pay for the synchronizer's traffic.
+      -- registration can no longer be used to pay for the synchronizer's traffic. As for an
+      -- update, the vote names the registration's contract id, so it fails if another vote changed
+      -- the registration first. We accept that race, as registrations change very rarely.
       with
         registeredSynchronizerCid : ContractId RegisteredSynchronizer
       controller dso

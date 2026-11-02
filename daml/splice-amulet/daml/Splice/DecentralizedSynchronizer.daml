@@ -202,9 +202,9 @@ data RegisteredSynchronizer_UpdateResult = RegisteredSynchronizer_UpdateResult w
 
 -- | A dedicated synchronizer registered by DSO governance.
 --
--- A dedicated synchronizer is run by its own `operator` with the Splice software, separate from
--- the decentralized synchronizer that hosts Amulet. Its `paymaster` pays for the synchronizer's
--- traffic on the decentralized synchronizer.
+-- A dedicated synchronizer runs the Splice software separately from the decentralized
+-- synchronizer that hosts Amulet. Its `paymaster` pays for the synchronizer's traffic on the
+-- decentralized synchronizer.
 --
 -- The registration is created, updated and archived only by an SV vote, through
 -- `DsoRules_RegisterSynchronizer`, `DsoRules_UpdateSynchronizerRegistration` and
@@ -217,10 +217,6 @@ template RegisteredSynchronizer with
     synchronizerId : Text
       -- ^ Id of the dedicated synchronizer. It identifies the registration and does not change on
       -- update.
-    operator : Party
-      -- ^ The party operating the dedicated synchronizer. It is not an observer: the operator's
-      -- participant need not be connected to the decentralized synchronizer, and a vote naming
-      -- an observer without a participant there could not be executed.
     paymaster : Party
       -- ^ The party paying for the synchronizer's traffic on the decentralized synchronizer.
       -- Observes the registration, so it can read it from its own ledger.
@@ -240,14 +236,12 @@ template RegisteredSynchronizer with
     -- kept.
     choice RegisteredSynchronizer_Update : RegisteredSynchronizer_UpdateResult
       with
-        newOperator : Party
         newPaymaster : Party
         newMaxActivityWeight : Decimal
         newMaxAssetActivityWeight : Decimal
       controller dso
       do
         registeredSynchronizerCid <- create this with
-          operator = newOperator
           paymaster = newPaymaster
           maxActivityWeight = newMaxActivityWeight
           maxAssetActivityWeight = newMaxAssetActivityWeight
