@@ -37,7 +37,7 @@ use_bft=0
 collect_metrics=0
 enable_key_download=0
 logFileHint=canton
-# Base traffic rate on the splitwell synchronizer in bytes; empty means Canton's default.
+# Base traffic rate on the splitwell synchronizer in bytes; empty means mainnet's.
 splitwell_max_base_traffic_amount="${SPLITWELL_MAX_BASE_TRAFFIC_AMOUNT-}"
 
 args=$(getopt -o "hdDap:cB:wsbtfFegmk" -l "help" -- "$@")

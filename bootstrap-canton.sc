@@ -39,22 +39,23 @@ def staticParameters(sequencer: LocalInstanceReference) =
     .map(StaticSynchronizerParameters(_))
     .getOrElse(sys.error("whatever"))
 
-// The base rate is Canton's default unless start-canton.sh sets it; -t sets it to zero for the sync operator tests.
+// The base rate is mainnet's unless start-canton.sh sets it; -t sets it to zero for the sync operator tests.
 val splitwellMaxBaseTrafficAmount = Option(System.getenv("SPLITWELL_MAX_BASE_TRAFFIC_AMOUNT"))
   .filter(_.nonEmpty)
   .map(amount => NonNegativeLong.tryCreate(amount.toLong))
-  .getOrElse(NonNegativeLong.tryCreate(10 * 20 * 1024))
+  .getOrElse(NonNegativeLong.tryCreate(200000))
 
-// Canton's own defaults apart from the base rate. A member only gets a traffic state, and so can
-// only be granted extra traffic, on a synchronizer that has traffic control enabled.
+// The global synchronizer's parameters on mainnet, apart from the base rate. A member only gets
+// a traffic state, and so can only be granted extra traffic, on a synchronizer that has traffic
+// control enabled.
 val defaultTrafficControlParameters = TrafficControlParameters(
   maxBaseTrafficAmount = splitwellMaxBaseTrafficAmount,
-  readVsWriteScalingFactor = PositiveInt.tryCreate(200),
-  maxBaseTrafficAccumulationDuration = PositiveFiniteDuration.ofMinutes(10),
-  setBalanceRequestSubmissionWindowSize = PositiveFiniteDuration.ofMinutes(5),
+  readVsWriteScalingFactor = PositiveInt.tryCreate(4),
+  maxBaseTrafficAccumulationDuration = PositiveFiniteDuration.ofMinutes(20),
+  setBalanceRequestSubmissionWindowSize = PositiveFiniteDuration.ofMinutes(2),
   enforceRateLimiting = true,
   baseEventCost = NonNegativeLong.zero,
-  freeConfirmationResponses = false,
+  freeConfirmationResponses = true,
 )
 
 def bootstrapOtherDomain(
