@@ -33,7 +33,7 @@ import Splice.Testing.TokenStandard.RegistryApiV2 qualified as V2
 import Splice.Testing.TokenStandard.WalletClientV2 qualified as WalletClientV2
 import Splice.Testing.Utils
   ( EnrichedFactoryChoice(..), FailureStatusCheck, allocatePartyExact, discloseMany', emptyExtraArgs
-  , expectErrorId, expectUnmetRequirement, queryDisclosure', submitMustFail'', trafficPurchaseMemoPrefix
+  , expectErrorId, expectMessageContains, queryDisclosure', submitMustFail'', trafficPurchaseMemoPrefix
   )
 
 import Splice.Scripts.Util
@@ -192,7 +192,7 @@ test_direct_rejectsWeightsWithoutRegistration : Script ()
 test_direct_rejectsWeightsWithoutRegistration = do
   setup <- setupDirect
   choiceArg <- paymasterPurchase setup setup.paymaster
-  buyTrafficMustFailWith (expectUnmetRequirement "Activity weights are only given for a registered synchronizer") setup
+  buyTrafficMustFailWith (expectErrorId "splice.lfdecentralizedtrust.org/activity-weight-without-registration") setup
     choiceArg with
       memberId = testMemberId
       synchronizerId = globalSynchronizerId
@@ -231,6 +231,32 @@ test_direct_rejectsEmptyMemberIdForGlobalSynchronizer = do
     choiceArg with
       synchronizerId = globalSynchronizerId
       optRegisteredSynchronizerCid = None
+
+-- A registration that the paymaster signed itself instead of the DSO doesn't let it buy traffic.
+test_direct_rejectsRegistrationNotSignedByTheDso : Script ()
+test_direct_rejectsRegistrationNotSignedByTheDso = do
+  setup <- setupDirect
+  let paymaster = setup.paymaster.primaryParty
+  forgedRegistrationCid <- register paymaster dedicatedSynchronizerId paymaster
+  choiceArg <- paymasterPurchase setup setup.paymaster
+  buyTrafficMustFailWith (expectMessageContains "Contract group identifier mismatch") setup
+    choiceArg with optRegisteredSynchronizerCid = Some forgedRegistrationCid
+
+-- The SVs stop a paymaster by archiving its registration.
+test_direct_rejectsArchivedRegistration : Script ()
+test_direct_rejectsArchivedRegistration = do
+  setup <- setupDirect
+  choiceArg <- paymasterPurchase setup setup.paymaster
+  submit setup.app.dso $ archiveCmd setup.registrationCid
+  trySubmit (actAs setup.paymaster.primaryParty <> readAs setup.app.dso)
+    (exerciseCmd setup.amuletRulesCid choiceArg) >>= expectContractNotFound
+
+-- | Checks that a submission failed because one of its contracts is not active.
+expectContractNotFound : Show a => Either SubmitError a -> Script ()
+expectContractNotFound result = case result of
+  Left (ContractNotFound {}) -> pure ()
+  Left err -> fail $ "Expected ContractNotFound, but got: " <> show err
+  Right value -> fail $ "Expected failure but command succeeded with value: " <> show value
 
 
 -- Token standard purchase
@@ -285,12 +311,18 @@ paymasterMemoParams synchronizerId = "synchronizer-id=" <> synchronizerId <> "&m
 transferFactoryChoice
   : TokenStandardSetup -> Optional (ContractId RegisteredSynchronizer) -> V2.TransferFactory_Transfer
   -> Script (EnrichedFactoryChoice V2.TransferFactory V2.TransferFactory_Transfer)
-transferFactoryChoice setup optRegistrationCid choiceArg = do
+transferFactoryChoice setup = transferFactoryChoiceDisclosedBy setup setup.dso
+
+-- | `transferFactoryChoice` with the registration disclosed by `discloser`, which must see it.
+transferFactoryChoiceDisclosedBy
+  : TokenStandardSetup -> Party -> Optional (ContractId RegisteredSynchronizer) -> V2.TransferFactory_Transfer
+  -> Script (EnrichedFactoryChoice V2.TransferFactory V2.TransferFactory_Transfer)
+transferFactoryChoiceDisclosedBy setup discloser optRegistrationCid choiceArg = do
   enrichedChoice <- V2.getTransferFactory setup.registryV2 choiceArg
   case optRegistrationCid of
     None -> pure enrichedChoice
     Some registrationCid -> do
-      registrationDisclosure <- queryDisclosure' setup.dso registrationCid
+      registrationDisclosure <- queryDisclosure' discloser registrationCid
       pure enrichedChoice with
         arg.extraArgs.context.values =
           TextMap.insert registeredSynchronizerContextKey (AV_ContractId (coerceContractId registrationCid))
@@ -302,6 +334,11 @@ tokenStandardPurchaseMustFailWith
   -> Script ()
 tokenStandardPurchaseMustFailWith check setup sender optRegistrationCid memoParams = do
   enrichedChoice <- trafficPurchaseTransfer setup sender memoParams >>= transferFactoryChoice setup optRegistrationCid
+  submitTokenStandardPurchaseMustFailWith check sender enrichedChoice
+
+submitTokenStandardPurchaseMustFailWith
+  : FailureStatusCheck -> Party -> EnrichedFactoryChoice V2.TransferFactory V2.TransferFactory_Transfer -> Script ()
+submitTokenStandardPurchaseMustFailWith check sender enrichedChoice =
   submitMustFail'' check (actAs sender <> discloseMany' enrichedChoice.disclosures) $
     exerciseCmd enrichedChoice.factoryCid enrichedChoice.arg
 
@@ -336,6 +373,34 @@ test_tokenStandard_rejectsSenderOtherThanPaymaster = do
   setup <- setupTokenStandard
   tokenStandardPurchaseMustFailWith (expectErrorId "splice.lfdecentralizedtrust.org/not-paymaster")
     setup setup.other (Some setup.registrationCid) (paymasterMemoParams dedicatedSynchronizerId)
+
+test_tokenStandard_rejectsSynchronizerOtherThanTheRegistrations : Script ()
+test_tokenStandard_rejectsSynchronizerOtherThanTheRegistrations = do
+  setup <- setupTokenStandard
+  tokenStandardPurchaseMustFailWith (expectErrorId "splice.lfdecentralizedtrust.org/registered-synchronizer-mismatch")
+    setup setup.paymaster (Some setup.registrationCid) (paymasterMemoParams "other-synchronizer::1220abab")
+
+-- A registration that the paymaster signed itself instead of the DSO doesn't let it buy traffic.
+test_tokenStandard_rejectsRegistrationNotSignedByTheDso : Script ()
+test_tokenStandard_rejectsRegistrationNotSignedByTheDso = do
+  setup <- setupTokenStandard
+  forgedRegistrationCid <- register setup.paymaster dedicatedSynchronizerId setup.paymaster
+  enrichedChoice <-
+    trafficPurchaseTransfer setup setup.paymaster (paymasterMemoParams dedicatedSynchronizerId) >>=
+    transferFactoryChoiceDisclosedBy setup setup.paymaster (Some forgedRegistrationCid)
+  submitTokenStandardPurchaseMustFailWith (expectMessageContains "Contract group identifier mismatch")
+    setup.paymaster enrichedChoice
+
+-- The SVs stop a paymaster by archiving its registration.
+test_tokenStandard_rejectsArchivedRegistration : Script ()
+test_tokenStandard_rejectsArchivedRegistration = do
+  setup <- setupTokenStandard
+  enrichedChoice <-
+    trafficPurchaseTransfer setup setup.paymaster (paymasterMemoParams dedicatedSynchronizerId) >>=
+    transferFactoryChoice setup (Some setup.registrationCid)
+  submit setup.dso $ archiveCmd setup.registrationCid
+  trySubmit (actAs setup.paymaster <> discloseMany' enrichedChoice.disclosures)
+    (exerciseCmd enrichedChoice.factoryCid enrichedChoice.arg) >>= expectContractNotFound
 
 test_tokenStandard_rejectsRegistrationForRequiredSynchronizer : Script ()
 test_tokenStandard_rejectsRegistrationForRequiredSynchronizer = do

@@ -507,7 +507,8 @@ class DbScanStore private (
   }
 
   override def lookupRegisteredSynchronizer(
-      synchronizerId: String
+      synchronizerId: String,
+      paymaster: PartyId,
   )(implicit tc: TraceContext): Future[
     Option[ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]]
   ] = waitUntilAcsIngested {
@@ -522,6 +523,7 @@ class DbScanStore private (
             // There are few registrations, so this doesn't need an index.
             additionalWhere = sql"""
                 and create_arguments->>'synchronizerId' = $synchronizerId
+                and create_arguments->>'paymaster' = ${paymaster.toProtoPrimitive}
             """,
             orderLimit = sql"order by event_number desc limit 1",
           ).headOption,

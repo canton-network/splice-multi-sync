@@ -17,7 +17,10 @@ object TokenStandardMetadata {
   // Mirrors "trafficPurchaseMemoPrefix" in splice.DecentralizedSynchronizer.daml.
   val trafficPurchaseMemoPrefix = "splice/memo:"
 
-  /** The `synchronizer-id` of a traffic purchase memo, if it has one. The Daml code
+  // Mirrors "registeredSynchronizerContextKey" in Splice.Amulet.TokenApiUtils.
+  val registeredSynchronizerContextKey = "registered-synchronizer"
+
+  /** The `synchronizer-id` of a traffic purchase memo, if it has a non-empty one. The Daml code
     * (`parseTrafficPurchaseMemo` in splice.DecentralizedSynchronizer.daml) validates the full memo.
     */
   def trafficPurchaseMemoSynchronizerId(memo: String): Option[String] =
@@ -28,6 +31,7 @@ object TokenStandardMetadata {
           .map(_.split("=", -1))
           .collectFirst { case Array("synchronizer-id", synchronizerId) => synchronizerId }
       )
+      .filter(_.nonEmpty)
 
   val expireLockKey = "expire-lock"
 }

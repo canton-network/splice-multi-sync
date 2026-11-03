@@ -26,5 +26,18 @@ class TokenStandardMetadataTest extends AnyWordSpec with BaseTest {
       synchronizerId("splice/memo:member-id=PAR::p::1220ab&migration-id=0") shouldBe None
       synchronizerId("splice/memo:synchronizer-id=a=b&migration-id=0") shouldBe None
     }
+
+    "return None for an empty synchronizer id" in {
+      synchronizerId("splice/memo:synchronizer-id=&migration-id=0") shouldBe None
+    }
+
+    // The Daml code rejects these memos, so it doesn't matter which synchronizer id they give.
+    "not validate the rest of the memo" in {
+      synchronizerId("splice/memo:synchronizer-id=dedicated::1220ef&migration-id=0&") shouldBe
+        Some("dedicated::1220ef")
+      synchronizerId(
+        "splice/memo:synchronizer-id=first::1220aa&synchronizer-id=second::1220bb&migration-id=0"
+      ) shouldBe Some("first::1220aa")
+    }
   }
 }

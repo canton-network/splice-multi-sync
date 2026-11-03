@@ -205,10 +205,10 @@ class CachingScanStore(
       store.lookupTransferCommandCounterByParty,
     ).get(partyId)
 
-  override def lookupRegisteredSynchronizer(synchronizerId: String)(implicit
+  override def lookupRegisteredSynchronizer(synchronizerId: String, paymaster: PartyId)(implicit
       tc: TraceContext
   ): Future[Option[ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]]] =
-    store.lookupRegisteredSynchronizer(synchronizerId)
+    store.lookupRegisteredSynchronizer(synchronizerId, paymaster)
 
   override def lookupLatestTransferCommandEvents(sender: PartyId, nonce: Long, limit: Int)(implicit
       tc: TraceContext

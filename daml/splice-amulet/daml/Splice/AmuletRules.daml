@@ -327,8 +327,8 @@ template AmuletRules
         let trafficConfig = trafficPurchaseConfigFromAmuletConfig configUsd contextMiningRound
         optPaymasterPurchase <- case optRegisteredSynchronizerCid of
           None -> do
-            require "Activity weights are only given for a registered synchronizer"
-              (isNone optActivityWeight && isNone optAssetActivityWeight)
+            unless (isNone optActivityWeight && isNone optAssetActivityWeight) $
+              failWithStatus (mkActivityWeightWithoutRegistrationFailure optActivityWeight optAssetActivityWeight)
             pure None
           Some registeredSynchronizerCid ->
             Some <$> fetchPaymasterPurchase dso registeredSynchronizerCid optActivityWeight optAssetActivityWeight
@@ -1154,7 +1154,7 @@ mkRegisteredSynchronizerMismatchFailure : Text -> Text -> FailureStatus
 mkRegisteredSynchronizerMismatchFailure registeredSynchronizerId synchronizerId =
   mkFailureStatus
     (spliceErrorId "registered-synchronizer-mismatch")
-    InvalidIndependentOfSystemState
+    InvalidGivenCurrentSystemStateOther
     ("The registration is for synchronizer " <> registeredSynchronizerId <> ", not for " <> synchronizerId)
     (TextMap.fromList
       [ ("registeredSynchronizerId", registeredSynchronizerId)
@@ -1198,6 +1198,16 @@ mkInvalidActivityWeightFailure weightName weight maxWeight =
       , ("weight", show weight)
       , ("maxWeight", show maxWeight)
       ])
+
+mkActivityWeightWithoutRegistrationFailure : Optional Decimal -> Optional Decimal -> FailureStatus
+mkActivityWeightWithoutRegistrationFailure optActivityWeight optAssetActivityWeight =
+  mkFailureStatus
+    (spliceErrorId "activity-weight-without-registration")
+    InvalidIndependentOfSystemState
+    "Activity weights are only given for a registered synchronizer"
+    (TextMap.fromList $
+      map (\weight -> ("activityWeight", show weight)) (optionalToList optActivityWeight) <>
+      map (\weight -> ("assetActivityWeight", show weight)) (optionalToList optAssetActivityWeight))
 
 mkMaximumInputsExceededFailure : FailureStatus
 mkMaximumInputsExceededFailure =

@@ -238,9 +238,13 @@ trait ScanStore
     ]]
   ]
 
-  /** The registration of the dedicated synchronizer with the given id, if it is registered. */
+  /** The registration of the dedicated synchronizer with the given id and paymaster, if there is
+    * one. Nothing on the ledger makes a registration unique for its synchronizer id, so the
+    * paymaster picks the registration it pays with.
+    */
   def lookupRegisteredSynchronizer(
-      synchronizerId: String
+      synchronizerId: String,
+      paymaster: PartyId,
   )(implicit tc: TraceContext): Future[
     Option[ContractWithState[
       splice.decentralizedsynchronizer.RegisteredSynchronizer.ContractId,
@@ -425,8 +429,14 @@ object ScanStore {
                 _ => None,
                 member => Some(StoreMemberId(member)),
               ),
-            memberTrafficDomain =
-              Some(SynchronizerId.tryFromString(contract.payload.synchronizerId)),
+            memberTrafficDomain = SynchronizerId
+              .fromString(contract.payload.synchronizerId)
+              .fold(
+                // as for the member id, we ignore an invalid synchronizer id, e.g., a registered
+                // synchronizer's malformed id, instead of killing the ingestion pipeline
+                _ => None,
+                synchronizerId => Some(synchronizerId),
+              ),
             totalTrafficPurchased = Some(contract.payload.totalPurchased),
           )
         },
