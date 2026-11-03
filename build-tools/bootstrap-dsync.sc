@@ -276,3 +276,6 @@ participants.foreach { participant =>
     utils.retry_until_true(participant.synchronizers.is_connected(synchronizerId))
   }
 }
+
+println("dSync bootstrapped and ready. Running ping test...")
+participant1.health.ping(participant2.id, 10.seconds, sequencer1.synchronizer_id)
