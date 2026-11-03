@@ -238,6 +238,16 @@ trait ScanStore
     ]]
   ]
 
+  /** The registration of the dedicated synchronizer with the given id, if it is registered. */
+  def lookupRegisteredSynchronizer(
+      synchronizerId: String
+  )(implicit tc: TraceContext): Future[
+    Option[ContractWithState[
+      splice.decentralizedsynchronizer.RegisteredSynchronizer.ContractId,
+      splice.decentralizedsynchronizer.RegisteredSynchronizer,
+    ]]
+  ]
+
   def lookupLatestTransferCommandEvents(
       sender: PartyId,
       nonce: Long,
@@ -556,6 +566,16 @@ object ScanStore {
             (tc) =>
               pkgVersionSupport
                 .supports24hSubmissionDelay(Seq(key.dsoParty), Seq(key.dsoParty), now)(tc)
+          },
+        ) { contract =>
+          ScanAcsStoreRowData(
+            contract = contract
+          )
+        },
+        mkFilter(splice.decentralizedsynchronizer.RegisteredSynchronizer.COMPANION)(
+          co => co.payload.dso == dso,
+          versionGuard = { case (pkgVersionSupport, now) =>
+            (tc) => pkgVersionSupport.supportsDedicatedSynchronizers(Seq(key.dsoParty), now)(tc)
           },
         ) { contract =>
           ScanAcsStoreRowData(

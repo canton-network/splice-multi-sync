@@ -20,7 +20,10 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.amuletrules.{
   AmuletRules_MintResult,
 }
 import org.lfdecentralizedtrust.splice.codegen.java.splice.ans.AnsEntry
-import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.MemberTraffic
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.{
+  MemberTraffic,
+  RegisteredSynchronizer,
+}
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dso.decentralizedsynchronizer as decentralizedsynchronizerCodegen
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dsorules.{
   DsoRules,
@@ -375,6 +378,25 @@ abstract class ScanStoreTest
           r <- store.lookupTransferCommandCounterByParty(userParty(2))
           _ = r shouldBe None
         } yield succeed
+      }
+    }
+
+    "lookupRegisteredSynchronizer" should {
+      "return the registration of the synchronizer if it is registered" in {
+        val wanted = registeredSynchronizer("dedicated-synchronizer::1220aaaa")
+        val unwanted = registeredSynchronizer("dedicated-synchronizer::1220bbbb")
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(wanted)(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(unwanted)(store.multiDomainAcsStore)
+        } yield {
+          store
+            .lookupRegisteredSynchronizer("dedicated-synchronizer::1220aaaa")
+            .futureValue shouldBe Some(ContractWithState(wanted, Assigned(dummyDomain)))
+          store
+            .lookupRegisteredSynchronizer("dedicated-synchronizer::1220cccc")
+            .futureValue shouldBe None
+        }
       }
     }
 
@@ -1609,6 +1631,9 @@ trait AmuletTransferUtil { self: StoreTestBase =>
           domainMigrationId,
           extraTraffic,
           Optional.of(dsoParty.toProtoPrimitive),
+          Optional.empty(),
+          Optional.empty(),
+          Optional.empty(),
         ).toValue,
         mkAmuletRules_BuyMemberTrafficResult(
           round = round,
@@ -1778,6 +1803,19 @@ trait AmuletTransferUtil { self: StoreTestBase =>
       template,
     )
   }
+
+  def registeredSynchronizer(synchronizerId: String) =
+    contract(
+      RegisteredSynchronizer.TEMPLATE_ID_WITH_PACKAGE_ID,
+      new RegisteredSynchronizer.ContractId(nextCid()),
+      new RegisteredSynchronizer(
+        dsoParty.toProtoPrimitive,
+        synchronizerId,
+        providerParty(1).toProtoPrimitive,
+        numeric(1.0),
+        numeric(0.5),
+      ),
+    )
 
   def memberTraffic(member: Member, domainMigrationId: Long, totalPurchased: Long) = {
     val template = new MemberTraffic(
