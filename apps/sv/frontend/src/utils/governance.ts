@@ -285,7 +285,6 @@ function createRegisterSynchronizerProposal(
 ): RegisterSynchronizerProposal {
   return {
     synchronizerId: register.synchronizerId,
-    operator: register.operator,
     paymaster: register.paymaster,
     maxActivityWeight: register.maxActivityWeight,
     maxAssetActivityWeight: register.maxAssetActivityWeight,
@@ -305,7 +304,6 @@ function createUpdateSynchronizerRegistrationProposal({
   return {
     registeredSynchronizerCid,
     newFields: {
-      operator: update.newOperator,
       paymaster: update.newPaymaster,
       maxActivityWeight: update.newMaxActivityWeight,
       maxAssetActivityWeight: update.newMaxAssetActivityWeight,

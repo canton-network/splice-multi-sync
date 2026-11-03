@@ -28,14 +28,14 @@ vi.mock('../../../hooks/useListVoteRequests', () => ({
 }));
 
 const synchronizerId = activeSynchronizerRegistrationPayload.synchronizerId;
-const operator = activeSynchronizerRegistrationPayload.operator;
+const paymaster = activeSynchronizerRegistrationPayload.paymaster;
 const registrationCid = activeSynchronizerRegistration.contract_id;
 
-const duplicateOperator = 'operator::1220f00dfeed';
+const duplicatePaymaster = 'paymaster::1220f00dfeed';
 const duplicateRegistration = {
   ...activeSynchronizerRegistration,
   contract_id: registrationCid.replace(/^00a1/, '00b2'),
-  payload: { ...activeSynchronizerRegistrationPayload, operator: duplicateOperator },
+  payload: { ...activeSynchronizerRegistrationPayload, paymaster: duplicatePaymaster },
 };
 const duplicateCid = duplicateRegistration.contract_id;
 
@@ -121,8 +121,8 @@ describe('Offboard Dedicated Synchronizer Form', () => {
       screen.getByTestId('archive-synchronizer-registration-resolved-contract-id-field').textContent
     ).toBe(registrationCid);
     expect(
-      screen.getByTestId('archive-synchronizer-registration-resolved-operator-party-id')
-    ).toHaveTextContent(operator);
+      screen.getByTestId('archive-synchronizer-registration-resolved-paymaster-party-id')
+    ).toHaveTextContent(paymaster);
   });
 
   test('lets the proposer pick among duplicate registrations', async () => {
@@ -147,8 +147,8 @@ describe('Offboard Dedicated Synchronizer Form', () => {
       screen.getByTestId('archive-synchronizer-registration-resolved-contract-id-field').textContent
     ).toBe(duplicateCid);
     expect(
-      screen.getByTestId('archive-synchronizer-registration-resolved-operator-party-id')
-    ).toHaveTextContent(duplicateOperator);
+      screen.getByTestId('archive-synchronizer-registration-resolved-paymaster-party-id')
+    ).toHaveTextContent(duplicatePaymaster);
   });
 
   test('rejects a synchronizer id that is not registered', async () => {

@@ -401,7 +401,6 @@ export const closedVoteCid =
 export const activeSynchronizerRegistrationPayload = {
   dso: dsoInfo.dso_party_id,
   synchronizerId: 'dedicated::1220deadbeef',
-  operator: 'operator::1220cafebabe',
   paymaster: 'paymaster::1220feedface',
   maxActivityWeight: '1.0000000000',
   maxAssetActivityWeight: '0.5000000000',

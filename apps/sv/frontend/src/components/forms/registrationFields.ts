@@ -48,7 +48,6 @@ const weightField = (label: string, subtitle: string) => ({
 });
 
 export const registrationFields: RegistrationFieldSpecs = {
-  operator: partyField('Synchronizer Operator', 'The party operating the dedicated synchronizer'),
   paymaster: partyField(
     'Paymaster',
     "The party paying for the synchronizer's traffic on the decentralized synchronizer"

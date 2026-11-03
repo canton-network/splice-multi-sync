@@ -37,7 +37,6 @@ const toResolvedRegistration = (contract: OpenAPIContract): ResolvedSynchronizer
     contractId: registration.contractId,
     synchronizerId: registration.payload.synchronizerId,
     fields: {
-      operator: registration.payload.operator,
       paymaster: registration.payload.paymaster,
       maxActivityWeight: registration.payload.maxActivityWeight,
       maxAssetActivityWeight: registration.payload.maxAssetActivityWeight,

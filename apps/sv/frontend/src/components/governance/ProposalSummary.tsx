@@ -266,13 +266,6 @@ export const ProposalSummary: React.FC<ProposalSummaryProps> = props => {
               value={props.synchronizerId}
             />
             <ProposalReviewField
-              id="operator"
-              label={registrationFields.operator.label}
-              value={
-                <ReviewPartyId partyId={props.fields.operator} data-testid="operator-party-id" />
-              }
-            />
-            <ProposalReviewField
               id="paymaster"
               label={registrationFields.paymaster.label}
               value={
@@ -299,16 +292,6 @@ export const ProposalSummary: React.FC<ProposalSummaryProps> = props => {
               id="synchronizerId"
               label="Synchronizer ID"
               value={props.registration.synchronizerId}
-            />
-            <ProposalReviewField
-              id="operator"
-              label={registrationFields.operator.label}
-              value={
-                <ReviewPartyId
-                  partyId={props.registration.fields.operator}
-                  data-testid="operator-party-id"
-                />
-              }
             />
             <ProposalReviewField
               id="paymaster"

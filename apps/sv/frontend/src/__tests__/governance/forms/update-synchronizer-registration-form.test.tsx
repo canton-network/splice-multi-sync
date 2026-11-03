@@ -92,9 +92,6 @@ describe('Update Dedicated Synchronizer Registration Form', () => {
     expect(screen.getByTestId(`${prefix}-maxAssetActivityWeight`).getAttribute('value')).toBe(
       '0.5'
     );
-    expect(screen.getByTestId(`${prefix}-operator`).getAttribute('value')).toBe(
-      activeSynchronizerRegistrationPayload.operator
-    );
     expect(screen.getByTestId(`${prefix}-paymaster`).getAttribute('value')).toBe(
       activeSynchronizerRegistrationPayload.paymaster
     );
@@ -351,7 +348,6 @@ describe('Update Dedicated Synchronizer Registration Form', () => {
           value: {
             registeredSynchronizerCid: registrationCid,
             update: {
-              newOperator: activeSynchronizerRegistrationPayload.operator,
               newPaymaster: 'new-paymaster::1220abcdef',
               newMaxActivityWeight: '1.0',
               newMaxAssetActivityWeight: '0.5',

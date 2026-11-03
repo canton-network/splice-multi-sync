@@ -52,7 +52,7 @@ const PartyItem = ({
   partyId,
 }: {
   idPrefix: string;
-  field: 'operator' | 'paymaster';
+  field: 'paymaster';
   partyId: string;
 }) => (
   <DetailItem
@@ -102,7 +102,6 @@ export const RegisterSynchronizerSection: React.FC<RegisterSynchronizerSectionPr
       data-testid="proposal-details-register-synchronizer-section"
     >
       <SynchronizerIdItem idPrefix={idPrefix} synchronizerId={proposal.synchronizerId} />
-      <PartyItem idPrefix={idPrefix} field="operator" partyId={proposal.operator} />
       <PartyItem idPrefix={idPrefix} field="paymaster" partyId={proposal.paymaster} />
       <WeightItem
         idPrefix={idPrefix}
@@ -144,7 +143,6 @@ const PinnedRegistration = ({
     {registration && (
       <>
         <SynchronizerIdItem idPrefix={idPrefix} synchronizerId={registration.synchronizerId} />
-        <PartyItem idPrefix={idPrefix} field="operator" partyId={registration.operator} />
         <PartyItem idPrefix={idPrefix} field="paymaster" partyId={registration.paymaster} />
       </>
     )}

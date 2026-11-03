@@ -1551,7 +1551,6 @@ describe('Dedicated synchronizer votes', () => {
       proposal: {
         registeredSynchronizerCid,
         newFields: {
-          operator: activeSynchronizerRegistrationPayload.operator,
           paymaster: activeSynchronizerRegistrationPayload.paymaster,
           maxActivityWeight: '2.5000000000',
           maxAssetActivityWeight: activeSynchronizerRegistrationPayload.maxAssetActivityWeight,
@@ -1559,14 +1558,13 @@ describe('Dedicated synchronizer votes', () => {
       } as UpdateSynchronizerRegistrationProposal,
     }) as ProposalDetails;
 
-  test('a register vote shows the synchronizer, operator, paymaster and weights', () => {
+  test('a register vote shows the synchronizer, paymaster and weights', () => {
     renderDetails({
       ...voteRequest.proposalDetails,
       actionName: 'Register Dedicated Synchronizer',
       action: 'SRARC_RegisterSynchronizer',
       proposal: {
         synchronizerId: 'dedicated::1220deadbeef',
-        operator: 'operator::1220cafebabe',
         paymaster: 'paymaster::1220feedface',
         maxActivityWeight: '1.0000000000',
         maxAssetActivityWeight: '0.2500000000',
@@ -1582,9 +1580,6 @@ describe('Dedicated synchronizer votes', () => {
     expect(screen.getByTestId('proposal-details-synchronizer-id')).toHaveTextContent(
       'dedicated::1220deadbeef'
     );
-    expect(screen.getByTestId('proposal-details-operator-party-id')).toHaveTextContent(
-      'operator::1220cafebabe'
-    );
     expect(screen.getByTestId('proposal-details-paymaster-party-id')).toHaveTextContent(
       'paymaster::1220feedface'
     );
@@ -1592,7 +1587,7 @@ describe('Dedicated synchronizer votes', () => {
     expect(screen.getByTestId('proposal-details-maxAssetActivityWeight').textContent).toBe('0.25');
   });
 
-  test('an offboard vote shows the synchronizer, operator and paymaster of a live registration', async () => {
+  test('an offboard vote shows the synchronizer and paymaster of a live registration', async () => {
     renderDetails(archiveDetails(liveCid));
 
     expect(screen.getByTestId('proposal-details-action-value').textContent).toBe(
@@ -1601,9 +1596,6 @@ describe('Dedicated synchronizer votes', () => {
     expect(
       await screen.findByTestId('proposal-details-archive-synchronizer-synchronizer-id')
     ).toHaveTextContent(activeSynchronizerRegistrationPayload.synchronizerId);
-    expect(
-      screen.getByTestId('proposal-details-archive-synchronizer-operator-party-id')
-    ).toHaveTextContent(activeSynchronizerRegistrationPayload.operator);
     expect(
       screen.getByTestId('proposal-details-archive-synchronizer-paymaster-party-id')
     ).toHaveTextContent(activeSynchronizerRegistrationPayload.paymaster);
@@ -1664,7 +1656,7 @@ describe('Dedicated synchronizer votes', () => {
       await screen.findByTestId('proposal-details-update-synchronizer-registration-stale-warning')
     ).toBeInTheDocument();
     // Without the current registration there is nothing to compare, so every value is listed.
-    expect(screen.getAllByTestId('config-change')).toHaveLength(4);
+    expect(screen.getAllByTestId('config-change')).toHaveLength(3);
     expect(screen.queryByTestId('config-change-current-value')).toBeNull();
   });
 });

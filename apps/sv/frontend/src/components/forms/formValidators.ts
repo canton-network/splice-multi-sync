@@ -53,13 +53,36 @@ export const partyIdSchema = z
     message: 'Invalid PartyId format. Expected format: identifier::fingerprint',
   });
 
-// A synchronizer id is name::namespace, where the namespace is a key fingerprint, so it is
-// checked for shape here rather than only for being non-empty as the Daml choice does.
+// Mirrors Canton's SynchronizerId.fromString, which the SV app also runs before it creates the
+// vote: the Daml choice only requires a non-empty id, but a malformed one breaks SV and Scan
+// ingestion. The id splits at its first `::` into a name and a fingerprint, both Daml party
+// strings without `::`, of at most 185 and 68 characters.
+const cantonIdPart = /^[a-zA-Z0-9:_ -]+$/;
+
+const synchronizerIdError = (id: string): string | undefined => {
+  const delimiter = id.indexOf('::');
+  if (delimiter < 0) return 'Invalid synchronizer id. Expected format: name::fingerprint';
+  const name = id.slice(0, delimiter);
+  const fingerprint = id.slice(delimiter + 2);
+  if (!name) return 'Invalid synchronizer id: the name before `::` is empty';
+  if (!fingerprint) return 'Invalid synchronizer id: the fingerprint after `::` is empty';
+  if (fingerprint.includes('::')) return 'Invalid synchronizer id: `::` may appear only once';
+  if (!cantonIdPart.test(name) || !cantonIdPart.test(fingerprint)) {
+    return 'Invalid synchronizer id: only letters, digits, spaces and : _ - are allowed';
+  }
+  if (name.length > 185) return 'Invalid synchronizer id: the name has more than 185 characters';
+  if (fingerprint.length > 68) {
+    return 'Invalid synchronizer id: the fingerprint has more than 68 characters';
+  }
+  return undefined;
+};
+
 export const synchronizerIdSchema = z
   .string()
   .min(1, { message: 'Required' })
-  .regex(/^[a-zA-Z0-9_-]+::[a-zA-Z0-9_-]+$/, {
-    message: 'Invalid synchronizer id. Expected format: name::fingerprint',
+  .superRefine((id, ctx) => {
+    const message = synchronizerIdError(id);
+    if (message) ctx.addIssue({ code: 'custom', message });
   });
 
 // Canton contract ids are hex strings.

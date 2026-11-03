@@ -28,7 +28,6 @@ vi.mock('../../../hooks/useListVoteRequests', () => ({
 }));
 
 const validSynchronizerId = 'dedicated::1220deadbeef';
-const validOperator = 'operator::1220cafebabe';
 const validPaymaster = 'paymaster::1220feedface';
 const weightFields = ['maxActivityWeight', 'maxAssetActivityWeight'] as const;
 
@@ -54,7 +53,6 @@ describe('Register Dedicated Synchronizer Form', () => {
     expect(actionInput.textContent).toBe('Register Dedicated Synchronizer');
 
     expect(screen.getByTestId('register-synchronizer-synchronizer-id')).toBeInTheDocument();
-    expect(screen.getByTestId('register-synchronizer-operator')).toBeInTheDocument();
     expect(screen.getByTestId('register-synchronizer-paymaster')).toBeInTheDocument();
     expect(screen.getByTestId('register-synchronizer-maxActivityWeight')).toBeInTheDocument();
     expect(screen.getByTestId('register-synchronizer-maxAssetActivityWeight')).toBeInTheDocument();
@@ -85,7 +83,6 @@ describe('Register Dedicated Synchronizer Form', () => {
       screen.getByTestId('register-synchronizer-synchronizer-id'),
       validSynchronizerId
     );
-    await user.type(screen.getByTestId('register-synchronizer-operator'), validOperator);
     await user.type(screen.getByTestId('register-synchronizer-paymaster'), validPaymaster);
 
     // the weights are prefilled, so they never block submission
@@ -107,6 +104,22 @@ describe('Register Dedicated Synchronizer Form', () => {
     await user.click(screen.getByTestId('register-synchronizer-action'));
 
     screen.getByText('Invalid synchronizer id. Expected format: name::fingerprint');
+  });
+
+  test('rejects a synchronizer id that Canton cannot parse', async () => {
+    const user = userEvent.setup();
+    render(
+      <Wrapper>
+        <RegisterSynchronizerForm />
+      </Wrapper>
+    );
+
+    const synchronizerIdInput = screen.getByTestId('register-synchronizer-synchronizer-id');
+    await user.type(synchronizerIdInput, `dedicated::${'1'.repeat(69)}`);
+    await user.click(screen.getByTestId('register-synchronizer-action'));
+
+    screen.getByText('Invalid synchronizer id: the fingerprint has more than 68 characters');
+    expect(mockListRegistrations).not.toHaveBeenCalled();
   });
 
   test('prefills both weights with the full weight', () => {
@@ -178,7 +191,6 @@ describe('Register Dedicated Synchronizer Form', () => {
       screen.getByTestId('register-synchronizer-synchronizer-id'),
       validSynchronizerId
     );
-    await user.type(screen.getByTestId('register-synchronizer-operator'), validOperator);
     await user.type(screen.getByTestId('register-synchronizer-paymaster'), validPaymaster);
     const assetWeight = screen.getByTestId('register-synchronizer-maxAssetActivityWeight');
     await user.clear(assetWeight);
@@ -204,7 +216,6 @@ describe('Register Dedicated Synchronizer Form', () => {
           tag: 'SRARC_RegisterSynchronizer',
           value: {
             synchronizerId: validSynchronizerId,
-            operator: validOperator,
             paymaster: validPaymaster,
             maxActivityWeight: '1.0',
             maxAssetActivityWeight: '0.25',
@@ -222,7 +233,7 @@ describe('Register Dedicated Synchronizer Form, duplicate registration', () => {
       screen.getByTestId('register-synchronizer-synchronizer-id'),
       validSynchronizerId
     );
-    await user.click(screen.getByTestId('register-synchronizer-operator'));
+    await user.click(screen.getByTestId('register-synchronizer-paymaster'));
   };
 
   test('rejects a synchronizer id that is already registered', async () => {
@@ -296,7 +307,7 @@ describe('Register Dedicated Synchronizer Form, duplicate registration', () => {
     );
 
     await user.type(screen.getByTestId('register-synchronizer-synchronizer-id'), 'not-an-id');
-    await user.click(screen.getByTestId('register-synchronizer-operator'));
+    await user.click(screen.getByTestId('register-synchronizer-paymaster'));
 
     // the check is gated on the id parsing, so the ledger is never asked about a malformed one
     expect(await screen.findByText(/Invalid synchronizer id/)).toBeInTheDocument();
@@ -330,7 +341,7 @@ describe('Register Dedicated Synchronizer Form, duplicate registration', () => {
 
     await user.type(screen.getByTestId('register-synchronizer-summary'), 'Register a sync');
     await user.type(screen.getByTestId('register-synchronizer-url'), 'https://example.com');
-    await user.type(screen.getByTestId('register-synchronizer-operator'), validOperator);
+    await user.type(screen.getByTestId('register-synchronizer-paymaster'), validPaymaster);
     await enterSynchronizerId(user);
 
     expect(await screen.findByText(/already registered/)).toBeInTheDocument();

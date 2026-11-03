@@ -249,7 +249,6 @@ describe('Review Proposal Component', () => {
     contractId: '00a1b2c3d4e5f6',
     synchronizerId: 'dedicated::1220deadbeef',
     fields: {
-      operator: 'operator::1220cafebabe',
       paymaster: 'paymaster::1220feedface',
       maxActivityWeight: '1.0000000000',
       maxAssetActivityWeight: '0.5000000000',
@@ -278,9 +277,6 @@ describe('Review Proposal Component', () => {
     expect(screen.getByTestId('synchronizerId-field').textContent).toBe(
       registration.synchronizerId
     );
-    expect(screen.getByTestId('operator-party-id-value').textContent).toBe(
-      registration.fields.operator
-    );
     expect(screen.getByTestId('paymaster-party-id-value').textContent).toBe(
       registration.fields.paymaster
     );
@@ -308,9 +304,6 @@ describe('Review Proposal Component', () => {
     expectCommonReviewFields(actionName);
     expect(screen.getByTestId('synchronizerId-field').textContent).toBe(
       registration.synchronizerId
-    );
-    expect(screen.getByTestId('operator-party-id-value').textContent).toBe(
-      registration.fields.operator
     );
     expect(screen.getByTestId('paymaster-party-id-value').textContent).toBe(
       registration.fields.paymaster

@@ -34,13 +34,6 @@ export const ResolvedSynchronizerRegistrationFields: React.FC<
       value={registration.synchronizerId}
     />
     <ProposalReviewField
-      id={`${id}-operator`}
-      label={registrationFields.operator.label}
-      value={
-        <PartyValue partyId={registration.fields.operator} testId={`${id}-operator-party-id`} />
-      }
-    />
-    <ProposalReviewField
       id={`${id}-paymaster`}
       label={registrationFields.paymaster.label}
       value={
