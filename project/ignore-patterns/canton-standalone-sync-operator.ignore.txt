@@ -1,4 +1,4 @@
-# With a zero base rate, a member's sends are refused until its traffic purchase is granted.
+# With a zero base rate, a member's sends are refused until the sync operator grants it traffic.
 # The participant retries them automatically. Every layer that surfaces the refusal carries
 # the error code; the outbox retry line carries the transaction hashes instead.
 SEQUENCER_NOT_ENOUGH_TRAFFIC_CREDIT
