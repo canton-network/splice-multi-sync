@@ -2548,15 +2548,14 @@ abstract class SvDsoStoreTest extends StoreTestBase with HasExecutionContext {
     )
   }
 
-  private def registeredSynchronizer(operator: PartyId, synchronizerId: String) =
+  private def registeredSynchronizer(paymaster: PartyId, synchronizerId: String) =
     contract(
       RegisteredSynchronizer.TEMPLATE_ID_WITH_PACKAGE_ID,
       new RegisteredSynchronizer.ContractId(nextCid()),
       new RegisteredSynchronizer(
         dsoParty.toProtoPrimitive,
         synchronizerId,
-        operator.toProtoPrimitive,
-        operator.toProtoPrimitive,
+        paymaster.toProtoPrimitive,
         java.math.BigDecimal.ONE.setScale(10),
         java.math.BigDecimal.ONE.setScale(10),
       ),
