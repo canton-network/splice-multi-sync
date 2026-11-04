@@ -33,9 +33,9 @@ val domainParametersConfig = SynchronizerParametersConfig(
   topologyChangeDelay = Some(if (tokenFile == "canton-simtime.tokens") NonNegativeFiniteDuration.Zero else NonNegativeFiniteDuration.ofMillis(250)),
 )
 
-def staticParameters(sequencer: LocalInstanceReference) =
+def staticParameters(sequencer: LocalInstanceReference, protocolVersion: ProtocolVersion) =
   domainParametersConfig
-    .toStaticSynchronizerParameters(sequencer.config.crypto, ProtocolVersion.v36, NonNegativeInt.zero)
+    .toStaticSynchronizerParameters(sequencer.config.crypto, protocolVersion, NonNegativeInt.zero)
     .map(StaticSynchronizerParameters(_))
     .getOrElse(sys.error("whatever"))
 
@@ -44,6 +44,13 @@ val splitwellMaxBaseTrafficAmount = Option(System.getenv("SPLITWELL_MAX_BASE_TRA
   .filter(_.nonEmpty)
   .map(amount => NonNegativeLong.tryCreate(amount.toLong))
   .getOrElse(NonNegativeLong.tryCreate(200000))
+
+// -t also runs splitwell on protocol version 37, the first that lets the sync operator buy traffic
+// for a participant before it joins.
+val splitwellProtocolVersion = Option(System.getenv("SPLITWELL_PROTOCOL_VERSION"))
+  .filter(_.nonEmpty)
+  .map(ProtocolVersion.tryCreate)
+  .getOrElse(ProtocolVersion.v36)
 
 // The global synchronizer's parameters on mainnet, apart from the base rate. A member only gets
 // a traffic state, and so can only be granted extra traffic, on a synchronizer that has traffic
@@ -65,6 +72,7 @@ def bootstrapOtherDomain(
     // Traffic control is off by default here: only synchronizers that stand in for a dedicated one
     // need it, and enabling it everywhere would change what every other test sequences against.
     enableTrafficControl: Boolean = false,
+    protocolVersion: ProtocolVersion = ProtocolVersion.v36,
 ) = {
   bootstrap.synchronizer(
     name,
@@ -72,7 +80,7 @@ def bootstrapOtherDomain(
     sequencers = Seq(sequencer),
     mediators = Seq(mediator),
     synchronizerThreshold = PositiveInt.one,
-    staticSynchronizerParameters = staticParameters(sequencer),
+    staticSynchronizerParameters = staticParameters(sequencer, protocolVersion),
   )
   // For some stupid reason bootstrap.domain does not allow changing the dynamic domain parameters
   // so we overwrite it here.
@@ -103,7 +111,13 @@ def bootstrapOtherDomain(
 
 // splitwell is the only non-global synchronizer a sync operator can be pointed at today, so it
 // carries traffic control; see apps/app/src/test/resources/sync-operator-topology.conf.
-bootstrapOtherDomain("splitwell", splitwellSequencer, splitwellMediator, enableTrafficControl = true)
+bootstrapOtherDomain(
+  "splitwell",
+  splitwellSequencer,
+  splitwellMediator,
+  enableTrafficControl = true,
+  protocolVersion = splitwellProtocolVersion,
+)
 bootstrapOtherDomain("splitwellUpgrade", splitwellUpgradeSequencer, splitwellUpgradeMediator)
 
 // These user allocations are only there
