@@ -92,6 +92,7 @@ class SyncOperatorApp(
         synchronizerId,
         synchronizerNode,
         config.trafficControl,
+        config.trafficBalanceReconciliationDelay,
         loggerFactory,
       )
     } yield {
