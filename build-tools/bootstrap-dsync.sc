@@ -246,6 +246,8 @@ val maxTraffic = NonNegativeLong.tryCreate(Long.MaxValue)
 // Resubmitting within the same submission window would be refused for the same reason, so we skip
 // members that already have a traffic balance. The sequencers only report the traffic state of
 // members that are known in the topology, so for participants this only works once they have connected.
+// TODO(#splice-multi-sync/87): Once we integrate the dSync operator app, it sill initialize the traffic
+// balances for mediators, so those can be skipped here.
 val trafficMembers: Seq[(String, Member)] =
   participants.map(p => p.name -> p.id) ++ mediators.map(m => m.name -> m.id)
 trafficMembers.foreach { case (name, member) =>
