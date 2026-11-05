@@ -1921,13 +1921,13 @@ data MemberTrafficPurchaseResult = MemberTrafficPurchaseResult with
 -- the traffic is for one.
 --
 -- Without a registration, the traffic is for a member of the decentralized synchronizer: the
--- synchronizer must be one of the `supportedSynchronizerIds` and the purchase must name a member.
+-- synchronizer must be one of the `supportedSynchronizerIds` and the purchase's `memberId` must not be empty.
 --
 -- With a registration, the registration replaces the `supportedSynchronizerIds` check. The provider
 -- must be its paymaster and the synchronizer its synchronizer, which must not be one of the
 -- `supportedSynchronizerIds`, so that a registration can't stand in for the decentralized
--- synchronizer. The paymaster pays for the synchronizer as a whole, so the purchase must not name a
--- member, and a registered synchronizer has no migrations, so the migration id must be 0. The
+-- synchronizer. The paymaster pays for the synchronizer as a whole, so the purchase's `memberId`
+-- must be empty, and a registered synchronizer has no migrations, so the migration id must be 0. The
 -- activity weights must not be negative or above the registration's max.
 --
 -- Both purchases must be for at least the `minTrafficTopupAmount`.
@@ -1944,7 +1944,7 @@ validateBuyMemberTrafficInputs trafficConfig optPaymasterPurchase purchase = do
           Left $ mkUnknownSynchronizerFailure purchase.synchronizerId
       | T.isEmpty purchase.memberId =
           Left $ mkInvalidMemberIdFailure
-            ("Traffic for synchronizer " <> purchase.synchronizerId <> " must be bought for a member")
+            ("Traffic for synchronizer " <> purchase.synchronizerId <> " needs a memberId")
             purchase.memberId
       | otherwise = Right ()
     validatePaymasterPurchase PaymasterPurchase{..}
@@ -1958,7 +1958,7 @@ validateBuyMemberTrafficInputs trafficConfig optPaymasterPurchase purchase = do
           Left $ mkInvalidMigrationIdFailure registration.synchronizerId purchase.migrationId
       | not (T.isEmpty purchase.memberId) =
           Left $ mkInvalidMemberIdFailure
-            ("Traffic for registered synchronizer " <> registration.synchronizerId <> " must not be bought for a member")
+            ("Traffic for registered synchronizer " <> registration.synchronizerId <> " must have an empty memberId")
             purchase.memberId
       | not (isAllowedWeight activityWeight registration.maxActivityWeight) =
           Left $ mkInvalidActivityWeightFailure "activity weight" activityWeight registration.maxActivityWeight
@@ -2005,8 +2005,8 @@ buyMemberTraffic eventLogCid csum trafficConfig optPaymasterPurchase purchase (t
     amuletSpent = trafficCostAmulet
     usdSpent = trafficCostUsd
   -- TODO(ChainSafe/canton-extending-mainnet#155): Given a paymaster's purchase, record the
-  -- `paymasterActivity` it earns for `purchase.trafficAmount` through the CIP-0104 hook
-  -- `ActivityRecorder_DsoRecordActivity` once upstream Splice ships it.
+  -- `paymasterActivity` it earns for `purchase.trafficAmount` through the CIP-0104
+  -- `ActivityRecorder` hook once upstream Splice ships it.
   pure MemberTrafficPurchaseResult with ..
 
 data AppTransferContext = AppTransferContext

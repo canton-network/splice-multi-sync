@@ -44,8 +44,8 @@ dedicatedSynchronizerId : Text
 dedicatedSynchronizerId = "dedicated-synchronizer::1220dededededededededededededededededededededededededededededede"
 
 -- | The only one of the `requiredSynchronizers` in the test config.
-globalSynchronizerId : Text
-globalSynchronizerId = "decentralized-synchronizer-id-0"
+decentralizedSynchronizerId : Text
+decentralizedSynchronizerId = "decentralized-synchronizer-id-0"
 
 testMemberId : Text
 testMemberId = "PAR::alice-participant::1220abcd"
@@ -195,18 +195,18 @@ test_direct_rejectsWeightsWithoutRegistration = do
   buyTrafficMustFailWith (expectErrorId "splice.lfdecentralizedtrust.org/activity-weight-without-registration") setup
     choiceArg with
       memberId = testMemberId
-      synchronizerId = globalSynchronizerId
+      synchronizerId = decentralizedSynchronizerId
       optRegisteredSynchronizerCid = None
       optActivityWeight = Some 0.5
 
 test_direct_rejectsRegistrationForRequiredSynchronizer : Script ()
 test_direct_rejectsRegistrationForRequiredSynchronizer = do
   setup <- setupDirect
-  registrationCid <- register setup.app.dso globalSynchronizerId setup.paymaster.primaryParty
+  registrationCid <- register setup.app.dso decentralizedSynchronizerId setup.paymaster.primaryParty
   choiceArg <- paymasterPurchase setup setup.paymaster
   buyTrafficMustFailWith (expectErrorId "splice.lfdecentralizedtrust.org/registered-required-synchronizer") setup
     choiceArg with
-      synchronizerId = globalSynchronizerId
+      synchronizerId = decentralizedSynchronizerId
       optRegisteredSynchronizerCid = Some registrationCid
 
 test_direct_rejectsNonZeroMigrationId : Script ()
@@ -223,16 +223,16 @@ test_direct_rejectsMemberIdForRegisteredSynchronizer = do
   buyTrafficMustFailWith (expectErrorId "splice.lfdecentralizedtrust.org/invalid-member-id") setup
     choiceArg with memberId = testMemberId
 
-test_direct_rejectsEmptyMemberIdForGlobalSynchronizer : Script ()
-test_direct_rejectsEmptyMemberIdForGlobalSynchronizer = do
+test_direct_rejectsEmptyMemberIdForDecentralizedSynchronizer : Script ()
+test_direct_rejectsEmptyMemberIdForDecentralizedSynchronizer = do
   setup <- setupDirect
   choiceArg <- paymasterPurchase setup setup.paymaster
   buyTrafficMustFailWith (expectErrorId "splice.lfdecentralizedtrust.org/invalid-member-id") setup
     choiceArg with
-      synchronizerId = globalSynchronizerId
+      synchronizerId = decentralizedSynchronizerId
       optRegisteredSynchronizerCid = None
 
--- A registration that the paymaster signed itself instead of the DSO doesn't let it buy traffic.
+-- A registration that the paymaster signed itself instead of the DSO party doesn't let it buy traffic.
 test_direct_rejectsRegistrationNotSignedByTheDso : Script ()
 test_direct_rejectsRegistrationNotSignedByTheDso = do
   setup <- setupDirect
@@ -380,7 +380,7 @@ test_tokenStandard_rejectsSynchronizerOtherThanTheRegistrations = do
   tokenStandardPurchaseMustFailWith (expectErrorId "splice.lfdecentralizedtrust.org/registered-synchronizer-mismatch")
     setup setup.paymaster (Some setup.registrationCid) (paymasterMemoParams "other-synchronizer::1220abab")
 
--- A registration that the paymaster signed itself instead of the DSO doesn't let it buy traffic.
+-- A registration that the paymaster signed itself instead of the DSO party doesn't let it buy traffic.
 test_tokenStandard_rejectsRegistrationNotSignedByTheDso : Script ()
 test_tokenStandard_rejectsRegistrationNotSignedByTheDso = do
   setup <- setupTokenStandard
@@ -405,9 +405,9 @@ test_tokenStandard_rejectsArchivedRegistration = do
 test_tokenStandard_rejectsRegistrationForRequiredSynchronizer : Script ()
 test_tokenStandard_rejectsRegistrationForRequiredSynchronizer = do
   setup <- setupTokenStandard
-  registrationCid <- register setup.dso globalSynchronizerId setup.paymaster
+  registrationCid <- register setup.dso decentralizedSynchronizerId setup.paymaster
   tokenStandardPurchaseMustFailWith (expectErrorId "splice.lfdecentralizedtrust.org/registered-required-synchronizer")
-    setup setup.paymaster (Some registrationCid) (paymasterMemoParams globalSynchronizerId)
+    setup setup.paymaster (Some registrationCid) (paymasterMemoParams decentralizedSynchronizerId)
 
 test_tokenStandard_rejectsNonZeroMigrationId : Script ()
 test_tokenStandard_rejectsNonZeroMigrationId = do
@@ -423,8 +423,8 @@ test_tokenStandard_rejectsMemberIdForRegisteredSynchronizer = do
     setup setup.paymaster (Some setup.registrationCid)
     ("member-id=" <> testMemberId <> "&" <> paymasterMemoParams dedicatedSynchronizerId)
 
-test_tokenStandard_rejectsMissingMemberIdForGlobalSynchronizer : Script ()
-test_tokenStandard_rejectsMissingMemberIdForGlobalSynchronizer = do
+test_tokenStandard_rejectsMissingMemberIdForDecentralizedSynchronizer : Script ()
+test_tokenStandard_rejectsMissingMemberIdForDecentralizedSynchronizer = do
   setup <- setupTokenStandard
   tokenStandardPurchaseMustFailWith (expectErrorId "splice.lfdecentralizedtrust.org/invalid-member-id")
-    setup setup.paymaster None (paymasterMemoParams globalSynchronizerId)
+    setup setup.paymaster None (paymasterMemoParams decentralizedSynchronizerId)

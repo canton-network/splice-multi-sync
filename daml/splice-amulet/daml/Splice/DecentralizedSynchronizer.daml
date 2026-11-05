@@ -112,7 +112,7 @@ trafficPurchaseMemoPrefix = "splice/memo:"
 
 -- | Parse the purchase arguments from memo tag using url query param style:
 -- `splice/memo:[member-id=...&]synchronizer-id=...&migration-id=...[&forfeit-validator-reward-coupon=true|false]`.
--- A memo without a `member-id` parses to an empty member id. Only a paymaster's purchase for its
+-- A memo without a `member-id` parses to an empty `memberId`. Only a paymaster's purchase for its
 -- registered synchronizer may leave it out, which `validateBuyMemberTrafficInputs` checks.
 parseTrafficPurchaseMemo : Text -> Either Text TrafficPurchaseMemo
 parseTrafficPurchaseMemo memo = do
@@ -266,7 +266,7 @@ data PaymasterPurchase = PaymasterPurchase with
   deriving (Eq, Show)
 
 -- | The CIP-0104 activity that a paymaster earns for a traffic purchase for its registered
--- synchronizer. It has the shape of the arguments of the `ActivityRecorder_DsoRecordActivity`
+-- synchronizer. It has the shape of the arguments of the CIP-0104 `ActivityRecorder`
 -- hook, with one entry for the paymaster in each list.
 data PaymasterActivity = PaymasterActivity with
     appActivity : [(Party, Int)]
