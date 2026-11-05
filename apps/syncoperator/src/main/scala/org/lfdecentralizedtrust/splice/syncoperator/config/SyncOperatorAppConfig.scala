@@ -4,6 +4,7 @@
 package org.lfdecentralizedtrust.splice.syncoperator.config
 
 import com.digitalasset.canton.config.*
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import org.lfdecentralizedtrust.splice.config.{
   AutomationConfig,
   HttpClientConfig,
@@ -13,7 +14,6 @@ import org.lfdecentralizedtrust.splice.config.{
   SpliceParametersConfig,
   SplicePostgresConfig,
 }
-import org.lfdecentralizedtrust.splice.scan.config.ScanAppClientConfig
 
 // The sequencer of a synchronizer node this operator runs.
 case class SyncOperatorSequencerConfig(
@@ -29,6 +29,18 @@ case class SyncOperatorSynchronizerNodesConfig(
     current: SyncOperatorSynchronizerNodeConfig
 )
 
+/** Traffic control parameters the global synchronizer can adjust, defaulting to its mainnet
+  * values.
+  */
+case class SyncOperatorTrafficControlConfig(
+    // charge 4 per 10,000, i.e., 0.04% of write cost for every read.
+    readVsWriteScalingFactor: PositiveInt = PositiveInt.tryCreate(4),
+    maxBaseTrafficAccumulationDuration: PositiveFiniteDuration =
+      PositiveFiniteDuration.ofMinutes(20),
+    setBalanceRequestSubmissionWindowSize: PositiveFiniteDuration =
+      PositiveFiniteDuration.ofMinutes(2),
+)
+
 case class SyncOperatorAppBackendConfig(
     override val adminApi: AdminServerConfig = AdminServerConfig(),
     override val storage: DbConfig,
@@ -36,8 +48,8 @@ case class SyncOperatorAppBackendConfig(
     // Ledger API user of the operator party.
     operatorUser: String,
     participantClient: ParticipantClientConfig,
-    scanClient: ScanAppClientConfig,
     synchronizerNodes: SyncOperatorSynchronizerNodesConfig,
+    trafficControl: SyncOperatorTrafficControlConfig = SyncOperatorTrafficControlConfig(),
     override val automation: AutomationConfig = AutomationConfig(),
     parameters: SpliceParametersConfig = SpliceParametersConfig(batching = BatchingConfig()),
     // Set to false to disable the DB-level exclusive lock that prevents two sync operator instances

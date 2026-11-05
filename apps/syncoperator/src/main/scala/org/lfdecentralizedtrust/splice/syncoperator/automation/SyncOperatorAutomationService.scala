@@ -12,9 +12,9 @@ import org.lfdecentralizedtrust.splice.automation.{AutomationService, Automation
 import org.lfdecentralizedtrust.splice.automation.AutomationServiceCompanion.TriggerClass
 import org.lfdecentralizedtrust.splice.config.AutomationConfig
 import org.lfdecentralizedtrust.splice.environment.RetryProvider
-import org.lfdecentralizedtrust.splice.scan.admin.api.client.ScanConnection
 import org.lfdecentralizedtrust.splice.store.DomainTimeSynchronization
 import org.lfdecentralizedtrust.splice.syncoperator.SyncOperatorSynchronizerNode
+import org.lfdecentralizedtrust.splice.syncoperator.config.SyncOperatorTrafficControlConfig
 
 import scala.concurrent.ExecutionContextExecutor
 
@@ -25,7 +25,7 @@ class SyncOperatorAutomationService(
     retryProvider: RetryProvider,
     synchronizerId: SynchronizerId,
     synchronizerNode: SyncOperatorSynchronizerNode,
-    scanConnection: ScanConnection,
+    trafficControlConfig: SyncOperatorTrafficControlConfig,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
     ec: ExecutionContextExecutor,
@@ -46,7 +46,7 @@ class SyncOperatorAutomationService(
       triggerContext,
       synchronizerId,
       synchronizerNode,
-      scanConnection,
+      trafficControlConfig,
     )
   )
 }
