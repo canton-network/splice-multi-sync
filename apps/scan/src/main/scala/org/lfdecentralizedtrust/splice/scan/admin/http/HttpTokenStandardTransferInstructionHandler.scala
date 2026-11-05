@@ -30,6 +30,7 @@ import org.lfdecentralizedtrust.splice.util.{
   DarResourcesUtil,
   GovernanceLockUtil,
   TokenStandardAccount,
+  TokenStandardMetadata,
 }
 import org.lfdecentralizedtrust.tokenstandard.transferinstruction.v1
 import org.lfdecentralizedtrust.tokenstandard.transferinstruction.v2
@@ -80,8 +81,14 @@ class HttpTokenStandardTransferInstructionHandler(
           body.excludeDebugFields.getOrElse(false)
         )
         dsoRules <- store.getDsoRules()
+        sender = PartyId.tryFromProtoPrimitive(transferInstr.transfer.sender)
+        optRegisteredSynchronizer <- lookupTrafficPurchaseRegistration(
+          sender,
+          transferInstr.transfer.receiver,
+          transferInstr.transfer.meta,
+        )
         result <- buildTransferFactory(
-          PartyId.tryFromProtoPrimitive(transferInstr.transfer.sender),
+          sender,
           PartyId.tryFromProtoPrimitive(transferInstr.transfer.receiver),
           body.excludeDebugFields.getOrElse(false),
         )((optTransferPreapproval, optFeaturedAppRight, externalPartyAmuletRules) => {
@@ -97,7 +104,8 @@ class HttpTokenStandardTransferInstructionHandler(
               kind,
               choiceContext = choiceContextBuilder
                 .addOptionalContracts(
-                  "transfer-preapproval" -> optTransferPreapproval
+                  "transfer-preapproval" -> optTransferPreapproval,
+                  TokenStandardMetadata.registeredSynchronizerContextKey -> optRegisteredSynchronizer,
                 )
                 .addFeaturedAppRight(clock, dsoRules.payload, optFeaturedAppRight)
                 .disclose(externalPartyAmuletRules.contract)
@@ -189,13 +197,18 @@ class HttpTokenStandardTransferInstructionHandler(
           body.excludeDebugFields.getOrElse(false)
         )
         dsoRules <- store.getDsoRules()
+        sender = PartyId.tryFromProtoPrimitive(
+          TokenStandardAccount.tryGetRegularAccountOwner(transferInstr.transfer.sender)
+        )
+        receiver = TokenStandardAccount.tryGetRegularAccountOwner(transferInstr.transfer.receiver)
+        optRegisteredSynchronizer <- lookupTrafficPurchaseRegistration(
+          sender,
+          receiver,
+          transferInstr.transfer.meta,
+        )
         result <- buildTransferFactory(
-          PartyId.tryFromProtoPrimitive(
-            TokenStandardAccount.tryGetRegularAccountOwner(transferInstr.transfer.sender)
-          ),
-          PartyId.tryFromProtoPrimitive(
-            TokenStandardAccount.tryGetRegularAccountOwner(transferInstr.transfer.receiver)
-          ),
+          sender,
+          PartyId.tryFromProtoPrimitive(receiver),
           body.excludeDebugFields.getOrElse(false),
         )((optTransferPreapproval, optFeaturedAppRight, externalPartyAmuletRules) => {
           val isSelfTransfer = transferInstr.transfer.receiver == transferInstr.transfer.sender
@@ -210,7 +223,8 @@ class HttpTokenStandardTransferInstructionHandler(
               kind,
               choiceContext = choiceContextBuilder
                 .addOptionalContracts(
-                  "transfer-preapproval" -> optTransferPreapproval
+                  "transfer-preapproval" -> optTransferPreapproval,
+                  TokenStandardMetadata.registeredSynchronizerContextKey -> optRegisteredSynchronizer,
                 )
                 .addFeaturedAppRight(clock, dsoRules.payload, optFeaturedAppRight)
                 .disclose(externalPartyAmuletRules.contract)
@@ -277,6 +291,40 @@ class HttpTokenStandardTransferInstructionHandler(
       }
     }
   }
+
+  /** The registration of the dedicated synchronizer that a traffic purchase's memo names, which a
+    * paymaster's purchase for its registered synchronizer needs in its choice context. Only the
+    * paymaster may buy traffic for a registered synchronizer, so this looks up the registration
+    * whose paymaster is the sender. None for any other transfer, and for a purchase for one of
+    * the required synchronizers, for which the Daml code refuses a registration.
+    */
+  private def lookupTrafficPurchaseRegistration(
+      sender: PartyId,
+      receiver: String,
+      meta: metadatav1.Metadata,
+  )(implicit tc: TraceContext): Future[Option[ContractWithState[
+    splice.decentralizedsynchronizer.RegisteredSynchronizer.ContractId,
+    splice.decentralizedsynchronizer.RegisteredSynchronizer,
+  ]]] =
+    Option
+      .when(receiver == TokenStandardMetadata.trafficPurchaseReceiver)(
+        meta.values.asScala.get(TokenStandardMetadata.reasonMetaKey)
+      )
+      .flatten
+      .flatMap(TokenStandardMetadata.trafficPurchaseMemoSynchronizerId) match {
+      case None => Future.successful(None)
+      case Some(synchronizerId) =>
+        for {
+          amuletRules <- store.getAmuletRules()
+          requiredSynchronizers = AmuletConfigSchedule(amuletRules.payload.configSchedule)
+            .getConfigAsOf(clock.now)
+            .decentralizedSynchronizer
+            .requiredSynchronizers
+          optRegistration <-
+            if (requiredSynchronizers.map.containsKey(synchronizerId)) Future.successful(None)
+            else store.lookupRegisteredSynchronizer(synchronizerId, sender)
+        } yield optRegistration
+    }
 
   private def buildTransferFactory[FactoryResponse](
       sender: PartyId,

@@ -90,6 +90,16 @@ test_parseMemo_rejectsMissingKey : Script ()
 test_parseMemo_rejectsMissingKey = script do
   parse (trafficPurchaseMemoPrefix <> "member-id=" <> testMemberId <> "&synchronizer-id=" <> testSynchronizerId) ===
     Left "Missing key in traffic purchase memo: migration-id"
+  parse (trafficPurchaseMemoPrefix <> "member-id=" <> testMemberId <> "&migration-id=3") ===
+    Left "Missing key in traffic purchase memo: synchronizer-id"
+
+-- A paymaster's purchase for its registered synchronizer leaves out the `member-id`.
+test_parseMemo_memberIdIsOptional : Script ()
+test_parseMemo_memberIdIsOptional = script do
+  parse (trafficPurchaseMemoPrefix <> "synchronizer-id=" <> testSynchronizerId <> "&migration-id=3") ===
+    Right (expectedMemo with memberId = "")
+  parse (trafficPurchaseMemoPrefix <> "member-id=&synchronizer-id=" <> testSynchronizerId <> "&migration-id=3") ===
+    Right (expectedMemo with memberId = "")
 
 test_parseMemo_rejectsUnknownKey : Script ()
 test_parseMemo_rejectsUnknownKey = script do

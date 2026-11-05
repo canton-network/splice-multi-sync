@@ -31,7 +31,7 @@ import Splice.AmuletTransferInstruction
 import Splice.AmuletRules
 import Splice.GovernanceLock (lockManagerParty)
 import Splice.GovernanceLock.Request (governanceLock_transferFactoryV1_transferImpl)
-import Splice.DecentralizedSynchronizer (MemberTrafficPurchase(..), parseTrafficPurchaseMemo)
+import Splice.DecentralizedSynchronizer (MemberTrafficPurchase(..), RegisteredSynchronizer, parseTrafficPurchaseMemo)
 import Splice.Round (OpenMiningRound(..))
 import Splice.Types
 import Splice.Util
@@ -398,13 +398,20 @@ amulet_transferFactoryV1_transferImpl this actors arg = do
   ensureNoAccountMeta "transfer" "receiver" transfer.meta
 
   if transfer.receiver == trafficPurchaseReceiver then do
-    -- TODO(#7561): accept a RegisteredSynchronizer to support dedicated synchronizers.
     purchaseMemo <- case parseTrafficPurchaseMemo (reasonFromMeta transfer.meta) of
       Left err -> fail err
       Right memo -> pure memo
     trafficConfig <- case trafficPurchaseConfigFromConfigState configState of
       None -> fail "The referenced ExternalPartyConfigState carries no traffic purchase configuration"
       Some trafficConfig -> pure trafficConfig
+    -- A paymaster's purchase for its registered synchronizer comes with the registration in the
+    -- choice context (canton-network/splice#7561). The paymaster earns activity with the
+    -- registration's max weights.
+    optRegisteredSynchronizerCid <-
+      lookupFromContextU @(ContractId RegisteredSynchronizer) arg.extraArgs.context registeredSynchronizerContextKey
+    optPaymasterPurchase <- case optRegisteredSynchronizerCid of
+      None -> pure None
+      Some registeredSynchronizerCid -> Some <$> fetchPaymasterPurchase dso registeredSynchronizerCid None None
     paymentContext <- unfeaturedPaymentContextFromChoiceContext dso arg.extraArgs.context
     csum <- summarizeAndValidateExternalPartyContext paymentContext dso transfer.sender
     require "Traffic price must be positive" (trafficConfig.trafficPrice > 0.0)
@@ -429,7 +436,7 @@ amulet_transferFactoryV1_transferImpl this actors arg = do
           migrationId = purchaseMemo.migrationId
           trafficAmount = floor (trafficCostUsd * 1e6 / trafficConfig.trafficPrice)
     inputs <- holdingToTransferInputs (ForOwner with dso; owner = transfer.sender) transfer.inputHoldingCids
-    result <- buyMemberTraffic (toInterfaceContractId configStateCid) csum trafficConfig purchase
+    result <- buyMemberTraffic (toInterfaceContractId configStateCid) csum trafficConfig optPaymasterPurchase purchase
       (transfer.amount, trafficCostUsd) inputs
       burnRewardPolicy
     pure Api.Token.TransferInstructionV1.TransferInstructionResult with

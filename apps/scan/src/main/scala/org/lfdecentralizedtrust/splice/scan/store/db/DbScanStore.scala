@@ -26,7 +26,10 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.amuletrules.{
   TransferPreapproval,
 }
 import org.lfdecentralizedtrust.splice.codegen.java.splice.ans.{AnsEntry, AnsRules}
-import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.MemberTraffic
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.{
+  MemberTraffic,
+  RegisteredSynchronizer,
+}
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dso.svstate.SvNodeState
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dsorules.{
   DsoRules_CloseVoteRequestResult,
@@ -501,6 +504,32 @@ class DbScanStore private (
           "lookupTransferCommandCounterReceiver",
         )
     } yield contractWithStateFromRow(TransferCommandCounter.COMPANION)(row)).value
+  }
+
+  override def lookupRegisteredSynchronizer(
+      synchronizerId: String,
+      paymaster: PartyId,
+  )(implicit tc: TraceContext): Future[
+    Option[ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]]
+  ] = waitUntilAcsIngested {
+    (for {
+      row <- storage
+        .querySingle(
+          selectFromAcsTableWithState(
+            ScanTables.acsTableName,
+            acsStoreId,
+            domainMigrationId,
+            RegisteredSynchronizer.COMPANION,
+            // There are few registrations, so this doesn't need an index.
+            additionalWhere = sql"""
+                and create_arguments->>'synchronizerId' = $synchronizerId
+                and create_arguments->>'paymaster' = ${paymaster.toProtoPrimitive}
+            """,
+            orderLimit = sql"order by event_number desc limit 1",
+          ).headOption,
+          "lookupRegisteredSynchronizer",
+        )
+    } yield contractWithStateFromRow(RegisteredSynchronizer.COMPANION)(row)).value
   }
 
   override def lookupFeaturedAppRight(

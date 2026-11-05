@@ -238,6 +238,20 @@ trait ScanStore
     ]]
   ]
 
+  /** The registration of the dedicated synchronizer with the given id and paymaster, if there is
+    * one. Nothing on the ledger makes a registration unique for its synchronizer id, so the
+    * paymaster picks the registration it pays with.
+    */
+  def lookupRegisteredSynchronizer(
+      synchronizerId: String,
+      paymaster: PartyId,
+  )(implicit tc: TraceContext): Future[
+    Option[ContractWithState[
+      splice.decentralizedsynchronizer.RegisteredSynchronizer.ContractId,
+      splice.decentralizedsynchronizer.RegisteredSynchronizer,
+    ]]
+  ]
+
   def lookupLatestTransferCommandEvents(
       sender: PartyId,
       nonce: Long,
@@ -415,8 +429,14 @@ object ScanStore {
                 _ => None,
                 member => Some(StoreMemberId(member)),
               ),
-            memberTrafficDomain =
-              Some(SynchronizerId.tryFromString(contract.payload.synchronizerId)),
+            memberTrafficDomain = SynchronizerId
+              .fromString(contract.payload.synchronizerId)
+              .fold(
+                // as for the member id, we ignore an invalid synchronizer id, e.g., a registered
+                // synchronizer's malformed id, instead of killing the ingestion pipeline
+                _ => None,
+                synchronizerId => Some(synchronizerId),
+              ),
             totalTrafficPurchased = Some(contract.payload.totalPurchased),
           )
         },
@@ -556,6 +576,16 @@ object ScanStore {
             (tc) =>
               pkgVersionSupport
                 .supports24hSubmissionDelay(Seq(key.dsoParty), Seq(key.dsoParty), now)(tc)
+          },
+        ) { contract =>
+          ScanAcsStoreRowData(
+            contract = contract
+          )
+        },
+        mkFilter(splice.decentralizedsynchronizer.RegisteredSynchronizer.COMPANION)(
+          co => co.payload.dso == dso,
+          versionGuard = { case (pkgVersionSupport, now) =>
+            (tc) => pkgVersionSupport.supportsDedicatedSynchronizers(Seq(key.dsoParty), now)(tc)
           },
         ) { contract =>
           ScanAcsStoreRowData(

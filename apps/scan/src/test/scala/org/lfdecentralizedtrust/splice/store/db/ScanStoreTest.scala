@@ -20,7 +20,10 @@ import org.lfdecentralizedtrust.splice.codegen.java.splice.amuletrules.{
   AmuletRules_MintResult,
 }
 import org.lfdecentralizedtrust.splice.codegen.java.splice.ans.AnsEntry
-import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.MemberTraffic
+import org.lfdecentralizedtrust.splice.codegen.java.splice.decentralizedsynchronizer.{
+  MemberTraffic,
+  RegisteredSynchronizer,
+}
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dso.decentralizedsynchronizer as decentralizedsynchronizerCodegen
 import org.lfdecentralizedtrust.splice.codegen.java.splice.dsorules.{
   DsoRules,
@@ -375,6 +378,73 @@ abstract class ScanStoreTest
           r <- store.lookupTransferCommandCounterByParty(userParty(2))
           _ = r shouldBe None
         } yield succeed
+      }
+    }
+
+    "lookupRegisteredSynchronizer" should {
+      val synchronizerA = "dedicated-synchronizer::1220aaaa"
+      val synchronizerB = "dedicated-synchronizer::1220bbbb"
+
+      "return the registration of the synchronizer if it is registered" in {
+        val wanted = registeredSynchronizer(synchronizerA)
+        val unwanted = registeredSynchronizer(synchronizerB)
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(wanted)(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(unwanted)(store.multiDomainAcsStore)
+        } yield {
+          store
+            .lookupRegisteredSynchronizer(synchronizerA, providerParty(1))
+            .futureValue shouldBe Some(ContractWithState(wanted, Assigned(dummyDomain)))
+          store
+            .lookupRegisteredSynchronizer("dedicated-synchronizer::1220cccc", providerParty(1))
+            .futureValue shouldBe None
+          store
+            .lookupRegisteredSynchronizer(synchronizerA, providerParty(2))
+            .futureValue shouldBe None
+        }
+      }
+
+      "return the registration of the given paymaster if a synchronizer has several" in {
+        val ofPaymaster1 = registeredSynchronizer(synchronizerA, paymaster = providerParty(1))
+        val ofPaymaster2 = registeredSynchronizer(synchronizerA, paymaster = providerParty(2))
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(ofPaymaster1)(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(ofPaymaster2)(store.multiDomainAcsStore)
+        } yield {
+          store
+            .lookupRegisteredSynchronizer(synchronizerA, providerParty(1))
+            .futureValue shouldBe Some(ContractWithState(ofPaymaster1, Assigned(dummyDomain)))
+          store
+            .lookupRegisteredSynchronizer(synchronizerA, providerParty(2))
+            .futureValue shouldBe Some(ContractWithState(ofPaymaster2, Assigned(dummyDomain)))
+        }
+      }
+
+      "not return an archived registration" in {
+        val archived = registeredSynchronizer(synchronizerA)
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(archived)(store.multiDomainAcsStore)
+          _ <- dummyDomain.archive(archived)(store.multiDomainAcsStore)
+        } yield {
+          store
+            .lookupRegisteredSynchronizer(synchronizerA, providerParty(1))
+            .futureValue shouldBe None
+        }
+      }
+
+      "not return a registration of another DSO" in {
+        val ofOtherDso = registeredSynchronizer(synchronizerA, dso = mkPartyId("other-dso"))
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(ofOtherDso)(store.multiDomainAcsStore)
+        } yield {
+          store
+            .lookupRegisteredSynchronizer(synchronizerA, providerParty(1))
+            .futureValue shouldBe None
+        }
       }
     }
 
@@ -1609,6 +1679,9 @@ trait AmuletTransferUtil { self: StoreTestBase =>
           domainMigrationId,
           extraTraffic,
           Optional.of(dsoParty.toProtoPrimitive),
+          Optional.empty(),
+          Optional.empty(),
+          Optional.empty(),
         ).toValue,
         mkAmuletRules_BuyMemberTrafficResult(
           round = round,
@@ -1778,6 +1851,23 @@ trait AmuletTransferUtil { self: StoreTestBase =>
       template,
     )
   }
+
+  def registeredSynchronizer(
+      synchronizerId: String,
+      paymaster: PartyId = providerParty(1),
+      dso: PartyId = dsoParty,
+  ) =
+    contract(
+      RegisteredSynchronizer.TEMPLATE_ID_WITH_PACKAGE_ID,
+      new RegisteredSynchronizer.ContractId(nextCid()),
+      new RegisteredSynchronizer(
+        dso.toProtoPrimitive,
+        synchronizerId,
+        paymaster.toProtoPrimitive,
+        numeric(1.0),
+        numeric(0.5),
+      ),
+    )
 
   def memberTraffic(member: Member, domainMigrationId: Long, totalPurchased: Long) = {
     val template = new MemberTraffic(
