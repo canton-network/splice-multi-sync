@@ -23,8 +23,6 @@ import org.lfdecentralizedtrust.splice.syncoperator.automation.{
   PreJoinParticipantTrafficTrigger,
 }
 
-import scala.concurrent.duration.DurationInt
-
 class SyncOperatorIntegrationTest extends IntegrationTest {
 
   override def environmentDefinition: SpliceEnvironmentDefinition =
@@ -136,9 +134,11 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
         preJoinTrigger.resume()
       }
 
+      // A ping to another participant would also wait for that participant's vetting to reach
+      // splitwell. Bob's connect only returned once his own topology was sequenced.
       clue("the participant that joined late transacts") {
-        eventuallySucceeds(timeUntilSuccess = 2.minutes) {
-          bob.health.ping(alice.id, synchronizerId = Some(synchronizerId))
+        eventuallySucceeds() {
+          bob.health.ping(bob.id, synchronizerId = Some(synchronizerId))
         }
       }
     }
