@@ -1940,8 +1940,7 @@ lazy val `apps-syncoperator` =
   project
     .in(file("apps/syncoperator"))
     .dependsOn(
-      `apps-common` % "compile->compile;test->test",
-      `apps-scan` % "compile->compile;test->test",
+      `apps-common` % "compile->compile;test->test"
     )
     .settings(
       BuildCommon.sharedAppSettings

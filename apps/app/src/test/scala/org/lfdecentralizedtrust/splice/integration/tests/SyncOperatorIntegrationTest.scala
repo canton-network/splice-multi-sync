@@ -4,7 +4,9 @@
 package org.lfdecentralizedtrust.splice.integration.tests
 
 import com.digitalasset.canton.SynchronizerAlias
+import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.time.PositiveFiniteDuration as InternalPositiveFiniteDuration
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.{
@@ -12,6 +14,7 @@ import com.digitalasset.canton.topology.transaction.{
   ParticipantSynchronizerPermission,
 }
 import org.lfdecentralizedtrust.splice.automation.GrantUnlimitedTrafficTriggerBase.UnlimitedTraffic
+import org.lfdecentralizedtrust.splice.config.ConfigTransforms
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
 import org.lfdecentralizedtrust.splice.integration.EnvironmentDefinition
 import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
@@ -22,14 +25,27 @@ import org.lfdecentralizedtrust.splice.syncoperator.automation.{
   ParticipantUnlimitedTrafficTrigger,
   PreJoinParticipantTrafficTrigger,
 }
+import org.lfdecentralizedtrust.splice.syncoperator.config.SyncOperatorTrafficControlConfig
 
 class SyncOperatorIntegrationTest extends IntegrationTest {
+
+  // Values the bootstrap does not set, to check that the trigger applies them to the synchronizer.
+  private val trafficControlConfig = SyncOperatorTrafficControlConfig(
+    readVsWriteScalingFactor = PositiveInt.tryCreate(5),
+    maxBaseTrafficAccumulationDuration = PositiveFiniteDuration.ofMinutes(10),
+    setBalanceRequestSubmissionWindowSize = PositiveFiniteDuration.ofMinutes(4),
+  )
 
   override def environmentDefinition: SpliceEnvironmentDefinition =
     EnvironmentDefinition
       .fromResources(
         Seq("simple-topology-1sv.conf", "sync-operator-topology.conf"),
         this.getClass.getSimpleName,
+      )
+      .addConfigTransforms((_, config) =>
+        ConfigTransforms.updateAllSyncOperatorAppConfigs_(
+          _.copy(trafficControl = trafficControlConfig)
+        )(config)
       )
       .withOnlyAliceValidatorConnectingToSplitwell
       .withStandardSetup
@@ -53,23 +69,24 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
       syncOperatorBackend.appState.synchronizerId shouldBe served
     }
 
-    "charge traffic the way the global synchronizer does" in { implicit env =>
-      clue("the synchronizer runs traffic control with a zero base rate") {
-        synchronizerParameters.trafficControl.map(_.maxBaseTrafficAmount.value) shouldBe Some(0L)
-      }
-
-      clue("the synchronizer charges traffic the way the global synchronizer does") {
-        val participant = aliceValidatorBackend.participantClientWithAdminToken
-        val globalSynchronizerId =
-          participant.synchronizers.id_of(SynchronizerAlias.tryCreate("global")).logical
-        eventually() {
-          val global = participant.topology.synchronizer_parameters
-            .get_dynamic_synchronizer_parameters(globalSynchronizerId)
-            .trafficControl
-            .value
-          val dedicated = synchronizerParameters.trafficControl.value
-          dedicated.readVsWriteScalingFactor shouldBe global.readVsWriteScalingFactor
-          dedicated.freeConfirmationResponses shouldBe global.freeConfirmationResponses
+    "apply the configured traffic parameters to its synchronizer" in { implicit env =>
+      eventually() {
+        val trafficControl = synchronizerParameters.trafficControl.value
+        clue("the synchronizer has no free traffic and free confirmation responses") {
+          trafficControl.maxBaseTrafficAmount shouldBe NonNegativeLong.zero
+          trafficControl.freeConfirmationResponses shouldBe true
+        }
+        clue("the synchronizer has the configured values") {
+          trafficControl.readVsWriteScalingFactor shouldBe
+            trafficControlConfig.readVsWriteScalingFactor
+          trafficControl.maxBaseTrafficAccumulationDuration shouldBe
+            InternalPositiveFiniteDuration.fromConfig(
+              trafficControlConfig.maxBaseTrafficAccumulationDuration
+            )
+          trafficControl.setBalanceRequestSubmissionWindowSize shouldBe
+            InternalPositiveFiniteDuration.fromConfig(
+              trafficControlConfig.setBalanceRequestSubmissionWindowSize
+            )
         }
       }
     }

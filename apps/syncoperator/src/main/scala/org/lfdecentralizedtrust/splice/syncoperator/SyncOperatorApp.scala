@@ -24,7 +24,6 @@ import org.lfdecentralizedtrust.splice.environment.{
   SequencerAdminConnection,
   SpliceLedgerClient,
 }
-import org.lfdecentralizedtrust.splice.scan.admin.api.client.ScanConnection
 import org.lfdecentralizedtrust.splice.syncoperator.automation.SyncOperatorAutomationService
 import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorAppBackendConfig,
@@ -80,16 +79,6 @@ class SyncOperatorApp(
   )(implicit traceContext: TraceContext): Future[SyncOperatorApp.State] = {
     val synchronizerNode = newSynchronizerNode(config.synchronizerNodes.current)
     for {
-      scanConnection <- appInitStep(s"Get scan connection") {
-        ScanConnection.singleCached(
-          ledgerClient,
-          config.scanClient,
-          appParameters.upgradesConfig,
-          clock,
-          retryProvider,
-          loggerFactory,
-        )
-      }
       synchronizerId <- appInitStep("Get the synchronizer id from the sequencer") {
         servedSynchronizerId(synchronizerNode.sequencerAdminConnection)
       }
@@ -102,7 +91,7 @@ class SyncOperatorApp(
         retryProvider,
         synchronizerId,
         synchronizerNode,
-        scanConnection,
+        config.trafficControl,
         config.trafficBalanceReconciliationDelay,
         loggerFactory,
       )
@@ -110,7 +99,6 @@ class SyncOperatorApp(
       SyncOperatorApp.State(
         automation,
         storage,
-        scanConnection,
         synchronizerId,
         synchronizerNode,
         loggerFactory.getTracedLogger(SyncOperatorApp.State.getClass),
@@ -190,7 +178,6 @@ object SyncOperatorApp {
   case class State(
       automation: SyncOperatorAutomationService,
       storage: DbStorage,
-      scanConnection: ScanConnection,
       synchronizerId: SynchronizerId,
       synchronizerNode: SyncOperatorSynchronizerNode,
       logger: TracedLogger,
@@ -205,6 +192,6 @@ object SyncOperatorApp {
     override def isHealthy: Boolean = storage.isActive
 
     override def close(): Unit =
-      LifeCycle.close(automation, storage, scanConnection, synchronizerNode)(logger)
+      LifeCycle.close(automation, storage, synchronizerNode)(logger)
   }
 }
