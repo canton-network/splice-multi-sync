@@ -16,6 +16,7 @@ import org.lfdecentralizedtrust.splice.environment.RetryProvider
 import org.lfdecentralizedtrust.splice.store.DomainTimeSynchronization
 import org.lfdecentralizedtrust.splice.syncoperator.SyncOperatorSynchronizerNode
 import org.lfdecentralizedtrust.splice.syncoperator.config.SyncOperatorTrafficControlConfig
+import org.lfdecentralizedtrust.splice.syncoperator.store.TrafficReportStore
 
 import scala.concurrent.ExecutionContextExecutor
 
@@ -28,6 +29,7 @@ class SyncOperatorAutomationService(
     synchronizerNode: SyncOperatorSynchronizerNode,
     trafficControlConfig: SyncOperatorTrafficControlConfig,
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
+    trafficReportStore: TrafficReportStore,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
     ec: ExecutionContextExecutor,
@@ -78,6 +80,15 @@ class SyncOperatorAutomationService(
       trafficBalanceReconciliationDelay,
     )
   )
+
+  registerTrigger(
+    new TrafficReportTrigger(
+      triggerContext,
+      synchronizerId,
+      synchronizerNode,
+      trafficReportStore,
+    )
+  )
 }
 
 object SyncOperatorAutomationService extends AutomationServiceCompanion {
@@ -89,5 +100,6 @@ object SyncOperatorAutomationService extends AutomationServiceCompanion {
       aTrigger[MediatorUnlimitedTrafficTrigger],
       aTrigger[ParticipantUnlimitedTrafficTrigger],
       aTrigger[PreJoinParticipantTrafficTrigger],
+      aTrigger[TrafficReportTrigger],
     )
 }
