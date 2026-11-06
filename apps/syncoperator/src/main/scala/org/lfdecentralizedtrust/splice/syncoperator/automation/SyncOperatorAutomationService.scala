@@ -3,6 +3,7 @@
 
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.SynchronizerId
@@ -26,6 +27,7 @@ class SyncOperatorAutomationService(
     synchronizerId: SynchronizerId,
     synchronizerNode: SyncOperatorSynchronizerNode,
     trafficControlConfig: SyncOperatorTrafficControlConfig,
+    trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
     ec: ExecutionContextExecutor,
@@ -49,11 +51,43 @@ class SyncOperatorAutomationService(
       trafficControlConfig,
     )
   )
+
+  registerTrigger(
+    new MediatorUnlimitedTrafficTrigger(
+      triggerContext,
+      synchronizerId,
+      synchronizerNode,
+      trafficBalanceReconciliationDelay,
+    )
+  )
+
+  registerTrigger(
+    new ParticipantUnlimitedTrafficTrigger(
+      triggerContext,
+      synchronizerId,
+      synchronizerNode,
+      trafficBalanceReconciliationDelay,
+    )
+  )
+
+  registerTrigger(
+    new PreJoinParticipantTrafficTrigger(
+      triggerContext,
+      synchronizerId,
+      synchronizerNode,
+      trafficBalanceReconciliationDelay,
+    )
+  )
 }
 
 object SyncOperatorAutomationService extends AutomationServiceCompanion {
   import AutomationServiceCompanion.aTrigger
 
   override protected[this] def expectedTriggerClasses: Seq[TriggerClass] =
-    Seq(aTrigger[ReconcileDedicatedSynchronizerParametersTrigger])
+    Seq(
+      aTrigger[ReconcileDedicatedSynchronizerParametersTrigger],
+      aTrigger[MediatorUnlimitedTrafficTrigger],
+      aTrigger[ParticipantUnlimitedTrafficTrigger],
+      aTrigger[PreJoinParticipantTrafficTrigger],
+    )
 }
