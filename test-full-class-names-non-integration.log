@@ -71,6 +71,9 @@ org.lfdecentralizedtrust.splice.sv.automation.VoteRequestMetricsTriggerTest
 org.lfdecentralizedtrust.splice.sv.onboarding.SequencerBftPeerReconcilerSpec
 org.lfdecentralizedtrust.splice.sv.util.SvOnboardingTokenTest
 org.lfdecentralizedtrust.splice.sv.util.WeightDistributionForSvTest
+org.lfdecentralizedtrust.splice.syncoperator.TrafficReportTest
+org.lfdecentralizedtrust.splice.syncoperator.automation.TrafficReportTriggerTest
+org.lfdecentralizedtrust.splice.syncoperator.store.TrafficReportStoreTest
 org.lfdecentralizedtrust.splice.unit.http.HttpClientProxyTest
 org.lfdecentralizedtrust.splice.unit.store.db.AcsJdbcTypesTest
 org.lfdecentralizedtrust.splice.util.AmuletConfigScheduleTest

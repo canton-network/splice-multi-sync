@@ -5,6 +5,7 @@ package org.lfdecentralizedtrust.splice.syncoperator.config
 
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import org.lfdecentralizedtrust.splice.auth.AuthConfig
 import org.lfdecentralizedtrust.splice.config.{
   AutomationConfig,
   HttpClientConfig,
@@ -50,6 +51,7 @@ case class SyncOperatorAppBackendConfig(
     participantClient: ParticipantClientConfig,
     synchronizerNodes: SyncOperatorSynchronizerNodesConfig,
     trafficControl: SyncOperatorTrafficControlConfig = SyncOperatorTrafficControlConfig(),
+    auth: AuthConfig,
     override val automation: AutomationConfig = AutomationConfig(),
     parameters: SpliceParametersConfig = SpliceParametersConfig(batching = BatchingConfig()),
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration =
