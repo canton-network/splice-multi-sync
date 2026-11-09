@@ -302,20 +302,9 @@ template AmuletRules
         -- Party that the sender expects to represent the DSO party of the AmuletRules contract they are calling.
         -- Must always be set to protect from malicious delegees swapping the AmuletRules contract out for
         -- one under their control.
-        optRegisteredSynchronizerCid : Optional (ContractId RegisteredSynchronizer)
-        -- The registration of the dedicated synchronizer to buy traffic for. With one, the provider
-        -- must be the registration's paymaster, which pays for the synchronizer as a whole: the
-        -- memberId must be empty and the migrationId 0. The registration replaces the check that the
-        -- synchronizerId is one of the `requiredSynchronizers`. `None` buys traffic for a member of
-        -- the decentralized synchronizer.
-        optActivityWeight : Optional Decimal
-        -- The weight with which each purchased byte earns the paymaster app activity. Only allowed
-        -- with a registration. Defaults to the registration's `maxActivityWeight`, and must not be
-        -- negative or above it.
-        optAssetActivityWeight : Optional Decimal
-        -- The weight with which each purchased byte earns the paymaster asset activity. Only allowed
-        -- with a registration. Defaults to the registration's `maxAssetActivityWeight`, and must not
-        -- be negative or above it.
+        optDSyncTrafficPurchase : Optional DSyncTrafficPurchase
+        -- A paymaster's purchase for its registered dedicated synchronizer. `None` buys traffic for a
+        -- member of the decentralized synchronizer.
       controller provider
       do
         checkExpectedDso dso expectedDso
@@ -325,13 +314,7 @@ template AmuletRules
         csum <- summarizeAndValidateContext eventLogCid context dso
           (getDevelopmentFundManagerBlacklist configUsd) provider provider
         let trafficConfig = trafficPurchaseConfigFromAmuletConfig configUsd contextMiningRound
-        optPaymasterPurchase <- case optRegisteredSynchronizerCid of
-          None -> do
-            unless (isNone optActivityWeight && isNone optAssetActivityWeight) $
-              failWithStatus (mkActivityWeightWithoutRegistrationFailure optActivityWeight optAssetActivityWeight)
-            pure None
-          Some registeredSynchronizerCid ->
-            Some <$> fetchPaymasterPurchase dso registeredSynchronizerCid optActivityWeight optAssetActivityWeight
+        optPaymasterPurchase <- forA optDSyncTrafficPurchase (fetchPaymasterPurchase dso)
         result <- buyMemberTraffic eventLogCid csum trafficConfig optPaymasterPurchase
           MemberTrafficPurchase with
             provider
@@ -1199,6 +1182,8 @@ mkInvalidActivityWeightFailure weightName weight maxWeight =
       , ("maxWeight", show maxWeight)
       ])
 
+-- | A token-standard purchase's memo gives activity weights, but its choice context has no
+-- registration. A direct purchase can't, as its weights are part of its `DSyncTrafficPurchase`.
 mkActivityWeightWithoutRegistrationFailure : Optional Decimal -> Optional Decimal -> FailureStatus
 mkActivityWeightWithoutRegistrationFailure optActivityWeight optAssetActivityWeight =
   mkFailureStatus
@@ -1974,9 +1959,8 @@ validateBuyMemberTrafficInputs trafficConfig optPaymasterPurchase purchase = do
 
 -- | Fetches the registration of a synchronizer for a paymaster's purchase. The activity weights
 -- default to the registration's max.
-fetchPaymasterPurchase
-  : Party -> ContractId RegisteredSynchronizer -> Optional Decimal -> Optional Decimal -> Update PaymasterPurchase
-fetchPaymasterPurchase dso registeredSynchronizerCid optActivityWeight optAssetActivityWeight = do
+fetchPaymasterPurchase : Party -> DSyncTrafficPurchase -> Update PaymasterPurchase
+fetchPaymasterPurchase dso DSyncTrafficPurchase{..} = do
   registration <- fetchReferenceData (ForDso dso) registeredSynchronizerCid
   pure PaymasterPurchase with
     registration

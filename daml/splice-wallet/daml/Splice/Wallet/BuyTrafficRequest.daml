@@ -62,9 +62,7 @@ template BuyTrafficRequest
           migrationId
           trafficAmount
           expectedDso = Some dso
-          optRegisteredSynchronizerCid = None
-          optActivityWeight = None
-          optAssetActivityWeight = None
+          optDSyncTrafficPurchase = None
         let trackingInfo = BuyTrafficRequestTrackingInfo with ..
         pure BuyTrafficRequest_CompleteResult with
           purchasedTraffic = result.purchasedTraffic

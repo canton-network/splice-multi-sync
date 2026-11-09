@@ -1610,8 +1610,6 @@ trait AmuletTransferUtil { self: StoreTestBase =>
           extraTraffic,
           Optional.of(dsoParty.toProtoPrimitive),
           Optional.empty(),
-          Optional.empty(),
-          Optional.empty(),
         ).toValue,
         mkAmuletRules_BuyMemberTrafficResult(
           round = round,

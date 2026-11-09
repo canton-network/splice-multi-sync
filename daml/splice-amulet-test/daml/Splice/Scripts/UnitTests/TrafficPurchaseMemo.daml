@@ -29,6 +29,8 @@ expectedMemo = TrafficPurchaseMemo with
   synchronizerId = testSynchronizerId
   migrationId = 3
   forfeitValidatorRewardCoupon = False
+  activityWeight = None
+  assetActivityWeight = None
 
 memoParams : Text
 memoParams =
@@ -123,3 +125,23 @@ test_parseMemo_rejectsNonIntegerValues = script do
     isRejected $ parse $
       trafficPurchaseMemoPrefix <> "member-id=" <> testMemberId <> "&synchronizer-id=" <> testSynchronizerId <>
       "&migration-id=latest"
+
+-- A paymaster's purchase may give its activity weights.
+test_parseMemo_activityWeights : Script ()
+test_parseMemo_activityWeights = script do
+  parse (completeMemo <> "&activity-weight=0.25&asset-activity-weight=0") ===
+    Right (expectedMemo with activityWeight = Some 0.25; assetActivityWeight = Some 0.0)
+  parse (completeMemo <> "&asset-activity-weight=1.5") ===
+    Right (expectedMemo with assetActivityWeight = Some 1.5)
+  -- the parser doesn't check the range, `validateBuyMemberTrafficInputs` does
+  parse (completeMemo <> "&activity-weight=-0.1") ===
+    Right (expectedMemo with activityWeight = Some (-0.1))
+
+test_parseMemo_rejectsInvalidActivityWeights : Script ()
+test_parseMemo_rejectsInvalidActivityWeights = script do
+  parse (completeMemo <> "&activity-weight=half") ===
+    Left "Expected a decimal for activity-weight in traffic purchase memo, got: half"
+  parse (completeMemo <> "&asset-activity-weight=") ===
+    Left "Expected a decimal for asset-activity-weight in traffic purchase memo, got: "
+  assertMsg "duplicate activity-weight key is rejected" $ isRejected $
+    parse $ completeMemo <> "&activity-weight=0.1&activity-weight=0.2"
