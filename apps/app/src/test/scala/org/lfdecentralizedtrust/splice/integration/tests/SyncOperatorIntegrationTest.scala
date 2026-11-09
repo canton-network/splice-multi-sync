@@ -4,7 +4,7 @@
 package org.lfdecentralizedtrust.splice.integration.tests
 
 import com.digitalasset.canton.SynchronizerAlias
-import com.digitalasset.canton.config.PositiveFiniteDuration
+import com.digitalasset.canton.config.{NonNegativeDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.time.PositiveFiniteDuration as InternalPositiveFiniteDuration
 import com.digitalasset.canton.topology.{Member, ParticipantId}
@@ -148,12 +148,15 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
         preJoinTrigger.resume()
       }
 
-      // A ping to another participant would also wait for that participant's vetting to reach
-      // splitwell. Bob's connect only returned once his own topology was sequenced.
+      // The participant admin API in tests does not allow pings, so bob submits a topology
+      // transaction instead. It only becomes effective once the sequencer accepted it.
       clue("the participant that joined late transacts") {
-        eventuallySucceeds() {
-          bob.health.ping(bob.id, synchronizerId = Some(synchronizerId))
-        }
+        bob.parties.enable(
+          "late-joiner",
+          synchronizer = Some(SynchronizerAlias.tryCreate("splitwell")),
+          synchronizeParticipants = Seq(bob),
+          synchronize = Some(NonNegativeDuration.ofSeconds(60)),
+        )
       }
     }
   }
