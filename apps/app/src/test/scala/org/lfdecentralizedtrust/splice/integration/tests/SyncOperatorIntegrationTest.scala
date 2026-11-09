@@ -20,8 +20,8 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
   // Values the bootstrap does not set, to check that the trigger applies them to the synchronizer.
   private val trafficControlConfig = SyncOperatorTrafficControlConfig(
     readVsWriteScalingFactor = PositiveInt.tryCreate(5),
-    maxBaseTrafficAccumulationDuration = PositiveFiniteDuration.ofMinutes(10),
     setBalanceRequestSubmissionWindowSize = PositiveFiniteDuration.ofMinutes(4),
+    baseEventCost = NonNegativeLong.tryCreate(500),
   )
 
   override def environmentDefinition: SpliceEnvironmentDefinition =
@@ -67,14 +67,11 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
         clue("the synchronizer has the configured values") {
           trafficControl.readVsWriteScalingFactor shouldBe
             trafficControlConfig.readVsWriteScalingFactor
-          trafficControl.maxBaseTrafficAccumulationDuration shouldBe
-            InternalPositiveFiniteDuration.fromConfig(
-              trafficControlConfig.maxBaseTrafficAccumulationDuration
-            )
           trafficControl.setBalanceRequestSubmissionWindowSize shouldBe
             InternalPositiveFiniteDuration.fromConfig(
               trafficControlConfig.setBalanceRequestSubmissionWindowSize
             )
+          trafficControl.baseEventCost shouldBe trafficControlConfig.baseEventCost
         }
       }
     }
