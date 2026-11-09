@@ -4,7 +4,7 @@
 package org.lfdecentralizedtrust.splice.syncoperator.config
 
 import com.digitalasset.canton.config.*
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import org.lfdecentralizedtrust.splice.auth.AuthConfig
 import org.lfdecentralizedtrust.splice.config.{
   AutomationConfig,
@@ -30,16 +30,16 @@ case class SyncOperatorSynchronizerNodesConfig(
     current: SyncOperatorSynchronizerNodeConfig
 )
 
-/** Traffic control parameters the global synchronizer can adjust, defaulting to its mainnet
-  * values.
+/** Traffic control parameters for the dedicated synchronizer. These should always match mainnet.
+  * They are configurable to allow adjusting if mainnet changes without waiting for a new release
+  * but dsync operators must not change them outside of this.
   */
 case class SyncOperatorTrafficControlConfig(
     // charge 4 per 10,000, i.e., 0.04% of write cost for every read.
     readVsWriteScalingFactor: PositiveInt = PositiveInt.tryCreate(4),
-    maxBaseTrafficAccumulationDuration: PositiveFiniteDuration =
-      PositiveFiniteDuration.ofMinutes(20),
     setBalanceRequestSubmissionWindowSize: PositiveFiniteDuration =
       PositiveFiniteDuration.ofMinutes(2),
+    baseEventCost: NonNegativeLong = NonNegativeLong.zero,
 )
 
 case class SyncOperatorAppBackendConfig(

@@ -5,7 +5,7 @@ package org.lfdecentralizedtrust.splice.integration.tests
 
 import com.auth0.jwt.JWT
 import com.digitalasset.canton.SynchronizerAlias
-import com.digitalasset.canton.config.PositiveFiniteDuration
+import com.digitalasset.canton.config.{NonNegativeDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
@@ -45,8 +45,8 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
   // Values the bootstrap does not set, to check that the trigger applies them to the synchronizer.
   private val trafficControlConfig = SyncOperatorTrafficControlConfig(
     readVsWriteScalingFactor = PositiveInt.tryCreate(5),
-    maxBaseTrafficAccumulationDuration = PositiveFiniteDuration.ofMinutes(10),
     setBalanceRequestSubmissionWindowSize = PositiveFiniteDuration.ofMinutes(4),
+    baseEventCost = NonNegativeLong.tryCreate(500),
   )
 
   override def environmentDefinition: SpliceEnvironmentDefinition =
@@ -92,14 +92,11 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
         clue("the synchronizer has the configured values") {
           trafficControl.readVsWriteScalingFactor shouldBe
             trafficControlConfig.readVsWriteScalingFactor
-          trafficControl.maxBaseTrafficAccumulationDuration shouldBe
-            InternalPositiveFiniteDuration.fromConfig(
-              trafficControlConfig.maxBaseTrafficAccumulationDuration
-            )
           trafficControl.setBalanceRequestSubmissionWindowSize shouldBe
             InternalPositiveFiniteDuration.fromConfig(
               trafficControlConfig.setBalanceRequestSubmissionWindowSize
             )
+          trafficControl.baseEventCost shouldBe trafficControlConfig.baseEventCost
         }
       }
     }
@@ -164,28 +161,33 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
         preJoinTrigger.resume()
       }
 
-      // A ping to another participant would also wait for that participant's vetting to reach
-      // splitwell. Bob's connect only returned once his own topology was sequenced.
+      // The participant admin API in tests does not allow pings, so bob submits a topology
+      // transaction instead. It only becomes effective once the sequencer accepted it.
       clue("the participant that joined late transacts") {
-        eventuallySucceeds() {
-          bob.health.ping(bob.id, synchronizerId = Some(synchronizerId))
-        }
+        bob.parties.enable(
+          "late-joiner",
+          synchronizer = Some(SynchronizerAlias.tryCreate("splitwell")),
+          synchronizeParticipants = Seq(bob),
+          synchronize = Some(NonNegativeDuration.ofSeconds(60)),
+        )
       }
     }
 
     // Needs the traffic the case above grants.
     "report the traffic charged to participants per 10-minute interval" in { implicit env =>
-      val synchronizerId = syncOperatorBackend.appState.synchronizerId
       val bob = bobValidatorBackend.participantClientWithAdminToken
 
       val last =
         TrafficReport.alignDown(env.environment.clock.now).minus(TrafficReport.IntervalLength)
       val end = last.plus(TrafficReport.IntervalLength)
       // An interval is reported once the sequencer has sequenced past its end, and an idle
-      // synchronizer does not advance.
-      eventuallySucceeds() {
-        bob.health.ping(bob.id, synchronizerId = Some(synchronizerId))
-      }
+      // synchronizer does not advance, so bob submits a topology transaction.
+      bob.parties.enable(
+        "traffic-report",
+        synchronizer = Some(SynchronizerAlias.tryCreate("splitwell")),
+        synchronizeParticipants = Seq(bob),
+        synchronize = Some(NonNegativeDuration.ofSeconds(60)),
+      )
 
       clue("The interval that is not over is Undetermined") {
         reportedInterval(TrafficReport.alignDown(env.environment.clock.now)).status shouldBe

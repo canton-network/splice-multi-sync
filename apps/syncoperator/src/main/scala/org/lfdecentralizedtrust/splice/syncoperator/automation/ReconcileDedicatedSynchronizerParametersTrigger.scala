@@ -78,12 +78,10 @@ class ReconcileDedicatedSynchronizerParametersTrigger(
             // Zero base amount so that all traffic is paid for.
             maxBaseTrafficAmount = NonNegativeLong.zero,
             readVsWriteScalingFactor = trafficControlConfig.readVsWriteScalingFactor,
-            maxBaseTrafficAccumulationDuration = PositiveFiniteDuration.fromConfig(
-              trafficControlConfig.maxBaseTrafficAccumulationDuration
-            ),
             setBalanceRequestSubmissionWindowSize = PositiveFiniteDuration.fromConfig(
               trafficControlConfig.setBalanceRequestSubmissionWindowSize
             ),
+            baseEventCost = trafficControlConfig.baseEventCost,
             freeConfirmationResponses = true,
           )
         )

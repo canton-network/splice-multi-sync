@@ -449,10 +449,9 @@ class SpliceConfigTest extends AsyncWordSpec with BaseTest {
       syncOperator.adminApi.port.unwrap shouldBe 5116
       syncOperator.operatorUser shouldBe "sync_operator_user"
       syncOperator.trafficControl.readVsWriteScalingFactor.value shouldBe 4
-      syncOperator.trafficControl.maxBaseTrafficAccumulationDuration shouldBe
-        PositiveFiniteDuration.ofMinutes(20)
       syncOperator.trafficControl.setBalanceRequestSubmissionWindowSize shouldBe
         PositiveFiniteDuration.ofMinutes(2)
+      syncOperator.trafficControl.baseEventCost.value shouldBe 0
     }
   }
 }
