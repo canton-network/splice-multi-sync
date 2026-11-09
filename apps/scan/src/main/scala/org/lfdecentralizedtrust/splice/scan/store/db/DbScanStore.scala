@@ -525,7 +525,9 @@ class DbScanStore private (
                 and create_arguments->>'synchronizerId' = $synchronizerId
                 and create_arguments->>'paymaster' = ${paymaster.toProtoPrimitive}
             """,
-            orderLimit = sql"order by event_number desc limit 1",
+            // Every Scan must pick the same registration, so this orders by the ledger's creation
+            // time and contract id rather than by the store's ingestion order.
+            orderLimit = sql"order by created_at desc, contract_id desc limit 1",
           ).headOption,
           "lookupRegisteredSynchronizer",
         )

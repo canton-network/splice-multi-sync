@@ -129,6 +129,27 @@ abstract class ScanStoreTest
         } yield result shouldBe (1 to 3).sum.toLong
       }
 
+      "skip a contract with an invalid synchronizer id" in {
+        val namespace = Namespace(Fingerprint.tryFromString(s"dummy"))
+        val member = ParticipantId(UniqueIdentifier.tryCreate("member", namespace))
+        val invalidContract =
+          memberTraffic(member, domainMigrationId, 1L, synchronizerId = "not-a-synchronizer-id")
+        val goodContract = memberTraffic(member, domainMigrationId, 2L)
+        for {
+          store <- mkStore()
+          // ingesting the invalid contract must not fail, so the good one is ingested after it
+          _ <- MonadUtil.sequentialTraverse(
+            Seq(invalidContract, goodContract)
+          )(
+            dummyDomain.create(_)(store.multiDomainAcsStore)
+          )
+          result <- store.getTotalPurchasedMemberTraffic(
+            StoreMemberId(member),
+            dummyDomain,
+          )
+        } yield result shouldBe 2L
+      }
+
     }
 
     "lookupAmuletRules" should {
@@ -419,6 +440,44 @@ abstract class ScanStoreTest
           store
             .lookupRegisteredSynchronizer(synchronizerA, providerParty(2))
             .futureValue shouldBe Some(ContractWithState(ofPaymaster2, Assigned(dummyDomain)))
+        }
+      }
+
+      "return the most recently created registration if a paymaster has several" in {
+        def newerAndOlder(synchronizerId: String) = (
+          registeredSynchronizer(synchronizerId).copy(createdAt = Instant.EPOCH.plusSeconds(60)),
+          registeredSynchronizer(synchronizerId).copy(createdAt = Instant.EPOCH),
+        )
+        // ingested in both orders, as the pick must not depend on it: it differs between Scans
+        val (newerA, olderA) = newerAndOlder(synchronizerA)
+        val (newerB, olderB) = newerAndOlder(synchronizerB)
+        for {
+          store <- mkStore()
+          _ <- MonadUtil.sequentialTraverse(Seq(newerA, olderA, olderB, newerB))(
+            dummyDomain.create(_)(store.multiDomainAcsStore)
+          )
+        } yield {
+          store
+            .lookupRegisteredSynchronizer(synchronizerA, providerParty(1))
+            .futureValue shouldBe Some(ContractWithState(newerA, Assigned(dummyDomain)))
+          store
+            .lookupRegisteredSynchronizer(synchronizerB, providerParty(1))
+            .futureValue shouldBe Some(ContractWithState(newerB, Assigned(dummyDomain)))
+        }
+      }
+
+      "return the registration with the highest contract id if several were created at once" in {
+        val first = registeredSynchronizer(synchronizerA)
+        val second = registeredSynchronizer(synchronizerA)
+        val highest = Seq(first, second).maxBy(_.contractId.contractId)
+        for {
+          store <- mkStore()
+          _ <- dummyDomain.create(first)(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(second)(store.multiDomainAcsStore)
+        } yield {
+          store
+            .lookupRegisteredSynchronizer(synchronizerA, providerParty(1))
+            .futureValue shouldBe Some(ContractWithState(highest, Assigned(dummyDomain)))
         }
       }
 
@@ -1867,11 +1926,16 @@ trait AmuletTransferUtil { self: StoreTestBase =>
       ),
     )
 
-  def memberTraffic(member: Member, domainMigrationId: Long, totalPurchased: Long) = {
+  def memberTraffic(
+      member: Member,
+      domainMigrationId: Long,
+      totalPurchased: Long,
+      synchronizerId: String = dummyDomain.toProtoPrimitive,
+  ) = {
     val template = new MemberTraffic(
       dsoParty.toProtoPrimitive,
       member.toProtoPrimitive,
-      dummyDomain.toProtoPrimitive,
+      synchronizerId,
       domainMigrationId,
       totalPurchased,
       1,

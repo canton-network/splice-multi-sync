@@ -239,8 +239,9 @@ trait ScanStore
   ]
 
   /** The registration of the dedicated synchronizer with the given id and paymaster, if there is
-    * one. Nothing on the ledger makes a registration unique for its synchronizer id, so the
-    * paymaster picks the registration it pays with.
+    * one. Nothing on the ledger makes a registration unique for its synchronizer id and
+    * paymaster, so with several this returns the most recently created one, the same on every
+    * Scan.
     */
   def lookupRegisteredSynchronizer(
       synchronizerId: String,
@@ -429,14 +430,10 @@ object ScanStore {
                 _ => None,
                 member => Some(StoreMemberId(member)),
               ),
-            memberTrafficDomain = SynchronizerId
-              .fromString(contract.payload.synchronizerId)
-              .fold(
-                // as for the member id, we ignore an invalid synchronizer id, e.g., a registered
-                // synchronizer's malformed id, instead of killing the ingestion pipeline
-                _ => None,
-                synchronizerId => Some(synchronizerId),
-              ),
+            // as for the member id, we ignore an invalid synchronizer id, e.g., a registered
+            // synchronizer's malformed id, instead of killing the ingestion pipeline
+            memberTrafficDomain =
+              SynchronizerId.fromString(contract.payload.synchronizerId).toOption,
             totalTrafficPurchased = Some(contract.payload.totalPurchased),
           )
         },

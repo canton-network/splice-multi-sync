@@ -77,7 +77,7 @@ class HttpTokenStandardTransferInstructionHandler(
                 .asRuntimeException()
             )
         }
-        choiceContextBuilder <- getAmuletRulesTransferContextV1(
+        (choiceContextBuilder, externalPartyConfigStateO) <- getAmuletRulesTransferContextV1(
           body.excludeDebugFields.getOrElse(false)
         )
         dsoRules <- store.getDsoRules()
@@ -86,6 +86,7 @@ class HttpTokenStandardTransferInstructionHandler(
           sender,
           transferInstr.transfer.receiver,
           transferInstr.transfer.meta,
+          externalPartyConfigStateO,
         )
         result <- buildTransferFactory(
           sender,
@@ -193,7 +194,7 @@ class HttpTokenStandardTransferInstructionHandler(
                 .asRuntimeException()
             )
         }
-        choiceContextBuilder <- getAmuletRulesTransferContextV2(
+        (choiceContextBuilder, externalPartyConfigStateO) <- getAmuletRulesTransferContextV2(
           body.excludeDebugFields.getOrElse(false)
         )
         dsoRules <- store.getDsoRules()
@@ -205,6 +206,7 @@ class HttpTokenStandardTransferInstructionHandler(
           sender,
           receiver,
           transferInstr.transfer.meta,
+          externalPartyConfigStateO,
         )
         result <- buildTransferFactory(
           sender,
@@ -295,13 +297,18 @@ class HttpTokenStandardTransferInstructionHandler(
   /** The registration of the dedicated synchronizer that a traffic purchase's memo names, which a
     * paymaster's purchase for its registered synchronizer needs in its choice context. Only the
     * paymaster may buy traffic for a registered synchronizer, so this looks up the registration
-    * whose paymaster is the sender. None for any other transfer, and for a purchase for one of
-    * the required synchronizers, for which the Daml code refuses a registration.
+    * whose paymaster is the sender. None for any other transfer, and for a purchase for a
+    * synchronizer that the external party config state supports, for which the Daml code refuses
+    * a registration. This checks the config state that goes into the choice context, as the Daml
+    * code does, not the current AmuletRules config.
     */
   private def lookupTrafficPurchaseRegistration(
       sender: PartyId,
       receiver: String,
       meta: metadatav1.Metadata,
+      externalPartyConfigStateO: Option[
+        Contract[ExternalPartyConfigState.ContractId, ExternalPartyConfigState]
+      ],
   )(implicit tc: TraceContext): Future[Option[ContractWithState[
     splice.decentralizedsynchronizer.RegisteredSynchronizer.ContractId,
     splice.decentralizedsynchronizer.RegisteredSynchronizer,
@@ -314,16 +321,11 @@ class HttpTokenStandardTransferInstructionHandler(
       .flatMap(TokenStandardMetadata.trafficPurchaseMemoSynchronizerId) match {
       case None => Future.successful(None)
       case Some(synchronizerId) =>
-        for {
-          amuletRules <- store.getAmuletRules()
-          requiredSynchronizers = AmuletConfigSchedule(amuletRules.payload.configSchedule)
-            .getConfigAsOf(clock.now)
-            .decentralizedSynchronizer
-            .requiredSynchronizers
-          optRegistration <-
-            if (requiredSynchronizers.map.containsKey(synchronizerId)) Future.successful(None)
-            else store.lookupRegisteredSynchronizer(synchronizerId, sender)
-        } yield optRegistration
+        val isSupported = externalPartyConfigStateO
+          .flatMap(_.payload.supportedSynchronizerIds.toScala)
+          .exists(_.contains(synchronizerId))
+        if (isSupported) Future.successful(None)
+        else store.lookupRegisteredSynchronizer(synchronizerId, sender)
     }
 
   private def buildTransferFactory[FactoryResponse](
@@ -371,7 +373,12 @@ class HttpTokenStandardTransferInstructionHandler(
 
   private def getAmuletRulesTransferContextV1(excludeDebugFields: Boolean)(implicit
       tc: TraceContext
-  ): Future[V1ChoiceContextBuilder] = {
+  ): Future[
+    (
+        V1ChoiceContextBuilder,
+        Option[Contract[ExternalPartyConfigState.ContractId, ExternalPartyConfigState]],
+    )
+  ] = {
     val now = clock.now
     getAmuletRulesTransferContext(now) {
       (amuletRules, newestOpenRound, externalPartyConfigStateO) =>
@@ -382,18 +389,26 @@ class HttpTokenStandardTransferInstructionHandler(
             .activeSynchronizer,
           excludeDebugFields,
         )
-        choiceContextBuilder
-          .addContracts(
-            "amulet-rules" -> amuletRules,
-            "open-round" -> newestOpenRound.contract,
-          )
-          .addOptionalContract("external-party-config-state" -> externalPartyConfigStateO)
+        (
+          choiceContextBuilder
+            .addContracts(
+              "amulet-rules" -> amuletRules,
+              "open-round" -> newestOpenRound.contract,
+            )
+            .addOptionalContract("external-party-config-state" -> externalPartyConfigStateO),
+          externalPartyConfigStateO,
+        )
     }
   }
 
   private def getAmuletRulesTransferContextV2(excludeDebugFields: Boolean)(implicit
       tc: TraceContext
-  ): Future[V2ChoiceContextBuilder] = {
+  ): Future[
+    (
+        V2ChoiceContextBuilder,
+        Option[Contract[ExternalPartyConfigState.ContractId, ExternalPartyConfigState]],
+    )
+  ] = {
     val now = clock.now
     getAmuletRulesTransferContext(now) {
       (amuletRules, newestOpenRound, externalPartyConfigStateO) =>
@@ -404,12 +419,15 @@ class HttpTokenStandardTransferInstructionHandler(
             .activeSynchronizer,
           excludeDebugFields,
         )
-        choiceContextBuilder
-          .addContracts(
-            "amulet-rules" -> amuletRules,
-            "open-round" -> newestOpenRound.contract,
-          )
-          .addOptionalContract("external-party-config-state" -> externalPartyConfigStateO)
+        (
+          choiceContextBuilder
+            .addContracts(
+              "amulet-rules" -> amuletRules,
+              "open-round" -> newestOpenRound.contract,
+            )
+            .addOptionalContract("external-party-config-state" -> externalPartyConfigStateO),
+          externalPartyConfigStateO,
+        )
     }
   }
 
