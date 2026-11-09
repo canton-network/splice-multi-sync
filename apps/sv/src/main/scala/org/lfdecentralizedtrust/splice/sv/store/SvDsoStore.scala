@@ -1565,7 +1565,14 @@ object SvDsoStore {
               _ => None,
               member => Some(StoreMemberId(member)),
             ),
-          memberTrafficDomain = Some(SynchronizerId.tryFromString(contract.payload.synchronizerId)),
+          memberTrafficDomain = SynchronizerId
+            .fromString(contract.payload.synchronizerId)
+            .fold(
+              // as for the member id, we ignore an invalid synchronizer id, e.g., a registered
+              // synchronizer's malformed id, instead of killing the ingestion pipeline
+              _ => None,
+              synchronizerId => Some(synchronizerId),
+            ),
           totalTrafficPurchased = Some(contract.payload.totalPurchased),
         )
       },
