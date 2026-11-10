@@ -86,7 +86,7 @@ checkPaymasterTraffic dso amuletSpent usdSpent = do
 -- | A paymaster's purchase arguments with the registration and the given activity weights.
 dsyncPurchase
   : ContractId RegisteredSynchronizer -> Optional Decimal -> Optional Decimal -> Optional DSyncTrafficPurchase
-dsyncPurchase registeredSynchronizerCid optActivityWeight optAssetActivityWeight =
+dsyncPurchase registeredSynchronizerCid optAppActivityWeight optAssetActivityWeight =
   Some DSyncTrafficPurchase with ..
 
 
@@ -167,11 +167,11 @@ test_direct_acceptsWeightsUpToTheMax : Script ()
 test_direct_acceptsWeightsUpToTheMax = do
   setup <- setupDirect
   forA_ [(Some 1.0, Some 0.5), (Some 0.0, Some 0.0), (Some 0.25, None), (None, Some 0.1)] $
-    \(optActivityWeight, optAssetActivityWeight) -> do
+    \(optAppActivityWeight, optAssetActivityWeight) -> do
       choiceArg <- paymasterPurchase setup setup.paymaster
       submit (actAs setup.paymaster.primaryParty <> readAs setup.app.dso) $
         exerciseCmd setup.amuletRulesCid choiceArg with
-          optDSyncTrafficPurchase = dsyncPurchase setup.registrationCid optActivityWeight optAssetActivityWeight
+          optDSyncTrafficPurchase = dsyncPurchase setup.registrationCid optAppActivityWeight optAssetActivityWeight
   traffic <- query @MemberTraffic setup.app.dso
   length traffic === 4
 
@@ -201,11 +201,11 @@ test_direct_rejectsWeightOutOfRange : Script ()
 test_direct_rejectsWeightOutOfRange = do
   setup <- setupDirect
   forA_ [(Some 1.0000000001, None), (None, Some 0.6), (Some (-0.1), None), (None, Some (-0.1))] $
-    \(optActivityWeight, optAssetActivityWeight) -> do
+    \(optAppActivityWeight, optAssetActivityWeight) -> do
       choiceArg <- paymasterPurchase setup setup.paymaster
       buyTrafficMustFailWith (expectErrorId "splice.lfdecentralizedtrust.org/invalid-activity-weight") setup
         choiceArg with
-          optDSyncTrafficPurchase = dsyncPurchase setup.registrationCid optActivityWeight optAssetActivityWeight
+          optDSyncTrafficPurchase = dsyncPurchase setup.registrationCid optAppActivityWeight optAssetActivityWeight
 
 test_direct_rejectsRegistrationForRequiredSynchronizer : Script ()
 test_direct_rejectsRegistrationForRequiredSynchronizer = do
@@ -399,8 +399,8 @@ test_tokenStandard_acceptsWeightsUpToTheMax : Script ()
 test_tokenStandard_acceptsWeightsUpToTheMax = do
   setup <- setupTokenStandard
   let weightParams =
-        [ "&activity-weight=1.0&asset-activity-weight=0.5", "&activity-weight=0.0&asset-activity-weight=0.0"
-        , "&activity-weight=0.25", "&asset-activity-weight=0.1"
+        [ "&app-activity-weight=1.0&asset-activity-weight=0.5", "&app-activity-weight=0.0&asset-activity-weight=0.0"
+        , "&app-activity-weight=0.25", "&asset-activity-weight=0.1"
         ]
   forA_ weightParams $ \weights -> do
     enrichedChoice <-
@@ -415,8 +415,8 @@ test_tokenStandard_rejectsWeightOutOfRange : Script ()
 test_tokenStandard_rejectsWeightOutOfRange = do
   setup <- setupTokenStandard
   let weightParams =
-        [ "&activity-weight=1.0000000001", "&asset-activity-weight=0.6"
-        , "&activity-weight=-0.1", "&asset-activity-weight=-0.1"
+        [ "&app-activity-weight=1.0000000001", "&asset-activity-weight=0.6"
+        , "&app-activity-weight=-0.1", "&asset-activity-weight=-0.1"
         ]
   forA_ weightParams $ \weights ->
     tokenStandardPurchaseMustFailWith (expectErrorId "splice.lfdecentralizedtrust.org/invalid-activity-weight")
@@ -427,7 +427,7 @@ test_tokenStandard_rejectsWeightOutOfRange = do
 test_tokenStandard_rejectsWeightsWithoutRegistration : Script ()
 test_tokenStandard_rejectsWeightsWithoutRegistration = do
   setup <- setupTokenStandard
-  forA_ ["&activity-weight=0.5", "&asset-activity-weight=0.5"] $ \weight ->
+  forA_ ["&app-activity-weight=0.5", "&asset-activity-weight=0.5"] $ \weight ->
     tokenStandardPurchaseMustFailWith (expectErrorId "splice.lfdecentralizedtrust.org/activity-weight-without-registration")
       setup setup.paymaster None
       ("member-id=" <> testMemberId <> "&synchronizer-id=" <> decentralizedSynchronizerId <> "&migration-id=0" <> weight)

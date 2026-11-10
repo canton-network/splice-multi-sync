@@ -1185,13 +1185,13 @@ mkInvalidActivityWeightFailure weightName weight maxWeight =
 -- | A token-standard purchase's memo gives activity weights, but its choice context has no
 -- registration. A direct purchase can't, as its weights are part of its `DSyncTrafficPurchase`.
 mkActivityWeightWithoutRegistrationFailure : Optional Decimal -> Optional Decimal -> FailureStatus
-mkActivityWeightWithoutRegistrationFailure optActivityWeight optAssetActivityWeight =
+mkActivityWeightWithoutRegistrationFailure optAppActivityWeight optAssetActivityWeight =
   mkFailureStatus
     (spliceErrorId "activity-weight-without-registration")
     InvalidIndependentOfSystemState
     "Activity weights are only given for a registered synchronizer"
     (TextMap.fromList $
-      map (\weight -> ("activityWeight", show weight)) (optionalToList optActivityWeight) <>
+      map (\weight -> ("appActivityWeight", show weight)) (optionalToList optAppActivityWeight) <>
       map (\weight -> ("assetActivityWeight", show weight)) (optionalToList optAssetActivityWeight))
 
 mkMaximumInputsExceededFailure : FailureStatus
@@ -1945,8 +1945,8 @@ validateBuyMemberTrafficInputs trafficConfig optPaymasterPurchase purchase = do
           Left $ mkInvalidMemberIdFailure
             ("Traffic for registered synchronizer " <> registration.synchronizerId <> " must have an empty memberId")
             purchase.memberId
-      | not (isAllowedWeight activityWeight registration.maxActivityWeight) =
-          Left $ mkInvalidActivityWeightFailure "activity weight" activityWeight registration.maxActivityWeight
+      | not (isAllowedWeight appActivityWeight registration.maxActivityWeight) =
+          Left $ mkInvalidActivityWeightFailure "app activity weight" appActivityWeight registration.maxActivityWeight
       | not (isAllowedWeight assetActivityWeight registration.maxAssetActivityWeight) =
           Left $ mkInvalidActivityWeightFailure "asset activity weight" assetActivityWeight registration.maxAssetActivityWeight
       | otherwise = Right ()
@@ -1964,7 +1964,7 @@ fetchPaymasterPurchase dso DSyncTrafficPurchase{..} = do
   registration <- fetchReferenceData (ForDso dso) registeredSynchronizerCid
   pure PaymasterPurchase with
     registration
-    activityWeight = fromOptional registration.maxActivityWeight optActivityWeight
+    appActivityWeight = fromOptional registration.maxActivityWeight optAppActivityWeight
     assetActivityWeight = fromOptional registration.maxAssetActivityWeight optAssetActivityWeight
 
 -- | Burn amulet to buy extra traffic on a synchronizer, for a member of the decentralized

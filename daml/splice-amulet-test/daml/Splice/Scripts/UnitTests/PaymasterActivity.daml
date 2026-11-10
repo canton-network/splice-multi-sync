@@ -20,14 +20,14 @@ testPaymaster : Party
 testPaymaster = testParty "paymaster"
 
 purchaseWithWeights : Decimal -> Decimal -> PaymasterPurchase
-purchaseWithWeights activityWeight assetActivityWeight = PaymasterPurchase with
+purchaseWithWeights appActivityWeight assetActivityWeight = PaymasterPurchase with
   registration = RegisteredSynchronizer with
     dso = testParty "dso"
     synchronizerId = "dedicated-synchronizer::1220dede"
     paymaster = testPaymaster
     maxActivityWeight = 3.0
     maxAssetActivityWeight = 3.0
-  activityWeight
+  appActivityWeight
   assetActivityWeight
 
 activityFor : Int -> Int -> PaymasterActivity

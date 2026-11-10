@@ -411,12 +411,12 @@ amulet_transferFactoryV1_transferImpl this actors arg = do
     optRegisteredSynchronizerCid <-
       lookupFromContextU @(ContractId RegisteredSynchronizer) arg.extraArgs.context registeredSynchronizerContextKey
     when (isNone optRegisteredSynchronizerCid &&
-          (isSome purchaseMemo.activityWeight || isSome purchaseMemo.assetActivityWeight)) $
-      failWithStatus (mkActivityWeightWithoutRegistrationFailure purchaseMemo.activityWeight purchaseMemo.assetActivityWeight)
+          (isSome purchaseMemo.appActivityWeight || isSome purchaseMemo.assetActivityWeight)) $
+      failWithStatus (mkActivityWeightWithoutRegistrationFailure purchaseMemo.appActivityWeight purchaseMemo.assetActivityWeight)
     optPaymasterPurchase <- Traversable.forA optRegisteredSynchronizerCid $ \registeredSynchronizerCid ->
       fetchPaymasterPurchase dso DSyncTrafficPurchase with
         registeredSynchronizerCid
-        optActivityWeight = purchaseMemo.activityWeight
+        optAppActivityWeight = purchaseMemo.appActivityWeight
         optAssetActivityWeight = purchaseMemo.assetActivityWeight
     paymentContext <- unfeaturedPaymentContextFromChoiceContext dso arg.extraArgs.context
     csum <- summarizeAndValidateExternalPartyContext paymentContext dso transfer.sender

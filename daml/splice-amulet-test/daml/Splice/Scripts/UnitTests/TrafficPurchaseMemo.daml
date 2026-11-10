@@ -29,7 +29,7 @@ expectedMemo = TrafficPurchaseMemo with
   synchronizerId = testSynchronizerId
   migrationId = 3
   forfeitValidatorRewardCoupon = False
-  activityWeight = None
+  appActivityWeight = None
   assetActivityWeight = None
 
 memoParams : Text
@@ -129,19 +129,19 @@ test_parseMemo_rejectsNonIntegerValues = script do
 -- A paymaster's purchase may give its activity weights.
 test_parseMemo_activityWeights : Script ()
 test_parseMemo_activityWeights = script do
-  parse (completeMemo <> "&activity-weight=0.25&asset-activity-weight=0") ===
-    Right (expectedMemo with activityWeight = Some 0.25; assetActivityWeight = Some 0.0)
+  parse (completeMemo <> "&app-activity-weight=0.25&asset-activity-weight=0") ===
+    Right (expectedMemo with appActivityWeight = Some 0.25; assetActivityWeight = Some 0.0)
   parse (completeMemo <> "&asset-activity-weight=1.5") ===
     Right (expectedMemo with assetActivityWeight = Some 1.5)
   -- the parser doesn't check the range, `validateBuyMemberTrafficInputs` does
-  parse (completeMemo <> "&activity-weight=-0.1") ===
-    Right (expectedMemo with activityWeight = Some (-0.1))
+  parse (completeMemo <> "&app-activity-weight=-0.1") ===
+    Right (expectedMemo with appActivityWeight = Some (-0.1))
 
 test_parseMemo_rejectsInvalidActivityWeights : Script ()
 test_parseMemo_rejectsInvalidActivityWeights = script do
-  parse (completeMemo <> "&activity-weight=half") ===
-    Left "Expected a decimal for activity-weight in traffic purchase memo, got: half"
+  parse (completeMemo <> "&app-activity-weight=half") ===
+    Left "Expected a decimal for app-activity-weight in traffic purchase memo, got: half"
   parse (completeMemo <> "&asset-activity-weight=") ===
     Left "Expected a decimal for asset-activity-weight in traffic purchase memo, got: "
-  assertMsg "duplicate activity-weight key is rejected" $ isRejected $
-    parse $ completeMemo <> "&activity-weight=0.1&activity-weight=0.2"
+  assertMsg "duplicate app-activity-weight key is rejected" $ isRejected $
+    parse $ completeMemo <> "&app-activity-weight=0.1&app-activity-weight=0.2"

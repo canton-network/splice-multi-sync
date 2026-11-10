@@ -105,7 +105,7 @@ data TrafficPurchaseMemo = TrafficPurchaseMemo with
     synchronizerId : Text
     migrationId : Int
     forfeitValidatorRewardCoupon : Bool
-    activityWeight : Optional Decimal
+    appActivityWeight : Optional Decimal
     assetActivityWeight : Optional Decimal
   deriving (Eq, Show)
 
@@ -114,7 +114,7 @@ trafficPurchaseMemoPrefix = "splice/memo:"
 
 -- | Parse the purchase arguments from memo tag using url query param style:
 -- `splice/memo:[member-id=...&]synchronizer-id=...&migration-id=...[&forfeit-validator-reward-coupon=true|false]`
--- `[&activity-weight=...][&asset-activity-weight=...]`.
+-- `[&app-activity-weight=...][&asset-activity-weight=...]`.
 -- A memo without a `member-id` parses to an empty `memberId`. Only a paymaster's purchase for its
 -- registered synchronizer may leave it out, which `validateBuyMemberTrafficInputs` checks. The
 -- activity weights are those of `DSyncTrafficPurchase`, so only such a purchase may give them.
@@ -130,13 +130,13 @@ parseTrafficPurchaseMemo memo = do
   forfeitValidatorRewardCoupon <- case TextMap.lookup "forfeit-validator-reward-coupon" fields of
     None -> Right False
     Some value -> parseBoolField "forfeit-validator-reward-coupon" value
-  activityWeight <- optionalDecimalField fields "activity-weight"
+  appActivityWeight <- optionalDecimalField fields "app-activity-weight"
   assetActivityWeight <- optionalDecimalField fields "asset-activity-weight"
   pure TrafficPurchaseMemo with ..
   where
     knownKeys =
       [ "member-id", "synchronizer-id", "migration-id", "forfeit-validator-reward-coupon"
-      , "activity-weight", "asset-activity-weight"
+      , "app-activity-weight", "asset-activity-weight"
       ]
     addField fields field = case T.splitOn "=" field of
       [key, value]
@@ -276,7 +276,7 @@ data DSyncTrafficPurchase = DSyncTrafficPurchase with
       -- its paymaster, which pays for the synchronizer as a whole: the purchase's `memberId` must
       -- be empty and its `migrationId` 0. The synchronizer must be the registration's, and must not
       -- be one of the `requiredSynchronizers`.
-    optActivityWeight : Optional Decimal
+    optAppActivityWeight : Optional Decimal
       -- ^ The weight with which each purchased byte earns the paymaster app activity. Defaults to
       -- the registration's `maxActivityWeight`, and must not be negative or above it.
     optAssetActivityWeight : Optional Decimal
@@ -288,7 +288,7 @@ data DSyncTrafficPurchase = DSyncTrafficPurchase with
 data PaymasterPurchase = PaymasterPurchase with
     registration : RegisteredSynchronizer
       -- ^ The registration of the synchronizer the traffic is purchased for.
-    activityWeight : Decimal
+    appActivityWeight : Decimal
       -- ^ The weight with which each purchased byte earns the paymaster app activity.
     assetActivityWeight : Decimal
       -- ^ The weight with which each purchased byte earns the paymaster asset activity.
@@ -306,7 +306,7 @@ data PaymasterActivity = PaymasterActivity with
 -- purchase's weight in app and in asset activity, and each total is rounded down.
 paymasterActivity : PaymasterPurchase -> Int -> PaymasterActivity
 paymasterActivity PaymasterPurchase{..} trafficAmount = PaymasterActivity with
-    appActivity = [(registration.paymaster, weighted activityWeight)]
+    appActivity = [(registration.paymaster, weighted appActivityWeight)]
     assetActivity = [(registration.paymaster, weighted assetActivityWeight)]
   where
     weighted weight = floor (intToDecimal trafficAmount * weight)
