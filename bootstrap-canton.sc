@@ -13,11 +13,11 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.synchronizer.config.SynchronizerParametersConfig
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
-import com.digitalasset.canton.admin.api.client.data.TrafficControlParameters
+import com.digitalasset.canton.admin.api.client.data.{OnboardingRestriction, TrafficControlParameters}
 import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
-import com.digitalasset.canton.topology.transaction.TopologyChangeOp
+import com.digitalasset.canton.topology.transaction.{ParticipantPermission, TopologyChangeOp}
 import com.digitalasset.canton.version.ProtocolVersion
 
 println("Running canton bootstrap script...")
@@ -52,6 +52,9 @@ val splitwellProtocolVersion = Option(System.getenv("SPLITWELL_PROTOCOL_VERSION"
   .map(ProtocolVersion.tryCreate)
   .getOrElse(ProtocolVersion.v36)
 
+// -t also makes splitwell permissioned, as a dedicated synchronizer must be.
+val splitwellPermissioned = Option(System.getenv("SPLITWELL_PERMISSIONED")).contains("true")
+
 // The global synchronizer's parameters on mainnet, apart from the base rate. A member only gets
 // a traffic state, and so can only be granted extra traffic, on a synchronizer that has traffic
 // control enabled.
@@ -73,6 +76,7 @@ def bootstrapOtherDomain(
     // need it, and enabling it everywhere would change what every other test sequences against.
     enableTrafficControl: Boolean = false,
     protocolVersion: ProtocolVersion = ProtocolVersion.v36,
+    permissioned: Boolean = false,
 ) = {
   bootstrap.synchronizer(
     name,
@@ -102,6 +106,8 @@ def bootstrapOtherDomain(
         mediatorDeduplicationTimeout = NonNegativeFiniteDuration.ofHours(48),
         trafficControl =
           if (enableTrafficControl) Some(defaultTrafficControlParameters) else parameters.trafficControl,
+        onboardingRestriction =
+          if (permissioned) OnboardingRestriction.RestrictedOpen else parameters.onboardingRestriction,
       ),
     signedBy = Some(sequencer.id.uid.namespace.fingerprint),
     // This is test code so just force the change.
@@ -117,7 +123,16 @@ bootstrapOtherDomain(
   splitwellMediator,
   enableTrafficControl = true,
   protocolVersion = splitwellProtocolVersion,
+  permissioned = splitwellPermissioned,
 )
+// SyncOperatorIntegrationTest connects only alice's participant to splitwell during its setup.
+if (splitwellPermissioned) {
+  splitwellSequencer.topology.participant_synchronizer_permissions.propose(
+    splitwellSequencer.synchronizer_id,
+    aliceParticipant.id,
+    ParticipantPermission.Submission,
+  )
+}
 bootstrapOtherDomain("splitwellUpgrade", splitwellUpgradeSequencer, splitwellUpgradeMediator)
 
 // These user allocations are only there

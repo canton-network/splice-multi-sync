@@ -4,11 +4,12 @@
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 import org.lfdecentralizedtrust.splice.automation.{
@@ -17,26 +18,21 @@ import org.lfdecentralizedtrust.splice.automation.{
   TaskSuccess,
   TriggerContext,
 }
-import org.lfdecentralizedtrust.splice.automation.GrantUnlimitedTrafficTriggerBase.{
+import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
+import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
+import org.lfdecentralizedtrust.splice.syncoperator.SyncOperatorSynchronizerNode
+import org.lfdecentralizedtrust.splice.syncoperator.automation.UnlimitedTrafficTrigger.{
   Task,
   UnlimitedTraffic,
 }
-import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
-import org.lfdecentralizedtrust.splice.syncoperator.SyncOperatorSynchronizerNode
-import org.lfdecentralizedtrust.splice.syncoperator.automation.ParticipantUnlimitedTrafficTrigger.{
-  admittedParticipants,
-  joinedTrafficStates,
-}
 
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
-/** Purchases unlimited traffic for admitted participants before they join, so they can transact
-  * as soon as they have joined. Once they have joined, [[ParticipantUnlimitedTrafficTrigger]]
-  * keeps their limit at the maximum.
+/** Grants unlimited traffic to the mediators and the admitted participants of this synchronizer,
+  * whether or not they have joined yet.
   */
-class PreJoinParticipantTrafficTrigger(
+class UnlimitedTrafficTrigger(
     override protected val context: TriggerContext,
     synchronizerId: SynchronizerId,
     synchronizerNode: SyncOperatorSynchronizerNode,
@@ -49,45 +45,50 @@ class PreJoinParticipantTrafficTrigger(
 
   private val submittedAt = TrieMap.empty[Member, CantonTimestamp]
   private val purchased = TrieMap.empty[Member, Unit]
-  private val loggedUnsupported = new AtomicBoolean(false)
 
   private def connection: SequencerAdminConnection = synchronizerNode.sequencerAdminConnection
 
   override protected def retrieveTasks()(implicit
       tc: TraceContext
   ): Future[Seq[Task]] =
-    prePurchaseSupported().flatMap {
-      case false => Future.successful(Seq.empty)
-      case true =>
-        for {
-          admitted <- admittedParticipants(connection, synchronizerId)
-          pending = admitted.filterNot(purchased.contains).filterNot(recentlySubmitted)
-          joined <- joinedTrafficStates(connection, pending).map(_.map(_.member).toSet)
-        } yield pending.filterNot(joined.contains).map(Task(synchronizerId, _))
-    }
+    members().map(
+      _.filterNot(purchased.contains)
+        .filterNot(recentlySubmitted)
+        .map(Task(synchronizerId, _))
+    )
 
+  // Nothing else buys traffic on this synchronizer, so serial 1 is the right one for every member.
+  // Buying before a member joins relies on protocol version 37, which the app checks on startup.
   override protected def completeTask(task: Task)(implicit
       tc: TraceContext
   ): Future[TaskOutcome] =
-    connection.purchaseTrafficBeforeJoin(task.memberId, UnlimitedTraffic).map {
+    connection.purchaseInitialTraffic(task.memberId, UnlimitedTraffic).map {
       case true =>
         submittedAt.put(task.memberId, context.clock.now).discard
-        TaskSuccess(s"Purchased unlimited traffic for ${task.memberId} before it joined")
+        TaskSuccess(s"Purchased unlimited traffic for ${task.memberId}")
       case false =>
         submittedAt.remove(task.memberId).discard
         purchased.put(task.memberId, ()).discard
-        TaskSuccess(s"Traffic for ${task.memberId} was already purchased before it joined")
+        TaskSuccess(s"Unlimited traffic for ${task.memberId} was already purchased")
     }
 
   override protected def isStaleTask(task: Task)(implicit
       tc: TraceContext
   ): Future[Boolean] =
     if (purchased.contains(task.memberId)) Future.successful(true)
-    else
-      for {
-        admitted <- admittedParticipants(connection, task.synchronizerId)
-        joined <- joinedTrafficStates(connection, Seq(task.memberId))
-      } yield !admitted.contains(task.memberId) || joined.nonEmpty
+    else members().map(!_.contains(task.memberId))
+
+  private def members()(implicit tc: TraceContext): Future[Seq[Member]] =
+    for {
+      permissions <- connection.listParticipantSynchronizerPermissions(synchronizerId)
+      mediators <- connection.getMediatorSynchronizerState(
+        synchronizerId,
+        topologySnapshot = TopologySnapshot.Effective,
+      )
+    } yield (permissions.map(_.mapping.participantId) ++ mediators.mapping.active.forgetNE)
+      .map(member => member: Member)
+      .distinct
+      .sortBy(_.toProtoPrimitive)
 
   // A submission is only retried once it had time to be sequenced. The retry then reports
   // whether it was.
@@ -97,17 +98,20 @@ class PreJoinParticipantTrafficTrigger(
       .exists(
         _.plus(trafficBalanceReconciliationDelay.asJavaApproximation).isAfter(context.clock.now)
       )
+}
 
-  private def prePurchaseSupported()(implicit tc: TraceContext): Future[Boolean] =
-    connection.getStatus.map { status =>
-      val protocolVersion = status.trySuccess.protocolVersion
-      val supported = protocolVersion >= ProtocolVersion.v37
-      if (!supported && !loggedUnsupported.getAndSet(true))
-        logger.info(
-          s"Synchronizer $synchronizerId runs protocol version $protocolVersion, which cannot " +
-            "take traffic purchases before a participant joins. Participants get their traffic " +
-            "once they have joined."
-        )
-      supported
-    }
+object UnlimitedTrafficTrigger {
+
+  val UnlimitedTraffic: NonNegativeLong = NonNegativeLong.maxValue
+
+  final case class Task(
+      synchronizerId: SynchronizerId,
+      memberId: Member,
+  ) extends PrettyPrinting {
+    override def pretty: Pretty[this.type] =
+      prettyOfClass(
+        param("synchronizerId", _.synchronizerId),
+        param("memberId", _.memberId),
+      )
+  }
 }

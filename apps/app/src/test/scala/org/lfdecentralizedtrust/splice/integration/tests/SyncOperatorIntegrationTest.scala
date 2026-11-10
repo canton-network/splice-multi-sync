@@ -13,7 +13,6 @@ import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   ParticipantSynchronizerPermission,
 }
-import org.lfdecentralizedtrust.splice.automation.GrantUnlimitedTrafficTriggerBase.UnlimitedTraffic
 import org.lfdecentralizedtrust.splice.config.ConfigTransforms
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
 import org.lfdecentralizedtrust.splice.integration.EnvironmentDefinition
@@ -21,11 +20,11 @@ import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   IntegrationTest,
   SpliceTestConsoleEnvironment,
 }
-import org.lfdecentralizedtrust.splice.syncoperator.automation.{
-  ParticipantUnlimitedTrafficTrigger,
-  PreJoinParticipantTrafficTrigger,
-}
+import org.lfdecentralizedtrust.splice.syncoperator.automation.UnlimitedTrafficTrigger
+import org.lfdecentralizedtrust.splice.syncoperator.automation.UnlimitedTrafficTrigger.UnlimitedTraffic
 import org.lfdecentralizedtrust.splice.syncoperator.config.SyncOperatorTrafficControlConfig
+
+import scala.concurrent.duration.DurationInt
 
 class SyncOperatorIntegrationTest extends IntegrationTest {
 
@@ -88,13 +87,11 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
       }
     }
 
-    "grant unlimited traffic to the mediator and to admitted participants only" in { implicit env =>
+    "grant unlimited traffic to the mediator and to admitted participants" in { implicit env =>
       val synchronizerId = syncOperatorBackend.appState.synchronizerId
       val alice = aliceValidatorBackend.participantClientWithAdminToken
       val bob = bobValidatorBackend.participantClientWithAdminToken
-      val automation = syncOperatorBackend.appState.automation
-      val joinedTrigger = automation.trigger[ParticipantUnlimitedTrafficTrigger]
-      val preJoinTrigger = automation.trigger[PreJoinParticipantTrafficTrigger]
+      val trigger = syncOperatorBackend.appState.automation.trigger[UnlimitedTrafficTrigger]
 
       clue("the mediator is granted unlimited traffic") {
         val mediator = sequencer
@@ -109,33 +106,26 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
         }
       }
 
-      joinedTrigger.pause().futureValue
-      preJoinTrigger.pause().futureValue
-      try {
-        // Alice's validator has joined splitwell, but without traffic it cannot finish connecting.
-        clue("a participant that joined without being admitted gets no traffic") {
-          eventually() {
-            extraTrafficLimit(alice.id) should not be empty
-          }
-          joinedTrigger.runOnce().futureValue shouldBe false
-          preJoinTrigger.runOnce().futureValue shouldBe false
-          extraTrafficLimit(alice.id) should not be Some(UnlimitedTraffic)
-        }
-
-        clue("an admitted participant is granted unlimited traffic") {
-          admit(alice.id)
-          eventually() {
-            joinedTrigger.runOnce().futureValue shouldBe true
-          }
+      // The bootstrap admits alice's participant, which joins splitwell during the test setup.
+      clue("a participant admitted at startup is granted unlimited traffic") {
+        eventually() {
           extraTrafficLimit(alice.id) shouldBe Some(UnlimitedTraffic)
         }
+      }
 
-        // Only the purchase before the join can grant bob's traffic, as the trigger for joined
-        // participants stays paused.
+      trigger.pause().futureValue
+      try {
         clue("a participant admitted before it joins connects with unlimited traffic") {
           admit(bob.id)
           eventually() {
-            preJoinTrigger.runOnce().futureValue shouldBe true
+            sequencer
+              .listParticipantSynchronizerPermissions(synchronizerId)
+              .futureValue
+              .map(_.mapping.participantId) should contain(bob.id)
+          }
+          // Once nothing is left to do, the purchase for bob has been submitted.
+          eventually(40.seconds) {
+            trigger.runOnce().futureValue shouldBe false
           }
           bob.synchronizers.connect_by_config(
             alice.synchronizers.config(SynchronizerAlias.tryCreate("splitwell")).value,
@@ -144,8 +134,7 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
           extraTrafficLimit(bob.id) shouldBe Some(UnlimitedTraffic)
         }
       } finally {
-        joinedTrigger.resume()
-        preJoinTrigger.resume()
+        trigger.resume()
       }
 
       // The participant admin API in tests does not allow pings, so bob submits a topology

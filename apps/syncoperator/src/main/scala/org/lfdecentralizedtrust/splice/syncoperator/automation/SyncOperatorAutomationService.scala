@@ -53,25 +53,7 @@ class SyncOperatorAutomationService(
   )
 
   registerTrigger(
-    new MediatorUnlimitedTrafficTrigger(
-      triggerContext,
-      synchronizerId,
-      synchronizerNode,
-      trafficBalanceReconciliationDelay,
-    )
-  )
-
-  registerTrigger(
-    new ParticipantUnlimitedTrafficTrigger(
-      triggerContext,
-      synchronizerId,
-      synchronizerNode,
-      trafficBalanceReconciliationDelay,
-    )
-  )
-
-  registerTrigger(
-    new PreJoinParticipantTrafficTrigger(
+    new UnlimitedTrafficTrigger(
       triggerContext,
       synchronizerId,
       synchronizerNode,
@@ -86,8 +68,6 @@ object SyncOperatorAutomationService extends AutomationServiceCompanion {
   override protected[this] def expectedTriggerClasses: Seq[TriggerClass] =
     Seq(
       aTrigger[ReconcileDedicatedSynchronizerParametersTrigger],
-      aTrigger[MediatorUnlimitedTrafficTrigger],
-      aTrigger[ParticipantUnlimitedTrafficTrigger],
-      aTrigger[PreJoinParticipantTrafficTrigger],
+      aTrigger[UnlimitedTrafficTrigger],
     )
 }
