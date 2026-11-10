@@ -52,7 +52,7 @@ import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success, Try}
 
-/** A running instance of a canton node that needs no participant. See NodeBase for apps that connect to a participant. */
+/** A running instance of a canton node that needs no participant. See SpliceNodeWithParticipantBase for apps that connect to a participant. */
 abstract class SpliceNodeBase[State <: AutoCloseable & HasHealth](
     parameters: SharedSpliceAppParameters,
     loggerFactory: NamedLoggerFactory,
@@ -119,11 +119,11 @@ abstract class SpliceNodeBase[State <: AutoCloseable & HasHealth](
 
   protected def ports: Map[String, Port]
 
-  override type Status = NodeBase.NodeStatus
+  override type Status = SpliceNodeBase.NodeStatus
 
   // TODO(DACH-NY/canton-network-node#736): fork or generalize status definition.
   override final def status = {
-    NodeBase.NodeStatus(
+    SpliceNodeBase.NodeStatus(
       uid = UniqueIdentifier.tryFromProtoPrimitive(s"amulet::$name"),
       uptime = uptime(),
       ports = ports,
@@ -290,7 +290,7 @@ abstract class SpliceNodeBase[State <: AutoCloseable & HasHealth](
 }
 
 /** A running instance of a canton node that connects to a participant. See Node for the subclass that provides the default initialization for most apps. */
-abstract class NodeBase[State <: AutoCloseable & HasHealth](
+abstract class SpliceNodeWithParticipantBase[State <: AutoCloseable & HasHealth](
     serviceUser: String,
     participantClient: BaseParticipantClientConfig,
     parameters: SharedSpliceAppParameters,
@@ -413,7 +413,7 @@ abstract class NodeBase[State <: AutoCloseable & HasHealth](
   }
 }
 
-object NodeBase {
+object SpliceNodeBase {
   final case class NodeStatus(
       uid: UniqueIdentifier,
       uptime: Duration,
