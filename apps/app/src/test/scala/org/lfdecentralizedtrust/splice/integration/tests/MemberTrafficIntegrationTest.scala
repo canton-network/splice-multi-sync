@@ -165,13 +165,14 @@ class MemberTrafficIntegrationTest
         s"synchronizer-id=${synchronizerId.toProtoPrimitive}&migration-id=0"
       aliceWalletClient.tap(spentAmuletAmount * (trafficContractsMergeThreshold + 1) + 100)
 
-      def registerWithAliceAsPaymaster(id: SynchronizerId): Unit =
+      actAndCheck(
+        "SV1 registers a dedicated synchronizer with Alice as its paymaster",
         sv1Backend.createVoteRequest(
           sv1Backend.getDsoInfo().svParty.toProtoPrimitive,
           new ARC_DsoRules(
             new SRARC_RegisterSynchronizer(
               new DsoRules_RegisterSynchronizer(
-                id.toProtoPrimitive,
+                synchronizerId.toProtoPrimitive,
                 aliceParty.toProtoPrimitive,
                 java.math.BigDecimal.ONE,
                 java.math.BigDecimal.ONE,
@@ -179,23 +180,21 @@ class MemberTrafficIntegrationTest
             )
           ),
           "url",
-          "Register a synchronizer",
+          "Register a dedicated synchronizer",
           sv1Backend.getDsoInfo().dsoRules.payload.config.voteRequestTimeout,
           None,
-        )
-
-      actAndCheck(
-        "SV1 registers a dedicated synchronizer with Alice as its paymaster",
-        registerWithAliceAsPaymaster(synchronizerId),
+        ),
       )(
         "Scan serves the registration in Alice's transfer factory",
         // Scan's store ingests the registration asynchronously, and the purchases need it there.
         _ => transferFactoryHasRegistration(aliceParty, memo) shouldBe true,
       )
 
-      clue("Scan only serves the registration to its paymaster") {
-        val aliceValidatorParty = aliceValidatorBackend.getValidatorPartyId()
-        transferFactoryHasRegistration(aliceValidatorParty, memo) shouldBe false
+      clue("Scan serves the registration to any sender, as the Daml code checks the paymaster") {
+        transferFactoryHasRegistration(
+          aliceValidatorBackend.getValidatorPartyId(),
+          memo,
+        ) shouldBe true
       }
 
       def buyTrafficAsPaymaster(viaV2: Boolean): Unit = {
@@ -255,27 +254,6 @@ class MemberTrafficIntegrationTest
               (trafficContractsMergeThreshold + 1) * purchasedTrafficAmount
           }
         }
-      }
-
-      clue("Scan leaves out a registration for a synchronizer that the config supports") {
-        // Daml refuses a registration for a supported synchronizer, so a member purchase for the
-        // decentralized synchronizer would fail if Scan added one.
-        actAndCheck(
-          "SV1 registers the decentralized synchronizer with Alice as its paymaster",
-          registerWithAliceAsPaymaster(activeSynchronizerId),
-        )(
-          "Scan has ingested the registration",
-          _ =>
-            sv1ScanBackend.appState.store
-              .lookupRegisteredSynchronizer(activeSynchronizerId.toProtoPrimitive, aliceParty)
-              .futureValue should not be empty,
-        )
-        val memberMemo =
-          s"${TokenStandardMetadata.trafficPurchaseMemoPrefix}" +
-            s"member-id=${aliceValidatorBackend.participantClient.id.toProtoPrimitive}" +
-            s"&synchronizer-id=${activeSynchronizerId.toProtoPrimitive}" +
-            s"&migration-id=${sv1ScanBackend.getMigrationId()}"
-        transferFactoryHasRegistration(aliceParty, memberMemo) shouldBe false
       }
     }
   }

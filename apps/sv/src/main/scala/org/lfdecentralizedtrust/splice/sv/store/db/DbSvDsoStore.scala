@@ -1638,11 +1638,10 @@ class DbSvDsoStore private (
             acsStoreId,
             domainMigrationId,
             MemberTraffic.COMPANION,
-            // No index covers this, as the member traffic index excludes rows without a member, so
-            // this reads every MemberTraffic contract in the store: about the number of members
-            // times numMemberTrafficContractsThreshold, as the merge trigger bounds each member's.
-            // The conditions match SvDsoStore.isPaymasterTraffic.
-            where = sql"""member_traffic_domain = $synchronizerId
+            // indexed by dso_acs_store_sid_mid_pn_tid_mtd. The conditions on the create arguments
+            // match SvDsoStore.isPaymasterTraffic.
+            where = sql"""member_traffic_member is null
+                      and member_traffic_domain = $synchronizerId
                       and create_arguments->>'memberId' = ''
                       and create_arguments->>'migrationId' = '0'""",
             orderLimit = sql"""limit ${sqlLimit(limit)}""",

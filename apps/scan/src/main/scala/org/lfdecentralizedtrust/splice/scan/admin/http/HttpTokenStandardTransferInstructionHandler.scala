@@ -8,7 +8,7 @@ import com.daml.ledger.javaapi.data.codegen.ContractId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import io.opentelemetry.api.trace.Tracer
 import org.lfdecentralizedtrust.splice.codegen.java.splice
@@ -77,19 +77,16 @@ class HttpTokenStandardTransferInstructionHandler(
                 .asRuntimeException()
             )
         }
-        (choiceContextBuilder, externalPartyConfigStateO) <- getAmuletRulesTransferContextV1(
+        choiceContextBuilder <- getAmuletRulesTransferContextV1(
           body.excludeDebugFields.getOrElse(false)
         )
         dsoRules <- store.getDsoRules()
-        sender = PartyId.tryFromProtoPrimitive(transferInstr.transfer.sender)
         optRegisteredSynchronizer <- lookupTrafficPurchaseRegistration(
-          sender,
           transferInstr.transfer.receiver,
           transferInstr.transfer.meta,
-          externalPartyConfigStateO,
         )
         result <- buildTransferFactory(
-          sender,
+          PartyId.tryFromProtoPrimitive(transferInstr.transfer.sender),
           PartyId.tryFromProtoPrimitive(transferInstr.transfer.receiver),
           body.excludeDebugFields.getOrElse(false),
         )((optTransferPreapproval, optFeaturedAppRight, externalPartyAmuletRules) => {
@@ -194,23 +191,21 @@ class HttpTokenStandardTransferInstructionHandler(
                 .asRuntimeException()
             )
         }
-        (choiceContextBuilder, externalPartyConfigStateO) <- getAmuletRulesTransferContextV2(
+        choiceContextBuilder <- getAmuletRulesTransferContextV2(
           body.excludeDebugFields.getOrElse(false)
         )
         dsoRules <- store.getDsoRules()
-        sender = PartyId.tryFromProtoPrimitive(
-          TokenStandardAccount.tryGetRegularAccountOwner(transferInstr.transfer.sender)
-        )
-        receiver = TokenStandardAccount.tryGetRegularAccountOwner(transferInstr.transfer.receiver)
         optRegisteredSynchronizer <- lookupTrafficPurchaseRegistration(
-          sender,
-          receiver,
+          TokenStandardAccount.tryGetRegularAccountOwner(transferInstr.transfer.receiver),
           transferInstr.transfer.meta,
-          externalPartyConfigStateO,
         )
         result <- buildTransferFactory(
-          sender,
-          PartyId.tryFromProtoPrimitive(receiver),
+          PartyId.tryFromProtoPrimitive(
+            TokenStandardAccount.tryGetRegularAccountOwner(transferInstr.transfer.sender)
+          ),
+          PartyId.tryFromProtoPrimitive(
+            TokenStandardAccount.tryGetRegularAccountOwner(transferInstr.transfer.receiver)
+          ),
           body.excludeDebugFields.getOrElse(false),
         )((optTransferPreapproval, optFeaturedAppRight, externalPartyAmuletRules) => {
           val isSelfTransfer = transferInstr.transfer.receiver == transferInstr.transfer.sender
@@ -295,20 +290,13 @@ class HttpTokenStandardTransferInstructionHandler(
   }
 
   /** The registration of the dedicated synchronizer that a traffic purchase's memo names, which a
-    * paymaster's purchase for its registered synchronizer needs in its choice context. Only the
-    * paymaster may buy traffic for a registered synchronizer, so this looks up the registration
-    * whose paymaster is the sender. None for any other transfer, and for a purchase for a
-    * synchronizer that the external party config state supports, for which the Daml code refuses
-    * a registration. This checks the config state that goes into the choice context, as the Daml
-    * code does, not the current AmuletRules config.
+    * paymaster's purchase for its registered synchronizer needs in its choice context. None for any
+    * other transfer, and for a memo whose synchronizer id doesn't parse. The Daml code checks that
+    * the sender is the registration's paymaster.
     */
   private def lookupTrafficPurchaseRegistration(
-      sender: PartyId,
       receiver: String,
       meta: metadatav1.Metadata,
-      externalPartyConfigStateO: Option[
-        Contract[ExternalPartyConfigState.ContractId, ExternalPartyConfigState]
-      ],
   )(implicit tc: TraceContext): Future[Option[ContractWithState[
     splice.decentralizedsynchronizer.RegisteredSynchronizer.ContractId,
     splice.decentralizedsynchronizer.RegisteredSynchronizer,
@@ -318,14 +306,10 @@ class HttpTokenStandardTransferInstructionHandler(
         meta.values.asScala.get(TokenStandardMetadata.reasonMetaKey)
       )
       .flatten
-      .flatMap(TokenStandardMetadata.trafficPurchaseMemoSynchronizerId) match {
+      .flatMap(TokenStandardMetadata.trafficPurchaseMemoSynchronizerId)
+      .flatMap(SynchronizerId.fromString(_).toOption) match {
       case None => Future.successful(None)
-      case Some(synchronizerId) =>
-        val isSupported = externalPartyConfigStateO
-          .flatMap(_.payload.supportedSynchronizerIds.toScala)
-          .exists(_.contains(synchronizerId))
-        if (isSupported) Future.successful(None)
-        else store.lookupRegisteredSynchronizer(synchronizerId, sender)
+      case Some(synchronizerId) => store.lookupRegisteredSynchronizer(synchronizerId)
     }
 
   private def buildTransferFactory[FactoryResponse](
@@ -373,12 +357,7 @@ class HttpTokenStandardTransferInstructionHandler(
 
   private def getAmuletRulesTransferContextV1(excludeDebugFields: Boolean)(implicit
       tc: TraceContext
-  ): Future[
-    (
-        V1ChoiceContextBuilder,
-        Option[Contract[ExternalPartyConfigState.ContractId, ExternalPartyConfigState]],
-    )
-  ] = {
+  ): Future[V1ChoiceContextBuilder] = {
     val now = clock.now
     getAmuletRulesTransferContext(now) {
       (amuletRules, newestOpenRound, externalPartyConfigStateO) =>
@@ -389,26 +368,18 @@ class HttpTokenStandardTransferInstructionHandler(
             .activeSynchronizer,
           excludeDebugFields,
         )
-        (
-          choiceContextBuilder
-            .addContracts(
-              "amulet-rules" -> amuletRules,
-              "open-round" -> newestOpenRound.contract,
-            )
-            .addOptionalContract("external-party-config-state" -> externalPartyConfigStateO),
-          externalPartyConfigStateO,
-        )
+        choiceContextBuilder
+          .addContracts(
+            "amulet-rules" -> amuletRules,
+            "open-round" -> newestOpenRound.contract,
+          )
+          .addOptionalContract("external-party-config-state" -> externalPartyConfigStateO)
     }
   }
 
   private def getAmuletRulesTransferContextV2(excludeDebugFields: Boolean)(implicit
       tc: TraceContext
-  ): Future[
-    (
-        V2ChoiceContextBuilder,
-        Option[Contract[ExternalPartyConfigState.ContractId, ExternalPartyConfigState]],
-    )
-  ] = {
+  ): Future[V2ChoiceContextBuilder] = {
     val now = clock.now
     getAmuletRulesTransferContext(now) {
       (amuletRules, newestOpenRound, externalPartyConfigStateO) =>
@@ -419,15 +390,12 @@ class HttpTokenStandardTransferInstructionHandler(
             .activeSynchronizer,
           excludeDebugFields,
         )
-        (
-          choiceContextBuilder
-            .addContracts(
-              "amulet-rules" -> amuletRules,
-              "open-round" -> newestOpenRound.contract,
-            )
-            .addOptionalContract("external-party-config-state" -> externalPartyConfigStateO),
-          externalPartyConfigStateO,
-        )
+        choiceContextBuilder
+          .addContracts(
+            "amulet-rules" -> amuletRules,
+            "open-round" -> newestOpenRound.contract,
+          )
+          .addOptionalContract("external-party-config-state" -> externalPartyConfigStateO)
     }
   }
 

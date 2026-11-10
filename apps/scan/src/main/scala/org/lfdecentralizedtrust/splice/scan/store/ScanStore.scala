@@ -238,14 +238,13 @@ trait ScanStore
     ]]
   ]
 
-  /** The registration of the dedicated synchronizer with the given id and paymaster, if there is
-    * one. Nothing on the ledger makes a registration unique for its synchronizer id and
-    * paymaster, so with several this returns the most recently created one, the same on every
-    * Scan.
+  /** The registration of the dedicated synchronizer with the given id, if there is one. Nothing
+    * on the ledger makes a registration unique for its synchronizer id: by convention the SVs
+    * register a synchronizer at most once. With several, this returns the most recently created
+    * one, the same on every Scan.
     */
   def lookupRegisteredSynchronizer(
-      synchronizerId: String,
-      paymaster: PartyId,
+      synchronizerId: SynchronizerId
   )(implicit tc: TraceContext): Future[
     Option[ContractWithState[
       splice.decentralizedsynchronizer.RegisteredSynchronizer.ContractId,
@@ -586,7 +585,11 @@ object ScanStore {
           },
         ) { contract =>
           ScanAcsStoreRowData(
-            contract = contract
+            contract = contract,
+            // as for MemberTraffic, we ignore an invalid synchronizer id instead of killing the
+            // ingestion pipeline
+            registeredSynchronizerId =
+              SynchronizerId.fromString(contract.payload.synchronizerId).toOption,
           )
         },
       ),

@@ -405,6 +405,8 @@ abstract class ScanStoreTest
     "lookupRegisteredSynchronizer" should {
       val synchronizerA = "dedicated-synchronizer::1220aaaa"
       val synchronizerB = "dedicated-synchronizer::1220bbbb"
+      def lookup(store: ScanStore, synchronizerId: String) =
+        store.lookupRegisteredSynchronizer(SynchronizerId.tryFromString(synchronizerId))
 
       "return the registration of the synchronizer if it is registered" in {
         val wanted = registeredSynchronizer(synchronizerA)
@@ -414,39 +416,18 @@ abstract class ScanStoreTest
           _ <- dummyDomain.create(wanted)(store.multiDomainAcsStore)
           _ <- dummyDomain.create(unwanted)(store.multiDomainAcsStore)
         } yield {
-          store
-            .lookupRegisteredSynchronizer(synchronizerA, providerParty(1))
-            .futureValue shouldBe Some(ContractWithState(wanted, Assigned(dummyDomain)))
-          store
-            .lookupRegisteredSynchronizer("dedicated-synchronizer::1220cccc", providerParty(1))
-            .futureValue shouldBe None
-          store
-            .lookupRegisteredSynchronizer(synchronizerA, providerParty(2))
-            .futureValue shouldBe None
+          lookup(store, synchronizerA).futureValue shouldBe Some(
+            ContractWithState(wanted, Assigned(dummyDomain))
+          )
+          lookup(store, "dedicated-synchronizer::1220cccc").futureValue shouldBe None
         }
       }
 
-      "return the registration of the given paymaster if a synchronizer has several" in {
-        val ofPaymaster1 = registeredSynchronizer(synchronizerA, paymaster = providerParty(1))
-        val ofPaymaster2 = registeredSynchronizer(synchronizerA, paymaster = providerParty(2))
-        for {
-          store <- mkStore()
-          _ <- dummyDomain.create(ofPaymaster1)(store.multiDomainAcsStore)
-          _ <- dummyDomain.create(ofPaymaster2)(store.multiDomainAcsStore)
-        } yield {
-          store
-            .lookupRegisteredSynchronizer(synchronizerA, providerParty(1))
-            .futureValue shouldBe Some(ContractWithState(ofPaymaster1, Assigned(dummyDomain)))
-          store
-            .lookupRegisteredSynchronizer(synchronizerA, providerParty(2))
-            .futureValue shouldBe Some(ContractWithState(ofPaymaster2, Assigned(dummyDomain)))
-        }
-      }
-
-      "return the most recently created registration if a paymaster has several" in {
+      "return the most recently created registration if a synchronizer has several" in {
         def newerAndOlder(synchronizerId: String) = (
           registeredSynchronizer(synchronizerId).copy(createdAt = Instant.EPOCH.plusSeconds(60)),
-          registeredSynchronizer(synchronizerId).copy(createdAt = Instant.EPOCH),
+          registeredSynchronizer(synchronizerId, paymaster = providerParty(2))
+            .copy(createdAt = Instant.EPOCH),
         )
         // ingested in both orders, as the pick must not depend on it: it differs between Scans
         val (newerA, olderA) = newerAndOlder(synchronizerA)
@@ -457,12 +438,12 @@ abstract class ScanStoreTest
             dummyDomain.create(_)(store.multiDomainAcsStore)
           )
         } yield {
-          store
-            .lookupRegisteredSynchronizer(synchronizerA, providerParty(1))
-            .futureValue shouldBe Some(ContractWithState(newerA, Assigned(dummyDomain)))
-          store
-            .lookupRegisteredSynchronizer(synchronizerB, providerParty(1))
-            .futureValue shouldBe Some(ContractWithState(newerB, Assigned(dummyDomain)))
+          lookup(store, synchronizerA).futureValue shouldBe Some(
+            ContractWithState(newerA, Assigned(dummyDomain))
+          )
+          lookup(store, synchronizerB).futureValue shouldBe Some(
+            ContractWithState(newerB, Assigned(dummyDomain))
+          )
         }
       }
 
@@ -474,11 +455,9 @@ abstract class ScanStoreTest
           store <- mkStore()
           _ <- dummyDomain.create(first)(store.multiDomainAcsStore)
           _ <- dummyDomain.create(second)(store.multiDomainAcsStore)
-        } yield {
-          store
-            .lookupRegisteredSynchronizer(synchronizerA, providerParty(1))
-            .futureValue shouldBe Some(ContractWithState(highest, Assigned(dummyDomain)))
-        }
+        } yield lookup(store, synchronizerA).futureValue shouldBe Some(
+          ContractWithState(highest, Assigned(dummyDomain))
+        )
       }
 
       "not return an archived registration" in {
@@ -487,11 +466,7 @@ abstract class ScanStoreTest
           store <- mkStore()
           _ <- dummyDomain.create(archived)(store.multiDomainAcsStore)
           _ <- dummyDomain.archive(archived)(store.multiDomainAcsStore)
-        } yield {
-          store
-            .lookupRegisteredSynchronizer(synchronizerA, providerParty(1))
-            .futureValue shouldBe None
-        }
+        } yield lookup(store, synchronizerA).futureValue shouldBe None
       }
 
       "not return a registration of another DSO" in {
@@ -499,11 +474,20 @@ abstract class ScanStoreTest
         for {
           store <- mkStore()
           _ <- dummyDomain.create(ofOtherDso)(store.multiDomainAcsStore)
-        } yield {
-          store
-            .lookupRegisteredSynchronizer(synchronizerA, providerParty(1))
-            .futureValue shouldBe None
-        }
+        } yield lookup(store, synchronizerA).futureValue shouldBe None
+      }
+
+      "ingest past a registration with an invalid synchronizer id" in {
+        val invalid = registeredSynchronizer("not-a-synchronizer-id")
+        val valid = registeredSynchronizer(synchronizerA)
+        for {
+          store <- mkStore()
+          // ingesting the invalid registration must not fail, so the valid one is ingested after it
+          _ <- dummyDomain.create(invalid)(store.multiDomainAcsStore)
+          _ <- dummyDomain.create(valid)(store.multiDomainAcsStore)
+        } yield lookup(store, synchronizerA).futureValue shouldBe Some(
+          ContractWithState(valid, Assigned(dummyDomain))
+        )
       }
     }
 

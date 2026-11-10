@@ -507,8 +507,7 @@ class DbScanStore private (
   }
 
   override def lookupRegisteredSynchronizer(
-      synchronizerId: String,
-      paymaster: PartyId,
+      synchronizerId: SynchronizerId
   )(implicit tc: TraceContext): Future[
     Option[ContractWithState[RegisteredSynchronizer.ContractId, RegisteredSynchronizer]]
   ] = waitUntilAcsIngested {
@@ -520,10 +519,9 @@ class DbScanStore private (
             acsStoreId,
             domainMigrationId,
             RegisteredSynchronizer.COMPANION,
-            // There are few registrations, so this doesn't need an index.
+            // indexed by scan_acs_store_sid_mid_pn_tid_rsi
             additionalWhere = sql"""
-                and create_arguments->>'synchronizerId' = $synchronizerId
-                and create_arguments->>'paymaster' = ${paymaster.toProtoPrimitive}
+                and registered_synchronizer_id = $synchronizerId
             """,
             // Every Scan must pick the same registration, so this orders by the ledger's creation
             // time and contract id rather than by the store's ingestion order.
