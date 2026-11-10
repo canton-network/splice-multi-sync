@@ -185,7 +185,7 @@ abstract class SpliceNodeBase[State <: AutoCloseable & HasHealth](
 
   /** Closed after the retry provider and before the HTTP pool and the app state. */
   protected def connectionCloseables(
-      @nowarn("cat=unused") closingTimeout: NonNegativeDuration
+      @nowarn("cat=unused") timeout: NonNegativeDuration
   )(implicit @nowarn("cat=unused") tc: TraceContext): Seq[AsyncOrSyncCloseable] = Seq.empty
 
   private val initializeF = withNewTrace("app_init") { implicit tc => _ =>
@@ -391,13 +391,13 @@ abstract class NodeBase[State <: AutoCloseable & HasHealth](
   }
 
   override protected def connectionCloseables(
-      closingTimeout: NonNegativeDuration
+      timeout: NonNegativeDuration
   )(implicit tc: TraceContext): Seq[AsyncOrSyncCloseable] =
     Seq(
       AsyncCloseable(
         s"$name Ledger API connection",
         ledgerClientF.map(_.close()),
-        closingTimeout,
+        timeout,
       )
     )
 

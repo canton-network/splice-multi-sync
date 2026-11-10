@@ -61,36 +61,35 @@ class SyncOperatorApp(
 
   override protected def initializeApp()(implicit
       traceContext: TraceContext
-  ): Future[SyncOperatorApp.State] =
-    appInitStep("Initialize app") {
-      val synchronizerNode = newSynchronizerNode(config.synchronizerNodes.current)
-      for {
-        synchronizerId <- appInitStep("Get the synchronizer id from the sequencer") {
-          servedSynchronizerId(synchronizerNode.sequencerAdminConnection)
-        }
-        _ <- appInitStep("Check the synchronizer runs traffic control") {
-          requireTrafficControl(synchronizerNode.sequencerAdminConnection, synchronizerId)
-        }
-        automation = new SyncOperatorAutomationService(
-          config.automation,
-          clock,
-          retryProvider,
-          synchronizerId,
-          synchronizerNode,
-          config.trafficControl,
-          loggerFactory,
-        )
-      } yield {
-        SyncOperatorApp.State(
-          automation,
-          storage,
-          synchronizerId,
-          synchronizerNode,
-          loggerFactory.getTracedLogger(SyncOperatorApp.State.getClass),
-          timeouts,
-        )
+  ): Future[SyncOperatorApp.State] = {
+    val synchronizerNode = newSynchronizerNode(config.synchronizerNodes.current)
+    for {
+      synchronizerId <- appInitStep("Get the synchronizer id from the sequencer") {
+        servedSynchronizerId(synchronizerNode.sequencerAdminConnection)
       }
+      _ <- appInitStep("Check the synchronizer runs traffic control") {
+        requireTrafficControl(synchronizerNode.sequencerAdminConnection, synchronizerId)
+      }
+      automation = new SyncOperatorAutomationService(
+        config.automation,
+        clock,
+        retryProvider,
+        synchronizerId,
+        synchronizerNode,
+        config.trafficControl,
+        loggerFactory,
+      )
+    } yield {
+      SyncOperatorApp.State(
+        automation,
+        storage,
+        synchronizerId,
+        synchronizerNode,
+        loggerFactory.getTracedLogger(SyncOperatorApp.State.getClass),
+        timeouts,
+      )
     }
+  }
 
   private def newSynchronizerNode(
       nodeConfig: SyncOperatorSynchronizerNodeConfig
