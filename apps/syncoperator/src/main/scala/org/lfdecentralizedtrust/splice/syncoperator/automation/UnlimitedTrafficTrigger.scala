@@ -6,7 +6,6 @@ package org.lfdecentralizedtrust.splice.syncoperator.automation
 import com.digitalasset.base.error.utils.ErrorDetails
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
@@ -36,7 +35,8 @@ import scala.concurrent.{ExecutionContext, Future}
 /** Grants unlimited traffic to the mediators and the admitted participants of this synchronizer.
   * Members the sequencer reports traffic for get the maximum with their next serial. A participant
   * that has not joined yet gets it with serial 1, which the sequencer accepts from protocol
-  * version 37 (checked on startup). Once it has joined, its traffic state shows that limit.
+  * version 37 (checked on startup). Once it has joined, its traffic state shows that limit, and if
+  * the limit did not take effect it gets the maximum with its next serial then.
   */
 class UnlimitedTrafficTrigger(
     override protected val context: TriggerContext,
@@ -49,7 +49,6 @@ class UnlimitedTrafficTrigger(
     override val tracer: Tracer,
 ) extends PollingParallelTaskExecutionTrigger[Task] {
 
-  private val submittedAt = TrieMap.empty[Member, CantonTimestamp]
   private val initialLimitSet = TrieMap.empty[Member, Unit]
 
   private def connection: SequencerAdminConnection = synchronizerNode.sequencerAdminConnection
@@ -64,10 +63,9 @@ class UnlimitedTrafficTrigger(
       .filter { member =>
         states.get(member) match {
           case Some(state) =>
-            submittedAt.remove(member).discard
             initialLimitSet.remove(member).discard
             state.extraTrafficLimit != UnlimitedTraffic
-          case None => !initialLimitSet.contains(member) && !recentlySubmitted(member)
+          case None => !initialLimitSet.contains(member)
         }
       }
       .map(Task(synchronizerId, _))
@@ -90,21 +88,17 @@ class UnlimitedTrafficTrigger(
       case None =>
         connection
           .setInitialTrafficControlState(task.memberId, UnlimitedTraffic)
-          .map { _ =>
-            submittedAt.put(task.memberId, context.clock.now).discard
-            TaskSuccess(
-              s"Updated traffic limit for ${task.memberId} to the maximum before it joined"
-            )
-          }
+          .map(_ => s"Updated traffic limit for ${task.memberId} to the maximum before it joined")
           .recover {
-            // Before the join this is the only sign that the limit is already recorded.
+            // Before the join this is the only sign that the limit is already recorded, e.g. after
+            // a restart.
             case ex: StatusRuntimeException
                 if ErrorDetails.matches(ex, TrafficControlErrors.TrafficControlSerialTooLow) =>
-              submittedAt.remove(task.memberId).discard
-              initialLimitSet.put(task.memberId, ()).discard
-              TaskSuccess(
-                s"Traffic limit for ${task.memberId} was already set to the maximum before it joined"
-              )
+              s"Traffic limit for ${task.memberId} was already set to the maximum before it joined"
+          }
+          .map { description =>
+            initialLimitSet.put(task.memberId, ()).discard
+            TaskSuccess(description)
           }
     }
 
@@ -142,15 +136,6 @@ class UnlimitedTrafficTrigger(
       connection
         .listSequencerTrafficControlState(members)
         .map(_.map(state => state.member -> state).toMap)
-
-  // A submission is only retried once it had time to be sequenced. The retry then reports
-  // whether it was.
-  private def recentlySubmitted(member: Member): Boolean =
-    submittedAt
-      .get(member)
-      .exists(
-        _.plus(trafficBalanceReconciliationDelay.asJavaApproximation).isAfter(context.clock.now)
-      )
 }
 
 object UnlimitedTrafficTrigger {
