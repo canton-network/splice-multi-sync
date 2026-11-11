@@ -38,6 +38,8 @@ import org.lfdecentralizedtrust.splice.sv.config.SvOnboardingConfig.FoundDso
 import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorAppBackendConfig,
   SyncOperatorAppClientConfig,
+  SyncOperatorLsuConfig,
+  SyncOperatorMediatorConfig,
   SyncOperatorSequencerConfig,
   SyncOperatorSynchronizerNodeConfig,
   SyncOperatorSynchronizerNodesConfig,
@@ -1030,12 +1032,16 @@ object SpliceConfig {
       deriveReader[SplitwellAppClientConfig]
     implicit val syncOperatorSequencerConfigReader: ConfigReader[SyncOperatorSequencerConfig] =
       deriveReader[SyncOperatorSequencerConfig]
+    implicit val syncOperatorMediatorConfigReader: ConfigReader[SyncOperatorMediatorConfig] =
+      deriveReader[SyncOperatorMediatorConfig]
     implicit val syncOperatorSynchronizerNodeConfigReader
         : ConfigReader[SyncOperatorSynchronizerNodeConfig] =
       deriveReader[SyncOperatorSynchronizerNodeConfig]
     implicit val syncOperatorSynchronizerNodesConfigReader
         : ConfigReader[SyncOperatorSynchronizerNodesConfig] =
       deriveReader[SyncOperatorSynchronizerNodesConfig]
+    implicit val syncOperatorLsuConfigReader: ConfigReader[SyncOperatorLsuConfig] =
+      deriveReader[SyncOperatorLsuConfig]
     implicit val syncOperatorTrafficControlConfigReader
         : ConfigReader[SyncOperatorTrafficControlConfig] =
       deriveReader[SyncOperatorTrafficControlConfig]
@@ -1386,12 +1392,16 @@ object SpliceConfig {
       deriveWriter[SplitwellAppClientConfig]
     implicit val syncOperatorSequencerConfigWriter: ConfigWriter[SyncOperatorSequencerConfig] =
       deriveWriter[SyncOperatorSequencerConfig]
+    implicit val syncOperatorMediatorConfigWriter: ConfigWriter[SyncOperatorMediatorConfig] =
+      deriveWriter[SyncOperatorMediatorConfig]
     implicit val syncOperatorSynchronizerNodeConfigWriter
         : ConfigWriter[SyncOperatorSynchronizerNodeConfig] =
       deriveWriter[SyncOperatorSynchronizerNodeConfig]
     implicit val syncOperatorSynchronizerNodesConfigWriter
         : ConfigWriter[SyncOperatorSynchronizerNodesConfig] =
       deriveWriter[SyncOperatorSynchronizerNodesConfig]
+    implicit val syncOperatorLsuConfigWriter: ConfigWriter[SyncOperatorLsuConfig] =
+      deriveWriter[SyncOperatorLsuConfig]
     implicit val syncOperatorTrafficControlConfigWriter
         : ConfigWriter[SyncOperatorTrafficControlConfig] =
       deriveWriter[SyncOperatorTrafficControlConfig]
