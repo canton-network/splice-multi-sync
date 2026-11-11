@@ -387,11 +387,11 @@ class SequencerAdminConnection(
     )
   }
 
-  /** Makes a member's first traffic purchase, with serial 1. Works whether or not the member has
-    * joined; before it joins the sequencer only accepts it from protocol version 37. Returns false
-    * if a purchase with that serial is already recorded.
+  /** Purchases traffic for a member that has not joined yet, which the sequencer only accepts from
+    * protocol version 37. Its traffic state cannot be read before it joins, so this always uses
+    * serial 1. Returns false if a purchase with that serial is already recorded.
     */
-  def purchaseInitialTraffic(
+  def purchaseTrafficBeforeJoin(
       member: Member,
       totalExtraTrafficLimit: NonNegativeLong,
   )(implicit traceContext: TraceContext): Future[Boolean] =

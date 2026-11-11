@@ -19,6 +19,7 @@ import org.lfdecentralizedtrust.splice.automation.{
   TriggerContext,
 }
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
+import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection.TrafficState
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
 import org.lfdecentralizedtrust.splice.syncoperator.SyncOperatorSynchronizerNode
 import org.lfdecentralizedtrust.splice.syncoperator.automation.UnlimitedTrafficTrigger.{
@@ -29,8 +30,10 @@ import org.lfdecentralizedtrust.splice.syncoperator.automation.UnlimitedTrafficT
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
 
-/** Grants unlimited traffic to the mediators and the admitted participants of this synchronizer,
-  * whether or not they have joined yet.
+/** Grants unlimited traffic to the mediators and the admitted participants of this synchronizer.
+  * Members the sequencer reports traffic for get the maximum with their next serial. A participant
+  * that has not joined yet is bought for with serial 1, which the sequencer accepts from protocol
+  * version 37 (checked on startup). Once it has joined, its traffic state shows that purchase.
   */
 class UnlimitedTrafficTrigger(
     override protected val context: TriggerContext,
@@ -51,32 +54,58 @@ class UnlimitedTrafficTrigger(
   override protected def retrieveTasks()(implicit
       tc: TraceContext
   ): Future[Seq[Task]] =
-    members().map(
-      _.filterNot(purchased.contains)
-        .filterNot(recentlySubmitted)
-        .map(Task(synchronizerId, _))
-    )
+    for {
+      members <- members()
+      states <- trafficStates(members)
+    } yield members
+      .filter { member =>
+        states.get(member) match {
+          case Some(state) =>
+            submittedAt.remove(member).discard
+            purchased.remove(member).discard
+            state.extraTrafficLimit != UnlimitedTraffic
+          case None => !purchased.contains(member) && !recentlySubmitted(member)
+        }
+      }
+      .map(Task(synchronizerId, _))
 
-  // Nothing else buys traffic on this synchronizer, so serial 1 is the right one for every member.
-  // Buying before a member joins relies on protocol version 37, which the app checks on startup.
   override protected def completeTask(task: Task)(implicit
       tc: TraceContext
   ): Future[TaskOutcome] =
-    connection.purchaseInitialTraffic(task.memberId, UnlimitedTraffic).map {
-      case true =>
-        submittedAt.put(task.memberId, context.clock.now).discard
-        TaskSuccess(s"Purchased unlimited traffic for ${task.memberId}")
-      case false =>
-        submittedAt.remove(task.memberId).discard
-        purchased.put(task.memberId, ()).discard
-        TaskSuccess(s"Unlimited traffic for ${task.memberId} was already purchased")
+    connection.lookupSequencerTrafficControlState(task.memberId).flatMap {
+      case Some(trafficState) =>
+        for {
+          sequencerState <- connection.getSequencerSynchronizerState(TopologySnapshot.Sequenced)
+          _ <- connection.setSequencerTrafficControlState(
+            trafficState,
+            sequencerState,
+            UnlimitedTraffic,
+            context.pollingClock,
+            trafficBalanceReconciliationDelay,
+          )
+        } yield TaskSuccess(s"Updated traffic limit for ${task.memberId} to the maximum")
+      case None =>
+        connection.purchaseTrafficBeforeJoin(task.memberId, UnlimitedTraffic).map {
+          case true =>
+            submittedAt.put(task.memberId, context.clock.now).discard
+            TaskSuccess(s"Purchased unlimited traffic for ${task.memberId} before it joined")
+          case false =>
+            submittedAt.remove(task.memberId).discard
+            purchased.put(task.memberId, ()).discard
+            TaskSuccess(s"Traffic for ${task.memberId} was already purchased before it joined")
+        }
     }
 
   override protected def isStaleTask(task: Task)(implicit
       tc: TraceContext
   ): Future[Boolean] =
-    if (purchased.contains(task.memberId)) Future.successful(true)
-    else members().map(!_.contains(task.memberId))
+    for {
+      members <- members()
+      stateO <- connection.lookupSequencerTrafficControlState(task.memberId)
+    } yield !members.contains(task.memberId) || (stateO match {
+      case Some(state) => state.extraTrafficLimit == UnlimitedTraffic
+      case None => purchased.contains(task.memberId)
+    })
 
   private def members()(implicit tc: TraceContext): Future[Seq[Member]] =
     for {
@@ -89,6 +118,18 @@ class UnlimitedTrafficTrigger(
       .map(member => member: Member)
       .distinct
       .sortBy(_.toProtoPrimitive)
+
+  // The sequencer only reports a traffic state for members it knows, so not for participants that
+  // have not joined.
+  private def trafficStates(
+      members: Seq[Member]
+  )(implicit tc: TraceContext): Future[Map[Member, TrafficState]] =
+    // An empty filter would list every member.
+    if (members.isEmpty) Future.successful(Map.empty)
+    else
+      connection
+        .listSequencerTrafficControlState(members)
+        .map(_.map(state => state.member -> state).toMap)
 
   // A submission is only retried once it had time to be sequenced. The retry then reports
   // whether it was.

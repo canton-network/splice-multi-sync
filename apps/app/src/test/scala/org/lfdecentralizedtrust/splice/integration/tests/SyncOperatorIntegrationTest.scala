@@ -93,7 +93,7 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
       val bob = bobValidatorBackend.participantClientWithAdminToken
       val trigger = syncOperatorBackend.appState.automation.trigger[UnlimitedTrafficTrigger]
 
-      clue("the mediator is granted unlimited traffic") {
+      clue("the mediator is granted unlimited traffic with its next serial") {
         val mediator = sequencer
           .getMediatorSynchronizerState(synchronizerId, TopologySnapshot.Effective)
           .futureValue
