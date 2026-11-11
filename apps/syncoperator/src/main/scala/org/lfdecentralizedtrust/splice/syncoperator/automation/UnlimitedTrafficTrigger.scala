@@ -32,8 +32,8 @@ import scala.concurrent.{ExecutionContext, Future}
 
 /** Grants unlimited traffic to the mediators and the admitted participants of this synchronizer.
   * Members the sequencer reports traffic for get the maximum with their next serial. A participant
-  * that has not joined yet is bought for with serial 1, which the sequencer accepts from protocol
-  * version 37 (checked on startup). Once it has joined, its traffic state shows that purchase.
+  * that has not joined yet gets it with serial 1, which the sequencer accepts from protocol
+  * version 37 (checked on startup). Once it has joined, its traffic state shows that limit.
   */
 class UnlimitedTrafficTrigger(
     override protected val context: TriggerContext,
@@ -47,7 +47,7 @@ class UnlimitedTrafficTrigger(
 ) extends PollingParallelTaskExecutionTrigger[Task] {
 
   private val submittedAt = TrieMap.empty[Member, CantonTimestamp]
-  private val purchased = TrieMap.empty[Member, Unit]
+  private val initialLimitSet = TrieMap.empty[Member, Unit]
 
   private def connection: SequencerAdminConnection = synchronizerNode.sequencerAdminConnection
 
@@ -62,9 +62,9 @@ class UnlimitedTrafficTrigger(
         states.get(member) match {
           case Some(state) =>
             submittedAt.remove(member).discard
-            purchased.remove(member).discard
+            initialLimitSet.remove(member).discard
             state.extraTrafficLimit != UnlimitedTraffic
-          case None => !purchased.contains(member) && !recentlySubmitted(member)
+          case None => !initialLimitSet.contains(member) && !recentlySubmitted(member)
         }
       }
       .map(Task(synchronizerId, _))
@@ -85,14 +85,18 @@ class UnlimitedTrafficTrigger(
           )
         } yield TaskSuccess(s"Updated traffic limit for ${task.memberId} to the maximum")
       case None =>
-        connection.purchaseTrafficBeforeJoin(task.memberId, UnlimitedTraffic).map {
+        connection.setInitialTrafficControlState(task.memberId, UnlimitedTraffic).map {
           case true =>
             submittedAt.put(task.memberId, context.clock.now).discard
-            TaskSuccess(s"Purchased unlimited traffic for ${task.memberId} before it joined")
+            TaskSuccess(
+              s"Updated traffic limit for ${task.memberId} to the maximum before it joined"
+            )
           case false =>
             submittedAt.remove(task.memberId).discard
-            purchased.put(task.memberId, ()).discard
-            TaskSuccess(s"Traffic for ${task.memberId} was already purchased before it joined")
+            initialLimitSet.put(task.memberId, ()).discard
+            TaskSuccess(
+              s"Traffic limit for ${task.memberId} was already set to the maximum before it joined"
+            )
         }
     }
 
@@ -104,7 +108,7 @@ class UnlimitedTrafficTrigger(
       stateO <- connection.lookupSequencerTrafficControlState(task.memberId)
     } yield !members.contains(task.memberId) || (stateO match {
       case Some(state) => state.extraTrafficLimit == UnlimitedTraffic
-      case None => purchased.contains(task.memberId)
+      case None => initialLimitSet.contains(task.memberId)
     })
 
   private def members()(implicit tc: TraceContext): Future[Seq[Member]] =

@@ -123,7 +123,7 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
               .futureValue
               .map(_.mapping.participantId) should contain(bob.id)
           }
-          // Once nothing is left to do, the purchase for bob has been submitted.
+          // Once nothing is left to do, bob's traffic limit has been submitted.
           eventually(40.seconds) {
             trigger.runOnce().futureValue shouldBe false
           }

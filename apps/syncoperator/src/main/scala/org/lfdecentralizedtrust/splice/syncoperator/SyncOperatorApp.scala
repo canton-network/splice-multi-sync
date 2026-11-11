@@ -113,8 +113,8 @@ class SyncOperatorApp(
       )
     )
 
-  /** The app buys traffic for participants before they join, which the sequencer only accepts from
-    * protocol version 37.
+  /** The app sets the traffic limit of participants before they join, which the sequencer only
+    * accepts from protocol version 37.
     */
   private def requireProtocolVersion(synchronizerId: PhysicalSynchronizerId): Future[Unit] =
     if (synchronizerId.protocolVersion >= ProtocolVersion.v37) Future.unit
