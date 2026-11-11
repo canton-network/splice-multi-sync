@@ -123,10 +123,13 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
               .futureValue
               .map(_.mapping.participantId) should contain(bob.id)
           }
-          // Once nothing is left to do, bob's traffic limit has been submitted.
+          // The first run sets bob's limit. Once the reconciliation delay has passed, the next run
+          // finds it already recorded, and after that there is nothing left to do.
+          trigger.runOnce().futureValue shouldBe true
           eventually(40.seconds) {
-            trigger.runOnce().futureValue shouldBe false
+            trigger.runOnce().futureValue shouldBe true
           }
+          trigger.runOnce().futureValue shouldBe false
           bob.synchronizers.connect_by_config(
             alice.synchronizers.config(SynchronizerAlias.tryCreate("splitwell")).value,
             synchronize = None,

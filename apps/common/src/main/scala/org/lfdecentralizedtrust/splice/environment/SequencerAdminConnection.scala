@@ -30,7 +30,6 @@ import com.digitalasset.canton.sequencer.admin.v30.{
   SequencerBftPruningAdministrationServiceGrpc,
 }
 import com.digitalasset.canton.sequencing.protocol
-import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
 import com.digitalasset.canton.synchronizer.sequencer.SequencerPruningStatus
 import com.digitalasset.canton.synchronizer.sequencer.admin.grpc.InitializeSequencerResponse
 import com.digitalasset.canton.time.Clock
@@ -48,7 +47,7 @@ import com.digitalasset.canton.topology.transaction.SequencerSynchronizerState
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.protobuf.ByteString
 import com.typesafe.config.ConfigFactory
-import io.grpc.{Status, StatusRuntimeException}
+import io.grpc.Status
 import io.grpc.stub.StreamObserver
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.actor.ActorSystem
@@ -389,20 +388,14 @@ class SequencerAdminConnection(
 
   /** Sets the traffic limit of a member that has not joined yet, which the sequencer only accepts
     * from protocol version 37. Its traffic state cannot be read before it joins, so this always
-    * uses serial 1. Returns false if a limit with that serial is already recorded.
+    * uses serial 1. Fails with `TRAFFIC_CONTROL_SERIAL_TOO_LOW` if a limit with that serial is
+    * already recorded.
     */
   def setInitialTrafficControlState(
       member: Member,
       totalExtraTrafficLimit: NonNegativeLong,
-  )(implicit traceContext: TraceContext): Future[Boolean] =
+  )(implicit traceContext: TraceContext): Future[Unit] =
     setTrafficControlState(member, totalExtraTrafficLimit, PositiveInt.one)
-      .map(_ => true)
-      .recover {
-        case ex: StatusRuntimeException
-            if Option(ex.getStatus.getDescription)
-              .exists(_.contains(TrafficControlErrors.TrafficControlSerialTooLow.id)) =>
-          false
-      }
 
   def getSequencerSynchronizerState(topologySnapshot: TopologySnapshot)(implicit
       traceContext: TraceContext

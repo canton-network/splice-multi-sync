@@ -3,13 +3,16 @@
 
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
+import com.digitalasset.base.error.utils.ErrorDetails
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
 import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import io.grpc.StatusRuntimeException
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 import org.lfdecentralizedtrust.splice.automation.{
@@ -85,19 +88,24 @@ class UnlimitedTrafficTrigger(
           )
         } yield TaskSuccess(s"Updated traffic limit for ${task.memberId} to the maximum")
       case None =>
-        connection.setInitialTrafficControlState(task.memberId, UnlimitedTraffic).map {
-          case true =>
+        connection
+          .setInitialTrafficControlState(task.memberId, UnlimitedTraffic)
+          .map { _ =>
             submittedAt.put(task.memberId, context.clock.now).discard
             TaskSuccess(
               s"Updated traffic limit for ${task.memberId} to the maximum before it joined"
             )
-          case false =>
-            submittedAt.remove(task.memberId).discard
-            initialLimitSet.put(task.memberId, ()).discard
-            TaskSuccess(
-              s"Traffic limit for ${task.memberId} was already set to the maximum before it joined"
-            )
-        }
+          }
+          .recover {
+            // Before the join this is the only sign that the limit is already recorded.
+            case ex: StatusRuntimeException
+                if ErrorDetails.matches(ex, TrafficControlErrors.TrafficControlSerialTooLow) =>
+              submittedAt.remove(task.memberId).discard
+              initialLimitSet.put(task.memberId, ()).discard
+              TaskSuccess(
+                s"Traffic limit for ${task.memberId} was already set to the maximum before it joined"
+              )
+          }
     }
 
   override protected def isStaleTask(task: Task)(implicit
