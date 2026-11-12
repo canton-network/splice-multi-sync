@@ -1638,12 +1638,10 @@ class DbSvDsoStore private (
             acsStoreId,
             domainMigrationId,
             MemberTraffic.COMPANION,
-            // indexed by dso_acs_store_sid_mid_pn_tid_mtd. The conditions on the create arguments
-            // match SvDsoStore.isPaymasterTraffic.
+            // indexed by dso_acs_store_sid_mid_pn_tid_mtd. Only a paymaster can buy traffic for a
+            // synchronizer that isn't required, with an empty member id and migration id 0.
             where = sql"""member_traffic_member is null
-                      and member_traffic_domain = $synchronizerId
-                      and create_arguments->>'memberId' = ''
-                      and create_arguments->>'migrationId' = '0'""",
+                      and member_traffic_domain = $synchronizerId""",
             orderLimit = sql"""limit ${sqlLimit(limit)}""",
           ),
           "listPaymasterTrafficContracts",

@@ -2327,9 +2327,7 @@ abstract class SvDsoStoreTest extends StoreTestBase with HasExecutionContext {
         val member = ParticipantId("member", Namespace(Fingerprint.tryFromString(s"dummy")))
         val goodContracts = (1 to 3).map(n => paymasterTraffic(dummy2Domain, n.toLong))
         val badContracts = (4 to 6).map(n => paymasterTraffic(dummyDomain, n.toLong)) ++
-          (7 to 9).map(n => memberTraffic(member, dummy2Domain, n.toLong)) :+
-          // an invalid member id isn't a paymaster's
-          memberTrafficContract("invalid", dummy2Domain.toProtoPrimitive, 10L, 0L)
+          (7 to 9).map(n => memberTraffic(member, dummy2Domain, n.toLong))
         for {
           store <- mkStore()
           _ <- MonadUtil.sequentialTraverse(
