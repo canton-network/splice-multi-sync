@@ -49,6 +49,12 @@ class UnlimitedTrafficTrigger(
     override val tracer: Tracer,
 ) extends PollingParallelTaskExecutionTrigger[Task] {
 
+  // Works around lookupSequencerTrafficControlState (and listSequencerTrafficControlState) not
+  // returning a traffic state for members that have not joined yet, even after their limit was
+  // recorded. Without a state the trigger cannot tell a participant whose limit is set from a new
+  // one, so it remembers the participants whose limit it set, and completeTask takes
+  // TRAFFIC_CONTROL_SERIAL_TOO_LOW to mean the limit is already recorded, e.g. after a restart.
+  // Both can go once the sequencer reports a state for members that have not joined.
   private val initialLimitSet = TrieMap.empty[Member, Unit]
 
   private def connection: SequencerAdminConnection = synchronizerNode.sequencerAdminConnection
@@ -90,8 +96,8 @@ class UnlimitedTrafficTrigger(
           .setInitialTrafficControlState(task.memberId, UnlimitedTraffic)
           .map(_ => s"Updated traffic limit for ${task.memberId} to the maximum before it joined")
           .recover {
-            // Before the join this is the only sign that the limit is already recorded, e.g. after
-            // a restart.
+            // Before the join this is the only sign that the limit is already recorded, since the
+            // sequencer reports no traffic state for the member (see initialLimitSet).
             case ex: StatusRuntimeException
                 if ErrorDetails.matches(ex, TrafficControlErrors.TrafficControlSerialTooLow) =>
               s"Traffic limit for ${task.memberId} was already set to the maximum before it joined"
