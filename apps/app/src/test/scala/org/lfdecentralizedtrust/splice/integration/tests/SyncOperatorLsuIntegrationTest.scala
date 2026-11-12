@@ -10,14 +10,9 @@ import com.digitalasset.canton.config.{
   NonNegativeDuration,
   NonNegativeFiniteDuration,
 }
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.topology.{Member, ParticipantId}
-import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
-import com.digitalasset.canton.topology.transaction.{
-  ParticipantPermission,
-  ParticipantSynchronizerPermission,
-}
+import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.version.ProtocolVersion
 import org.lfdecentralizedtrust.splice.automation.Trigger
 import org.lfdecentralizedtrust.splice.config.ConfigTransforms
@@ -29,10 +24,7 @@ import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   SpliceTestConsoleEnvironment,
 }
 import org.lfdecentralizedtrust.splice.lsu.{LsuRollForwardTimestamp, LsuTransferTrafficTrigger}
-import org.lfdecentralizedtrust.splice.syncoperator.automation.{
-  DedicatedLsuTrigger,
-  UnlimitedTrafficTrigger,
-}
+import org.lfdecentralizedtrust.splice.syncoperator.automation.DedicatedLsuTrigger
 import org.lfdecentralizedtrust.splice.syncoperator.automation.UnlimitedTrafficTrigger.UnlimitedTraffic
 import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorLsuConfig,
@@ -46,8 +38,7 @@ import java.time.Duration
 import scala.concurrent.duration.*
 
 /** Upgrades the synchronizer the operator runs, on a schedule the operator sets itself, and checks
-  * that members keep unlimited traffic, including a participant admitted before the upgrade that
-  * joins only after it.
+  * that members keep unlimited traffic.
   *
   * The successor's sequencer and mediator are started only for this test, uninitialized, so the
   * operator's LSU trigger initializes them from the synchronizer it is upgrading.
@@ -148,8 +139,6 @@ class SyncOperatorLsuIntegrationTest
 
     "upgrade its synchronizer and keep its members' unlimited traffic" in { implicit env =>
       val alice = aliceValidatorBackend.participantClientWithAdminToken
-      val bob = bobValidatorBackend.participantClientWithAdminToken
-      val trafficTrigger = syncOperatorBackend.appState.automation.trigger[UnlimitedTrafficTrigger]
 
       // The bootstrap admits alice's participant, which joins splitwell during the test setup.
       clue("alice's participant is granted unlimited traffic") {
@@ -166,21 +155,6 @@ class SyncOperatorLsuIntegrationTest
         }
       }
       val consumedBefore = consumed(sequencer, alice.id)
-
-      // From here on the traffic trigger only runs when the test runs it.
-      trafficTrigger.pause().futureValue
-
-      clue("bob's participant is admitted and has its traffic limit set, but does not join yet") {
-        admit(bob.id)
-        eventually() {
-          sequencer
-            .listParticipantSynchronizerPermissions(synchronizerId)
-            .futureValue
-            .map(_.mapping.participantId) should contain(bob.id)
-        }
-        trafficTrigger.runOnce().futureValue shouldBe true
-        trafficTrigger.runOnce().futureValue shouldBe false
-      }
 
       val currentPsid = sequencer.getPhysicalSynchronizerId().futureValue
       currentPsid.serial.value should be < successorSerial.value
@@ -253,42 +227,16 @@ class SyncOperatorLsuIntegrationTest
             }
           }
 
-          // The upgrade only carries over traffic for members that have joined, so bob's limit
-          // stayed behind on the predecessor.
-          clue("the traffic trigger sets bob's limit again once it has switched to the successor") {
-            eventually(2.minutes) {
-              trafficTrigger.runOnce().futureValue shouldBe true
-            }
-            trafficTrigger.runOnce().futureValue shouldBe false
-          }
-
-          clue("bob's participant joins the upgraded synchronizer with unlimited traffic") {
-            bob.synchronizers.connect(
-              splitwellAlias,
-              s"http://localhost:${successorSequencerPublicPort.unwrap}",
-              synchronize = None,
-            )
-            // The trigger is paused, so only the limit set before bob joined can grant this.
-            eventually() {
-              trafficState(successor, bob.id).map(_.extraTrafficLimit) shouldBe
-                Some(UnlimitedTraffic)
-            }
-          }
-
-          trafficTrigger.resume()
-
-          // The participant admin API in tests does not allow pings, so the participants submit
+          // The participant admin API in tests does not allow pings, so the participant submits
           // topology transactions instead.
-          clue("both participants transact on the upgraded synchronizer") {
-            enableParty(alice, "lsu-after-upgrade-alice")
-            enableParty(bob, "lsu-after-upgrade-bob")
+          clue("alice's participant transacts on the upgraded synchronizer") {
+            enableParty(alice, "lsu-after-upgrade")
           }
         }
 
         clue("stop apps manually to prevent errors from the synchronizer being force stopped") {
           syncOperatorBackend.stop()
           alice.synchronizers.disconnect(splitwellAlias)
-          bob.synchronizers.disconnect(splitwellAlias)
         }
       }
     }
@@ -297,31 +245,11 @@ class SyncOperatorLsuIntegrationTest
   private def sequencer(implicit env: SpliceTestConsoleEnvironment) =
     syncOperatorBackend.appState.sequencerAdminConnection
 
-  private def synchronizerId(implicit env: SpliceTestConsoleEnvironment) =
-    syncOperatorBackend.appState.synchronizerId
-
   private def trafficState(connection: SequencerAdminConnection, member: Member) =
     connection.lookupSequencerTrafficControlState(member).futureValue
 
   private def consumed(connection: SequencerAdminConnection, member: Member): Long =
     trafficState(connection, member).fold(0L)(_.extraTrafficConsumed.value)
-
-  // The splitwell sequencer owns the synchronizer, so it can admit participants on its own.
-  private def admit(participantId: ParticipantId)(implicit env: SpliceTestConsoleEnvironment) =
-    sequencer
-      .proposeMapping(
-        TopologyStoreId.Synchronizer(synchronizerId),
-        ParticipantSynchronizerPermission(
-          synchronizerId,
-          participantId,
-          ParticipantPermission.Submission,
-          None,
-          None,
-        ),
-        PositiveInt.one,
-        isProposal = false,
-      )
-      .futureValue
 
   private def enableParty(participant: ParticipantClientReference, name: String) =
     participant.parties.enable(

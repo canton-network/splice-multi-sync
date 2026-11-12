@@ -58,11 +58,7 @@ class UnlimitedTrafficTrigger(
   // one, so it remembers the participants whose limit it set, and completeTask takes
   // TRAFFIC_CONTROL_SERIAL_TOO_LOW to mean the limit is already recorded, e.g. after a restart.
   // Both can go once the sequencer reports a state for members that have not joined.
-  //
-  // Each entry records the sequencer the limit was set on. An upgrade does not carry over the
-  // limit of a member that has not joined, so entries from the predecessor do not count on the
-  // successor.
-  private val initialLimitSet = TrieMap.empty[Member, SequencerAdminConnection]
+  private val initialLimitSet = TrieMap.empty[Member, Unit]
 
   private def connection()(implicit tc: TraceContext): Future[SequencerAdminConnection] =
     synchronizerNodeService.sequencerAdminConnection()
@@ -80,7 +76,7 @@ class UnlimitedTrafficTrigger(
           case Some(state) =>
             initialLimitSet.remove(member).discard
             state.extraTrafficLimit != UnlimitedTraffic
-          case None => !initialLimitSet.get(member).exists(_ eq connection)
+          case None => !initialLimitSet.contains(member)
         }
       }
       .map(Task(synchronizerId, _))
@@ -113,7 +109,7 @@ class UnlimitedTrafficTrigger(
                 s"Traffic limit for ${task.memberId} was already set to the maximum before it joined"
             }
             .map { description =>
-              initialLimitSet.put(task.memberId, connection).discard
+              initialLimitSet.put(task.memberId, ()).discard
               TaskSuccess(description)
             }
       }
@@ -128,7 +124,7 @@ class UnlimitedTrafficTrigger(
       stateO <- connection.lookupSequencerTrafficControlState(task.memberId)
     } yield !members.contains(task.memberId) || (stateO match {
       case Some(state) => state.extraTrafficLimit == UnlimitedTraffic
-      case None => initialLimitSet.get(task.memberId).exists(_ eq connection)
+      case None => initialLimitSet.contains(task.memberId)
     })
 
   private def members(
