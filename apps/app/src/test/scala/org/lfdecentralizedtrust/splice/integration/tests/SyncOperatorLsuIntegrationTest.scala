@@ -170,7 +170,7 @@ class SyncOperatorLsuIntegrationTest
       // From here on the traffic trigger only runs when the test runs it.
       trafficTrigger.pause().futureValue
 
-      clue("bob's participant is admitted and bought for, but does not join yet") {
+      clue("bob's participant is admitted and has its traffic limit set, but does not join yet") {
         admit(bob.id)
         eventually() {
           sequencer
@@ -178,14 +178,7 @@ class SyncOperatorLsuIntegrationTest
             .futureValue
             .map(_.mapping.participantId) should contain(bob.id)
         }
-        // The purchase is submitted, then found recorded once the reconciliation delay has passed,
-        // after which nothing is left to do.
-        eventually(40.seconds) {
-          trafficTrigger.runOnce().futureValue shouldBe false
-        }
-        eventually(40.seconds) {
-          trafficTrigger.runOnce().futureValue shouldBe true
-        }
+        trafficTrigger.runOnce().futureValue shouldBe true
         trafficTrigger.runOnce().futureValue shouldBe false
       }
 
@@ -260,9 +253,9 @@ class SyncOperatorLsuIntegrationTest
             }
           }
 
-          // The upgrade only carries over traffic for members that have joined, so the purchase
-          // for bob stayed behind on the predecessor.
-          clue("the traffic trigger buys for bob again once it has switched to the successor") {
+          // The upgrade only carries over traffic for members that have joined, so bob's limit
+          // stayed behind on the predecessor.
+          clue("the traffic trigger sets bob's limit again once it has switched to the successor") {
             eventually(2.minutes) {
               trafficTrigger.runOnce().futureValue shouldBe true
             }
@@ -275,7 +268,7 @@ class SyncOperatorLsuIntegrationTest
               s"http://localhost:${successorSequencerPublicPort.unwrap}",
               synchronize = None,
             )
-            // The trigger is paused, so only the purchase made before bob joined can grant this.
+            // The trigger is paused, so only the limit set before bob joined can grant this.
             eventually() {
               trafficState(successor, bob.id).map(_.extraTrafficLimit) shouldBe
                 Some(UnlimitedTraffic)
