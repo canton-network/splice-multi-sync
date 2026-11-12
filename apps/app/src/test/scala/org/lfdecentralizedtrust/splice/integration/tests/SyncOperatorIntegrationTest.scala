@@ -24,8 +24,6 @@ import org.lfdecentralizedtrust.splice.syncoperator.automation.UnlimitedTrafficT
 import org.lfdecentralizedtrust.splice.syncoperator.automation.UnlimitedTrafficTrigger.UnlimitedTraffic
 import org.lfdecentralizedtrust.splice.syncoperator.config.SyncOperatorTrafficControlConfig
 
-import scala.concurrent.duration.DurationInt
-
 class SyncOperatorIntegrationTest extends IntegrationTest {
 
   // Values the bootstrap does not set, to check that the trigger applies them to the synchronizer.
@@ -91,7 +89,6 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
       val synchronizerId = syncOperatorBackend.appState.synchronizerId
       val alice = aliceValidatorBackend.participantClientWithAdminToken
       val bob = bobValidatorBackend.participantClientWithAdminToken
-      val trigger = syncOperatorBackend.appState.automation.trigger[UnlimitedTrafficTrigger]
 
       clue("the mediator is granted unlimited traffic with its next serial") {
         val mediator = sequencer
@@ -113,9 +110,10 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
         }
       }
 
-      trigger.pause().futureValue
-      try {
-        clue("a participant admitted before it joins connects with unlimited traffic") {
+      clue("a participant admitted before it joins has its traffic limit set") {
+        val trigger = unlimitedTrafficTrigger
+        trigger.pause().futureValue
+        try {
           admit(bob.id)
           eventually() {
             sequencer
@@ -123,18 +121,35 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
               .futureValue
               .map(_.mapping.participantId) should contain(bob.id)
           }
-          // Once nothing is left to do, the purchase for bob has been submitted.
-          eventually(40.seconds) {
+          trigger.runOnce().futureValue shouldBe true
+          trigger.runOnce().futureValue shouldBe false
+        } finally {
+          trigger.resume()
+        }
+      }
+
+      // Bob has not joined, so after a restart only the sequencer's SERIAL_TOO_LOW reply tells the
+      // app that his limit is already set.
+      clue("after a restart the app finds the limit of a participant that has not joined") {
+        syncOperatorBackend.stop()
+        syncOperatorBackend.startSync()
+        val trigger = unlimitedTrafficTrigger
+        trigger.pause().futureValue
+        try {
+          eventually() {
             trigger.runOnce().futureValue shouldBe false
           }
-          bob.synchronizers.connect_by_config(
-            alice.synchronizers.config(SynchronizerAlias.tryCreate("splitwell")).value,
-            synchronize = None,
-          )
-          extraTrafficLimit(bob.id) shouldBe Some(UnlimitedTraffic)
+        } finally {
+          trigger.resume()
         }
-      } finally {
-        trigger.resume()
+      }
+
+      clue("the participant connects with unlimited traffic") {
+        bob.synchronizers.connect_by_config(
+          alice.synchronizers.config(SynchronizerAlias.tryCreate("splitwell")).value,
+          synchronize = None,
+        )
+        extraTrafficLimit(bob.id) shouldBe Some(UnlimitedTraffic)
       }
 
       // The participant admin API in tests does not allow pings, so bob submits a topology
@@ -152,6 +167,9 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
 
   private def sequencer(implicit env: SpliceTestConsoleEnvironment) =
     syncOperatorBackend.appState.sequencerAdminConnection
+
+  private def unlimitedTrafficTrigger(implicit env: SpliceTestConsoleEnvironment) =
+    syncOperatorBackend.appState.automation.trigger[UnlimitedTrafficTrigger]
 
   private def extraTrafficLimit(member: Member)(implicit
       env: SpliceTestConsoleEnvironment

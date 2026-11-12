@@ -3,13 +3,15 @@
 
 package org.lfdecentralizedtrust.splice.syncoperator.automation
 
+import com.digitalasset.base.error.utils.ErrorDetails
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
 import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import io.grpc.StatusRuntimeException
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 import org.lfdecentralizedtrust.splice.automation.{
@@ -35,8 +37,9 @@ import scala.concurrent.{ExecutionContext, Future}
 
 /** Grants unlimited traffic to the mediators and the admitted participants of this synchronizer.
   * Members the sequencer reports traffic for get the maximum with their next serial. A participant
-  * that has not joined yet is bought for with serial 1, which the sequencer accepts from protocol
-  * version 37 (checked on startup). Once it has joined, its traffic state shows that purchase.
+  * that has not joined yet gets it with serial 1, which the sequencer accepts from protocol
+  * version 37 (checked on startup). Once it has joined, its traffic state shows that limit, and if
+  * the limit did not take effect it gets the maximum with its next serial then.
   */
 class UnlimitedTrafficTrigger(
     override protected val context: TriggerContext,
@@ -49,11 +52,10 @@ class UnlimitedTrafficTrigger(
     override val tracer: Tracer,
 ) extends PollingParallelTaskExecutionTrigger[Task] {
 
-  // Each entry records the sequencer the purchase went to. An upgrade does not carry over
-  // purchases for members that have not joined, so entries from the predecessor do not count on
-  // the successor.
-  private val submittedAt = TrieMap.empty[Member, (SequencerAdminConnection, CantonTimestamp)]
-  private val purchased = TrieMap.empty[Member, SequencerAdminConnection]
+  // Each entry records the sequencer the limit was set on. An upgrade does not carry over the
+  // limit of a member that has not joined, so entries from the predecessor do not count on the
+  // successor.
+  private val initialLimitSet = TrieMap.empty[Member, SequencerAdminConnection]
 
   private def connection()(implicit tc: TraceContext): Future[SequencerAdminConnection] =
     synchronizerNodeService.sequencerAdminConnection()
@@ -69,12 +71,9 @@ class UnlimitedTrafficTrigger(
       .filter { member =>
         states.get(member) match {
           case Some(state) =>
-            submittedAt.remove(member).discard
-            purchased.remove(member).discard
+            initialLimitSet.remove(member).discard
             state.extraTrafficLimit != UnlimitedTraffic
-          case None =>
-            !purchased.get(member).exists(_ eq connection) &&
-            !recentlySubmitted(connection, member)
+          case None => !initialLimitSet.get(member).exists(_ eq connection)
         }
       }
       .map(Task(synchronizerId, _))
@@ -82,7 +81,7 @@ class UnlimitedTrafficTrigger(
   override protected def completeTask(task: Task)(implicit
       tc: TraceContext
   ): Future[TaskOutcome] =
-    connection().flatMap { connection =>
+    connection().flatMap(connection =>
       connection.lookupSequencerTrafficControlState(task.memberId).flatMap {
         case Some(trafficState) =>
           for {
@@ -96,17 +95,22 @@ class UnlimitedTrafficTrigger(
             )
           } yield TaskSuccess(s"Updated traffic limit for ${task.memberId} to the maximum")
         case None =>
-          connection.purchaseTrafficBeforeJoin(task.memberId, UnlimitedTraffic).map {
-            case true =>
-              submittedAt.put(task.memberId, connection -> context.clock.now).discard
-              TaskSuccess(s"Purchased unlimited traffic for ${task.memberId} before it joined")
-            case false =>
-              submittedAt.remove(task.memberId).discard
-              purchased.put(task.memberId, connection).discard
-              TaskSuccess(s"Traffic for ${task.memberId} was already purchased before it joined")
-          }
+          connection
+            .setInitialTrafficControlState(task.memberId, UnlimitedTraffic)
+            .map(_ => s"Updated traffic limit for ${task.memberId} to the maximum before it joined")
+            .recover {
+              // Before the join this is the only sign that the limit is already recorded, e.g. after
+              // a restart.
+              case ex: StatusRuntimeException
+                  if ErrorDetails.matches(ex, TrafficControlErrors.TrafficControlSerialTooLow) =>
+                s"Traffic limit for ${task.memberId} was already set to the maximum before it joined"
+            }
+            .map { description =>
+              initialLimitSet.put(task.memberId, connection).discard
+              TaskSuccess(description)
+            }
       }
-    }
+    )
 
   override protected def isStaleTask(task: Task)(implicit
       tc: TraceContext
@@ -117,7 +121,7 @@ class UnlimitedTrafficTrigger(
       stateO <- connection.lookupSequencerTrafficControlState(task.memberId)
     } yield !members.contains(task.memberId) || (stateO match {
       case Some(state) => state.extraTrafficLimit == UnlimitedTraffic
-      case None => purchased.get(task.memberId).exists(_ eq connection)
+      case None => initialLimitSet.get(task.memberId).exists(_ eq connection)
     })
 
   private def members(
@@ -146,16 +150,6 @@ class UnlimitedTrafficTrigger(
       connection
         .listSequencerTrafficControlState(members)
         .map(_.map(state => state.member -> state).toMap)
-
-  // A submission is only retried once it had time to be sequenced. The retry then reports
-  // whether it was.
-  private def recentlySubmitted(connection: SequencerAdminConnection, member: Member): Boolean =
-    submittedAt
-      .get(member)
-      .exists { case (submittedTo, at) =>
-        (submittedTo eq connection) &&
-        at.plus(trafficBalanceReconciliationDelay.asJavaApproximation).isAfter(context.clock.now)
-      }
 }
 
 object UnlimitedTrafficTrigger {
