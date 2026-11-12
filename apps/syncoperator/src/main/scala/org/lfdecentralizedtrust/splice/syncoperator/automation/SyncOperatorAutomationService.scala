@@ -7,7 +7,6 @@ import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.SynchronizerId
-import com.digitalasset.canton.tracing.TraceContext
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 import org.lfdecentralizedtrust.splice.automation.{AutomationService, AutomationServiceCompanion}
@@ -74,43 +73,35 @@ class SyncOperatorAutomationService(
 
   /** The upgrade path runs only once a successor node is configured. */
   private def registerLsuTriggers(): Unit =
-    synchronizerNodeService.nodes.successor match {
-      case Some(successorSynchronizerNode) =>
-        lsuConfig.foreach { lsu =>
-          registerTrigger(
-            new DedicatedLsuAnnouncementTrigger(
-              triggerContext,
-              synchronizerNodeService.nodes.current.sequencerAdminConnection,
-              lsu,
+    synchronizerNodeService.nodes.successor.foreach { successorSynchronizerNode =>
+      lsuConfig.foreach { lsu =>
+        registerTrigger(
+          new DedicatedLsuAnnouncementTrigger(
+            triggerContext,
+            synchronizerNodeService.nodes.current.sequencerAdminConnection,
+            lsu,
+          )
+        )
+      }
+      registerTrigger(
+        new DedicatedLsuTrigger(
+          triggerContext,
+          synchronizerNodeService.nodes,
+          successorSynchronizerNode,
+          lsuDumpPath.getOrElse(
+            throw new IllegalArgumentException(
+              "lsu-dump-path must be set when a successor synchronizer node is configured"
             )
-          )
-        }
-        registerTrigger(
-          new DedicatedLsuTrigger(
-            triggerContext,
-            synchronizerNodeService.nodes,
-            successorSynchronizerNode,
-            lsuDumpPath.getOrElse(
-              throw new IllegalArgumentException(
-                "lsu-dump-path must be set when a successor synchronizer node is configured"
-              )
-            ),
-          )
+          ),
         )
-        registerTrigger(
-          new LsuTransferTrafficTrigger(
-            triggerContext,
-            synchronizerNodeService.nodes.current,
-            successorSynchronizerNode,
-          )
+      )
+      registerTrigger(
+        new LsuTransferTrafficTrigger(
+          triggerContext,
+          synchronizerNodeService.nodes.current,
+          successorSynchronizerNode,
         )
-      case None =>
-        lsuConfig.foreach(_ =>
-          logger.warn(
-            "An upgrade is scheduled but no successor synchronizer node is configured, so it will " +
-              "not run. Configure synchronizer-nodes.successor."
-          )(TraceContext.empty)
-        )
+      )
     }
 }
 

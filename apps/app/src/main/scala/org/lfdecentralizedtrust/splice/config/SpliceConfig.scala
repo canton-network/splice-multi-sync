@@ -1046,7 +1046,24 @@ object SpliceConfig {
         : ConfigReader[SyncOperatorTrafficControlConfig] =
       deriveReader[SyncOperatorTrafficControlConfig]
     implicit val syncOperatorConfigReader: ConfigReader[SyncOperatorAppBackendConfig] =
-      deriveReader[SyncOperatorAppBackendConfig]
+      deriveReader[SyncOperatorAppBackendConfig].emap { conf =>
+        for {
+          _ <- Either.cond(
+            conf.lsu.isEmpty || conf.synchronizerNodes.successor.isDefined,
+            (),
+            ConfigValidationFailed(
+              "If lsu is configured, synchronizer-nodes.successor must be configured"
+            ),
+          )
+          _ <- Either.cond(
+            conf.synchronizerNodes.successor.isEmpty || conf.lsuDumpPath.isDefined,
+            (),
+            ConfigValidationFailed(
+              "If synchronizer-nodes.successor is configured, lsu-dump-path must be configured"
+            ),
+          )
+        } yield conf
+      }
     implicit val syncOperatorClientConfigReader: ConfigReader[SyncOperatorAppClientConfig] =
       deriveReader[SyncOperatorAppClientConfig]
 

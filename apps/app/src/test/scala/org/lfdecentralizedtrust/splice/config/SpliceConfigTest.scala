@@ -495,5 +495,43 @@ class SpliceConfigTest extends AsyncWordSpec with BaseTest {
       lsu.newPhysicalSynchronizerProtocolVersion shouldBe ProtocolVersion.v37
       syncOperator.lsuDumpPath.value shouldBe java.nio.file.Paths.get("/tmp/sync-operator-lsu")
     }
+
+    "reject a scheduled upgrade without a successor node" in {
+      val syncOperatorTopology = ConfigFactory.parseFile(
+        new java.io.File("apps/app/src/test/resources/sync-operator-topology.conf")
+      )
+      val upgrade = ConfigFactory.parseString(
+        """
+          |canton.sync-operator-apps.syncOperator.lsu {
+          |  topology-freeze-time = { type = "timestamp", time = "2026-12-01T00:00:00Z" }
+          |  upgrade-time = { type = "timestamp", time = "2026-12-01T01:00:00Z" }
+          |  new-physical-synchronizer-serial = 1
+          |  new-physical-synchronizer-protocol-version = "37"
+          |}
+          """.stripMargin
+      )
+      val buggyConfig = CantonConfig.mergeConfigs(config, Seq(syncOperatorTopology, upgrade))
+      SpliceConfig.loadAndValidate(buggyConfig).left.value.toString should include(
+        "If lsu is configured, synchronizer-nodes.successor must be configured"
+      )
+    }
+
+    "reject a successor node without an lsu dump path" in {
+      val syncOperatorTopology = ConfigFactory.parseFile(
+        new java.io.File("apps/app/src/test/resources/sync-operator-topology.conf")
+      )
+      val successor = ConfigFactory.parseString(
+        """
+          |canton.sync-operator-apps.syncOperator.synchronizer-nodes.successor {
+          |  sequencer.admin-api.port = 5809
+          |  mediator.admin-api.port = 5807
+          |}
+          """.stripMargin
+      )
+      val buggyConfig = CantonConfig.mergeConfigs(config, Seq(syncOperatorTopology, successor))
+      SpliceConfig.loadAndValidate(buggyConfig).left.value.toString should include(
+        "If synchronizer-nodes.successor is configured, lsu-dump-path must be configured"
+      )
+    }
   }
 }
