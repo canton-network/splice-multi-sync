@@ -21,7 +21,6 @@ import org.apache.pekko.http.scaladsl.client.RequestBuilding.Get
 import org.apache.pekko.http.scaladsl.model.{StatusCodes, Uri}
 import org.apache.pekko.http.scaladsl.model.headers.{Authorization, OAuth2BearerToken}
 import org.lfdecentralizedtrust.splice.auth.AuthUtil
-import org.lfdecentralizedtrust.splice.automation.GrantUnlimitedTrafficTriggerBase.UnlimitedTraffic
 import org.lfdecentralizedtrust.splice.config.ConfigTransforms
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
 import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval
@@ -32,10 +31,8 @@ import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   SpliceTestConsoleEnvironment,
 }
 import org.lfdecentralizedtrust.splice.syncoperator.TrafficReport
-import org.lfdecentralizedtrust.splice.syncoperator.automation.{
-  ParticipantUnlimitedTrafficTrigger,
-  PreJoinParticipantTrafficTrigger,
-}
+import org.lfdecentralizedtrust.splice.syncoperator.automation.UnlimitedTrafficTrigger
+import org.lfdecentralizedtrust.splice.syncoperator.automation.UnlimitedTrafficTrigger.UnlimitedTraffic
 import org.lfdecentralizedtrust.splice.syncoperator.config.SyncOperatorTrafficControlConfig
 
 import scala.concurrent.duration.DurationInt
@@ -101,15 +98,12 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
       }
     }
 
-    "grant unlimited traffic to the mediator and to admitted participants only" in { implicit env =>
+    "grant unlimited traffic to the mediator and to admitted participants" in { implicit env =>
       val synchronizerId = syncOperatorBackend.appState.synchronizerId
       val alice = aliceValidatorBackend.participantClientWithAdminToken
       val bob = bobValidatorBackend.participantClientWithAdminToken
-      val automation = syncOperatorBackend.appState.automation
-      val joinedTrigger = automation.trigger[ParticipantUnlimitedTrafficTrigger]
-      val preJoinTrigger = automation.trigger[PreJoinParticipantTrafficTrigger]
 
-      clue("the mediator is granted unlimited traffic") {
+      clue("the mediator is granted unlimited traffic with its next serial") {
         val mediator = sequencer
           .getMediatorSynchronizerState(synchronizerId, TopologySnapshot.Effective)
           .futureValue
@@ -122,43 +116,53 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
         }
       }
 
-      joinedTrigger.pause().futureValue
-      preJoinTrigger.pause().futureValue
-      try {
-        // Alice's validator has joined splitwell, but without traffic it cannot finish connecting.
-        clue("a participant that joined without being admitted gets no traffic") {
-          eventually() {
-            extraTrafficLimit(alice.id) should not be empty
-          }
-          joinedTrigger.runOnce().futureValue shouldBe false
-          preJoinTrigger.runOnce().futureValue shouldBe false
-          extraTrafficLimit(alice.id) should not be Some(UnlimitedTraffic)
-        }
-
-        clue("an admitted participant is granted unlimited traffic") {
-          admit(alice.id)
-          eventually() {
-            joinedTrigger.runOnce().futureValue shouldBe true
-          }
+      // The bootstrap admits alice's participant, which joins splitwell during the test setup.
+      clue("a participant admitted at startup is granted unlimited traffic") {
+        eventually() {
           extraTrafficLimit(alice.id) shouldBe Some(UnlimitedTraffic)
         }
+      }
 
-        // Only the purchase before the join can grant bob's traffic, as the trigger for joined
-        // participants stays paused.
-        clue("a participant admitted before it joins connects with unlimited traffic") {
+      clue("a participant admitted before it joins has its traffic limit set") {
+        val trigger = unlimitedTrafficTrigger
+        trigger.pause().futureValue
+        try {
           admit(bob.id)
           eventually() {
-            preJoinTrigger.runOnce().futureValue shouldBe true
+            sequencer
+              .listParticipantSynchronizerPermissions(synchronizerId)
+              .futureValue
+              .map(_.mapping.participantId) should contain(bob.id)
           }
-          bob.synchronizers.connect_by_config(
-            alice.synchronizers.config(SynchronizerAlias.tryCreate("splitwell")).value,
-            synchronize = None,
-          )
-          extraTrafficLimit(bob.id) shouldBe Some(UnlimitedTraffic)
+          trigger.runOnce().futureValue shouldBe true
+          trigger.runOnce().futureValue shouldBe false
+        } finally {
+          trigger.resume()
         }
-      } finally {
-        joinedTrigger.resume()
-        preJoinTrigger.resume()
+      }
+
+      // Bob has not joined, so after a restart only the sequencer's SERIAL_TOO_LOW reply tells the
+      // app that his limit is already set.
+      clue("after a restart the app finds the limit of a participant that has not joined") {
+        syncOperatorBackend.stop()
+        syncOperatorBackend.startSync()
+        val trigger = unlimitedTrafficTrigger
+        trigger.pause().futureValue
+        try {
+          eventually() {
+            trigger.runOnce().futureValue shouldBe false
+          }
+        } finally {
+          trigger.resume()
+        }
+      }
+
+      clue("the participant connects with unlimited traffic") {
+        bob.synchronizers.connect_by_config(
+          alice.synchronizers.config(SynchronizerAlias.tryCreate("splitwell")).value,
+          synchronize = None,
+        )
+        extraTrafficLimit(bob.id) shouldBe Some(UnlimitedTraffic)
       }
 
       // The participant admin API in tests does not allow pings, so bob submits a topology
@@ -246,6 +250,9 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
 
   private def sequencer(implicit env: SpliceTestConsoleEnvironment) =
     syncOperatorBackend.appState.sequencerAdminConnection
+
+  private def unlimitedTrafficTrigger(implicit env: SpliceTestConsoleEnvironment) =
+    syncOperatorBackend.appState.automation.trigger[UnlimitedTrafficTrigger]
 
   private def trafficStates(time: CantonTimestamp)(implicit env: SpliceTestConsoleEnvironment) =
     LsuTrafficState

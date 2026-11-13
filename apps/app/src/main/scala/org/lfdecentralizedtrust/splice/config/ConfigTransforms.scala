@@ -132,7 +132,6 @@ object ConfigTransforms {
       updateAllRemoteSplitwellAppConfigs_(c =>
         c.copy(ledgerApiUser = s"${c.ledgerApiUser}-$suffix")
       ),
-      updateAllSyncOperatorAppConfigs_(c => c.copy(operatorUser = s"${c.operatorUser}-$suffix")),
       updateAllAnsAppExternalClientConfigs_(c =>
         c.copy(ledgerApiUser = s"${c.ledgerApiUser}-$suffix")
       ),
@@ -557,10 +556,10 @@ object ConfigTransforms {
       updateAllSyncOperatorAppConfigs((name, conf) =>
         if (predicate(name))
           conf
-            .focus(_.participantClient)
-            .modify(portTransform(bump, _))
             .focus(_.synchronizerNodes.current)
             .modify(portTransform(bump, _))
+            .focus(_.synchronizerNodes.successor)
+            .modify(_.map(portTransform(bump, _)))
         else conf
       ),
     )
@@ -789,7 +788,14 @@ object ConfigTransforms {
       bump: Int,
       c: SyncOperatorSynchronizerNodeConfig,
   ): SyncOperatorSynchronizerNodeConfig =
-    c.focus(_.sequencer.adminApi).modify(portTransform(bump, _))
+    c.focus(_.sequencer.adminApi)
+      .modify(portTransform(bump, _))
+      .focus(_.sequencer.internalApi)
+      .modify(_.map(portTransform(bump, _)))
+      .focus(_.sequencer.externalPublicApiUrl)
+      .modify(_.map(bumpUrl(bump, _)))
+      .focus(_.mediator)
+      .modify(_.map(_.focus(_.adminApi).modify(portTransform(bump, _))))
 
   private def portTransform(
       bump: Int,
@@ -833,9 +839,6 @@ object ConfigTransforms {
       }),
       updateAllRemoteSplitwellAppConfigs_(c => {
         c.focus(_.participantClient.ledgerApi).modify(enableAuth(c.ledgerApiUser, _))
-      }),
-      updateAllSyncOperatorAppConfigs_(c => {
-        c.focus(_.participantClient.ledgerApi).modify(enableAuth(c.operatorUser, _))
       }),
     )
   }
