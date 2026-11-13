@@ -20,6 +20,7 @@ import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorLsuConfig,
   SyncOperatorTrafficControlConfig,
 }
+import org.lfdecentralizedtrust.splice.syncoperator.store.TrafficReportStore
 
 import java.nio.file.Path
 
@@ -36,6 +37,7 @@ class SyncOperatorAutomationService(
     lsuDumpPath: Option[Path],
     trafficControlConfig: SyncOperatorTrafficControlConfig,
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
+    trafficReportStore: TrafficReportStore,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
     ec: ExecutionContextExecutor,
@@ -66,6 +68,16 @@ class SyncOperatorAutomationService(
       synchronizerId,
       synchronizerNodeService,
       trafficBalanceReconciliationDelay,
+    )
+  )
+
+  registerTrigger(
+    new TrafficReportTrigger(
+      triggerContext,
+      synchronizerId,
+      synchronizerNodeService.nodes.current.sequencerAdminConnection,
+      synchronizerNodeService.nodes.successor.map(_.sequencerAdminConnection),
+      trafficReportStore,
     )
   )
 
@@ -115,5 +127,6 @@ object SyncOperatorAutomationService extends AutomationServiceCompanion {
       aTrigger[DedicatedLsuAnnouncementTrigger],
       aTrigger[DedicatedLsuTrigger],
       aTrigger[LsuTransferTrafficTrigger],
+      aTrigger[TrafficReportTrigger],
     )
 }

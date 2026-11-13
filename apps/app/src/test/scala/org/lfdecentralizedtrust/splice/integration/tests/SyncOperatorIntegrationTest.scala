@@ -3,9 +3,12 @@
 
 package org.lfdecentralizedtrust.splice.integration.tests
 
+import com.auth0.jwt.JWT
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.{NonNegativeDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
 import com.digitalasset.canton.time.PositiveFiniteDuration as InternalPositiveFiniteDuration
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
@@ -13,16 +16,26 @@ import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   ParticipantSynchronizerPermission,
 }
+import org.apache.pekko.http.scaladsl.Http
+import org.apache.pekko.http.scaladsl.client.RequestBuilding.Get
+import org.apache.pekko.http.scaladsl.model.{StatusCodes, Uri}
+import org.apache.pekko.http.scaladsl.model.headers.{Authorization, OAuth2BearerToken}
+import org.lfdecentralizedtrust.splice.auth.AuthUtil
 import org.lfdecentralizedtrust.splice.config.ConfigTransforms
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
+import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval
+import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval.Status
 import org.lfdecentralizedtrust.splice.integration.EnvironmentDefinition
 import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   IntegrationTest,
   SpliceTestConsoleEnvironment,
 }
+import org.lfdecentralizedtrust.splice.syncoperator.TrafficReport
 import org.lfdecentralizedtrust.splice.syncoperator.automation.UnlimitedTrafficTrigger
 import org.lfdecentralizedtrust.splice.syncoperator.automation.UnlimitedTrafficTrigger.UnlimitedTraffic
 import org.lfdecentralizedtrust.splice.syncoperator.config.SyncOperatorTrafficControlConfig
+
+import scala.concurrent.duration.DurationInt
 
 class SyncOperatorIntegrationTest extends IntegrationTest {
 
@@ -163,6 +176,76 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
         )
       }
     }
+
+    // Needs the traffic the case above grants.
+    "report the traffic charged to participants per 10-minute interval" in { implicit env =>
+      val bob = bobValidatorBackend.participantClientWithAdminToken
+
+      val last =
+        TrafficReport.alignDown(env.environment.clock.now).minus(TrafficReport.IntervalLength)
+      val end = last.plus(TrafficReport.IntervalLength)
+      // An interval is reported once the sequencer has sequenced past its end, and an idle
+      // synchronizer does not advance, so bob submits a topology transaction.
+      bob.parties.enable(
+        "traffic-report",
+        synchronizer = Some(SynchronizerAlias.tryCreate("splitwell")),
+        synchronizeParticipants = Seq(bob),
+        synchronize = Some(NonNegativeDuration.ofSeconds(60)),
+      )
+
+      clue("the interval that is not over is Undetermined") {
+        reportedInterval(TrafficReport.alignDown(env.environment.clock.now)).status shouldBe
+          Status.Undetermined
+      }
+
+      val interval = clue("the last interval that is over is reported") {
+        eventually(timeUntilSuccess = 1.minute) {
+          val interval = reportedInterval(last)
+          interval.status shouldBe Status.Ok
+          interval
+        }
+      }
+
+      clue("its total is the participants' traffic in the sequencer's journal over it") {
+        interval.trafficConsumed.value shouldBe TrafficReport.participantsConsumed(
+          trafficStates(last),
+          trafficStates(end),
+        )
+      }
+    }
+
+    "reject traffic report requests without a valid token" in { implicit env =>
+      implicit val sys = env.actorSystem
+      registerHttpConnectionPoolsCleanup(env)
+
+      val start = TrafficReport.alignDown(env.environment.clock.now)
+      val request = Get(
+        Uri(s"${syncOperatorBackend.httpClientConfig.url}/api/syncoperator/v0/traffic-report")
+          .withQuery(
+            Uri.Query(
+              "start_record_time" -> start.toInstant.toString,
+              "end_record_time" -> start.plus(TrafficReport.IntervalLength).toInstant.toString,
+            )
+          )
+      )
+      val wrongAudienceToken = JWT
+        .create()
+        .withAudience("wrong-audience")
+        .withSubject(syncOperatorBackend.name)
+        .sign(AuthUtil.testSignatureAlgorithm)
+
+      clue("no token") {
+        Http().singleRequest(request).futureValue.status shouldBe StatusCodes.Unauthorized
+      }
+      clue("a token for another audience") {
+        Http()
+          .singleRequest(
+            request.withHeaders(Authorization(OAuth2BearerToken(wrongAudienceToken)))
+          )
+          .futureValue
+          .status shouldBe StatusCodes.Unauthorized
+      }
+    }
   }
 
   private def sequencer(implicit env: SpliceTestConsoleEnvironment) =
@@ -170,6 +253,19 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
 
   private def unlimitedTrafficTrigger(implicit env: SpliceTestConsoleEnvironment) =
     syncOperatorBackend.appState.automation.trigger[UnlimitedTrafficTrigger]
+
+  private def trafficStates(time: CantonTimestamp)(implicit env: SpliceTestConsoleEnvironment) =
+    LsuTrafficState
+      .fromTrustedByteString(sequencer.getLsuTrafficControlState(Some(time)).futureValue)
+      .value
+      .membersTraffic
+
+  private def reportedInterval(start: CantonTimestamp)(implicit
+      env: SpliceTestConsoleEnvironment
+  ): TrafficReportInterval =
+    syncOperatorBackend
+      .getTrafficReport(start, start.plus(TrafficReport.IntervalLength))
+      .loneElement
 
   private def extraTrafficLimit(member: Member)(implicit
       env: SpliceTestConsoleEnvironment
