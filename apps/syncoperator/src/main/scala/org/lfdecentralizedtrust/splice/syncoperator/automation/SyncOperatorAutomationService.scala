@@ -75,7 +75,8 @@ class SyncOperatorAutomationService(
     new TrafficReportTrigger(
       triggerContext,
       synchronizerId,
-      synchronizerNodeService.nodes.current,
+      synchronizerNodeService.nodes.current.sequencerAdminConnection,
+      synchronizerNodeService.nodes.successor.map(_.sequencerAdminConnection),
       trafficReportStore,
     )
   )
