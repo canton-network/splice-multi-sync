@@ -16,6 +16,14 @@ import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.actor.ActorSystem
+import org.lfdecentralizedtrust.splice.admin.api.TraceContextDirectives.withTraceContext
+import org.lfdecentralizedtrust.splice.admin.http.{AdminRoutes, HttpErrorHandler}
+import org.lfdecentralizedtrust.splice.auth.{
+  AuthConfig,
+  AuthenticationOnlyAuthExtractor,
+  HMACVerifier,
+  RSAVerifier,
+}
 import org.lfdecentralizedtrust.splice.config.SharedSpliceAppParameters
 import org.lfdecentralizedtrust.splice.environment.{
   MediatorAdminConnection,
@@ -25,12 +33,15 @@ import org.lfdecentralizedtrust.splice.environment.{
   SynchronizerNode,
   SynchronizerNodeService,
 }
+import org.lfdecentralizedtrust.splice.http.v0.sync_operator.SyncOperatorResource
+import org.lfdecentralizedtrust.splice.syncoperator.admin.http.HttpSyncOperatorHandler
 import org.lfdecentralizedtrust.splice.syncoperator.automation.SyncOperatorAutomationService
 import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorAppBackendConfig,
   SyncOperatorSynchronizerNodeConfig,
 }
 import org.lfdecentralizedtrust.splice.syncoperator.metrics.SyncOperatorAppMetrics
+import org.lfdecentralizedtrust.splice.syncoperator.store.TrafficReportStore
 import org.lfdecentralizedtrust.splice.util.HasHealth
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
@@ -50,6 +61,7 @@ class SyncOperatorApp(
     val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
     metrics: SyncOperatorAppMetrics,
+    adminRoutes: AdminRoutes,
 )(implicit
     ac: ActorSystem,
     ec: ExecutionContextExecutor,
@@ -93,6 +105,7 @@ class SyncOperatorApp(
       _ <- appInitStep("Check the synchronizer is permissioned and runs traffic control") {
         requireDedicatedSynchronizerParameters(sequencerAdminConnection, synchronizerId)
       }
+      trafficReportStore = new TrafficReportStore(storage)
       automation = new SyncOperatorAutomationService(
         config.automation,
         clock,
@@ -103,8 +116,35 @@ class SyncOperatorApp(
         config.lsuDumpPath,
         config.trafficControl,
         config.trafficBalanceReconciliationDelay,
+        trafficReportStore,
         loggerFactory,
       )
+      verifier = config.auth match {
+        case AuthConfig.Hs256Unsafe(audience, secret) => new HMACVerifier(audience, secret)
+        case AuthConfig.Rs256(audience, jwksUrl, connectionTimeout, readTimeout) =>
+          new RSAVerifier(
+            audience,
+            jwksUrl,
+            RSAVerifier.TimeoutsConfig(connectionTimeout, readTimeout),
+          )
+      }
+      handler = new HttpSyncOperatorHandler(trafficReportStore)
+      route = withTraceContext { implicit traceContext =>
+        HttpErrorHandler(loggerFactory)(traceContext) {
+          SyncOperatorResource.routes(
+            handler,
+            operation =>
+              metrics.httpServerMetrics.withMetrics("syncOperator")(operation).tflatMap { _ =>
+                AuthenticationOnlyAuthExtractor(
+                  verifier,
+                  loggerFactory,
+                  SyncOperatorApp.OAuthRealm,
+                )(traceContext)(operation)
+              },
+          )
+        }
+      }
+      _ = adminRoutes.updateRoute(route)
     } yield {
       SyncOperatorApp.State(
         automation,
@@ -250,6 +290,8 @@ class SyncOperatorApp(
 }
 
 object SyncOperatorApp {
+  val OAuthRealm = "splice sync operator realm"
+
   case class State(
       automation: SyncOperatorAutomationService,
       storage: DbStorage,

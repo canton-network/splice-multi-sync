@@ -62,9 +62,7 @@ class SyncOperatorAppBootstrap(
       configuredOpenTelemetry,
     ) {
 
-  override def initialize(adminRoutes: AdminRoutes): EitherT[Future, String, Unit] = {
-    // No HTTP surface yet; operator-facing endpoints attach here.
-    val _ = adminRoutes
+  override def initialize(adminRoutes: AdminRoutes): EitherT[Future, String, Unit] =
     startInstanceUnlessClosing {
       new SyncOperatorApp(
         name,
@@ -75,9 +73,9 @@ class SyncOperatorAppBootstrap(
         loggerFactory,
         futureSupervisor,
         metrics,
+        adminRoutes,
       )
     }
-  }
 
   override def isActive: Boolean = storage.isActive
 }

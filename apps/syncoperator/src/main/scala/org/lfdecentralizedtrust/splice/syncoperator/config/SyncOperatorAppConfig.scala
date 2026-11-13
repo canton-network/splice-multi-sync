@@ -12,6 +12,7 @@ import com.digitalasset.canton.admin.api.client.data.{
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.version.ProtocolVersion
+import org.lfdecentralizedtrust.splice.auth.AuthConfig
 import org.lfdecentralizedtrust.splice.config.{
   AutomationConfig,
   HttpClientConfig,
@@ -98,6 +99,7 @@ case class SyncOperatorAppBackendConfig(
     // Where the predecessor's synchronizer state is dumped during an upgrade.
     lsuDumpPath: Option[Path] = None,
     trafficControl: SyncOperatorTrafficControlConfig = SyncOperatorTrafficControlConfig(),
+    auth: AuthConfig,
     override val automation: AutomationConfig = AutomationConfig(),
     parameters: SpliceParametersConfig = SpliceParametersConfig(batching = BatchingConfig()),
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration =

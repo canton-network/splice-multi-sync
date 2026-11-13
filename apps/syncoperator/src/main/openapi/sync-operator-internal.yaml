@@ -1,0 +1,84 @@
+openapi: 3.0.0
+info:
+  title: Sync Operator API
+  version: 0.0.1
+tags:
+  - name: sync_operator
+servers:
+  - url: https://example.com/api/syncoperator
+paths:
+  /readyz:
+    $ref: "../../../../common/src/main/openapi/common-external.yaml#/paths/~1readyz"
+  /livez:
+    $ref: "../../../../common/src/main/openapi/common-external.yaml#/paths/~1livez"
+  /v0/traffic-report:
+    get:
+      description: |
+        Returns the traffic charged to the participants of the synchronizer this app operates,
+        for each 10-minute interval of record time in `[start_record_time, end_record_time)`.
+        Intervals are aligned at XX:00, XX:10, ... UTC, so both bounds must be aligned too.
+        A request covers at most 1000 intervals.
+      tags: [sync_operator]
+      x-jvm-package: sync_operator
+      operationId: "getTrafficReport"
+      parameters:
+        - name: "start_record_time"
+          in: "query"
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: "end_record_time"
+          in: "query"
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/GetTrafficReportResponse"
+        "400":
+          $ref: "../../../../common/src/main/openapi/common-external.yaml#/components/responses/400"
+
+components:
+  schemas:
+    GetTrafficReportResponse:
+      type: object
+      required:
+        - intervals
+      properties:
+        intervals:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrafficReportInterval"
+
+    TrafficReportInterval:
+      type: object
+      required:
+        - start_record_time
+        - status
+      properties:
+        start_record_time:
+          type: string
+          format: date-time
+        status:
+          description: |
+            `Ok`: the interval is over and `traffic_consumed` is final.
+            `Undetermined`: the interval is not over yet, or the app has not read it yet.
+            `CannotProvide`: the app can't read the interval, e.g., because it started after it,
+            or because the sequencer pruned it while the app was down.
+          type: string
+          enum:
+            - "Ok"
+            - "Undetermined"
+            - "CannotProvide"
+        traffic_consumed:
+          description: |
+            Traffic charged to the participants in the interval, in bytes.
+            Only set if `status` is `Ok`.
+          type: integer
+          format: int64
