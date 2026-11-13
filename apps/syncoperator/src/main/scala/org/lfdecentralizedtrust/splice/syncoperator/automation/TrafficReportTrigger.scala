@@ -45,7 +45,7 @@ class TrafficReportTrigger(
 ) extends PollingTrigger {
 
   override def performWorkIfAvailable()(implicit tc: TraceContext): Future[Boolean] =
-    store.lookupLatestIntervalStart(synchronizerId).flatMap { latest =>
+    store.lookupLatestIntervalStart().flatMap { latest =>
       val now = context.clock.now
       // On first start, take the last interval that is over rather than backfilling to the pruning
       // lower bound, which is the epoch on a sequencer that never pruned.
@@ -85,11 +85,7 @@ class TrafficReportTrigger(
           case None => Future.successful(false)
           case Some(atStart) =>
             store
-              .insertInterval(
-                synchronizerId,
-                start,
-                TrafficReport.participantsConsumed(atStart, atEnd),
-              )
+              .insertInterval(start, TrafficReport.participantsConsumed(atStart, atEnd))
               .map(_ => true)
         }
     }

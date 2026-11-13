@@ -145,7 +145,7 @@ class TrafficReportTriggerTest
       for {
         worked <- trigger.performWorkIfAvailable()
         idle <- trigger.performWorkIfAvailable()
-        stored <- store.listIntervals(dummyDomain, interval(0), interval(6))
+        stored <- store.listIntervals(interval(0), interval(6))
       } yield {
         worked shouldBe true
         idle shouldBe false
@@ -159,7 +159,7 @@ class TrafficReportTriggerTest
       val trigger = mkTrigger(store, now, mockSequencer(now, Map(interval(1) -> 100)))
       for {
         worked <- trigger.performWorkIfAvailable()
-        stored <- store.listIntervals(dummyDomain, interval(0), interval(6))
+        stored <- store.listIntervals(interval(0), interval(6))
       } yield {
         worked shouldBe false
         stored shouldBe empty
@@ -179,12 +179,12 @@ class TrafficReportTriggerTest
         ),
       )
       for {
-        _ <- store.insertInterval(dummyDomain, interval(1), 30L)
+        _ <- store.insertInterval(interval(1), 30L)
         worked <- loggerFactory.assertLogs(
           trigger.performWorkIfAvailable(),
           _.warningMessage should include("pruned"),
         )
-        stored <- store.listIntervals(dummyDomain, interval(0), interval(6))
+        stored <- store.listIntervals(interval(0), interval(6))
       } yield {
         worked shouldBe true
         stored shouldBe Map(interval(1) -> 30L, interval(4) -> 60L)
@@ -202,7 +202,7 @@ class TrafficReportTriggerTest
       val trigger = mkTrigger(store, now, current, Some(successor))
       for {
         worked <- trigger.performWorkIfAvailable()
-        stored <- store.listIntervals(dummyDomain, interval(0), interval(6))
+        stored <- store.listIntervals(interval(0), interval(6))
       } yield {
         worked shouldBe true
         stored shouldBe Map(interval(1) -> 50L)
@@ -217,12 +217,12 @@ class TrafficReportTriggerTest
       announceUpgrade(current, NonNegativeInt.one, upgradeTime = interval(1).plusSeconds(300))
       val trigger = mkTrigger(store, now, current)
       for {
-        _ <- store.insertInterval(dummyDomain, interval(0), 30L)
+        _ <- store.insertInterval(interval(0), 30L)
         worked <- loggerFactory.assertLogs(
           trigger.performWorkIfAvailable(),
           _.warningMessage should include("predates the upgrade"),
         )
-        stored <- store.listIntervals(dummyDomain, interval(0), interval(6))
+        stored <- store.listIntervals(interval(0), interval(6))
       } yield {
         worked shouldBe true
         stored shouldBe Map(interval(0) -> 30L, interval(2) -> 20L)

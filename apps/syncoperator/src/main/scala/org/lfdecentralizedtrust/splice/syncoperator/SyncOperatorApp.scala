@@ -128,7 +128,7 @@ class SyncOperatorApp(
             RSAVerifier.TimeoutsConfig(connectionTimeout, readTimeout),
           )
       }
-      handler = new HttpSyncOperatorHandler(trafficReportStore, synchronizerId)
+      handler = new HttpSyncOperatorHandler(trafficReportStore)
       route = withTraceContext { implicit traceContext =>
         HttpErrorHandler(loggerFactory)(traceContext) {
           SyncOperatorResource.routes(

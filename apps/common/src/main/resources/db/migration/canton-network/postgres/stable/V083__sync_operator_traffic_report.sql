@@ -5,11 +5,8 @@
 -- per 10-minute interval of record time.
 create table sync_operator_traffic_report
 (
-    -- Logical synchronizer id, which a logical synchronizer upgrade keeps.
-    synchronizer_id  text   not null,
     -- Start of the interval in micros since the epoch, a multiple of 10 minutes.
-    interval_start   bigint not null,
+    interval_start   bigint not null primary key,
     -- Traffic charged to the participants in the interval, in bytes.
-    traffic_consumed bigint not null,
-    primary key (synchronizer_id, interval_start)
+    traffic_consumed bigint not null
 );

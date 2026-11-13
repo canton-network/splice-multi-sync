@@ -193,12 +193,12 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
         synchronize = Some(NonNegativeDuration.ofSeconds(60)),
       )
 
-      clue("The interval that is not over is Undetermined") {
+      clue("the interval that is not over is Undetermined") {
         reportedInterval(TrafficReport.alignDown(env.environment.clock.now)).status shouldBe
           Status.Undetermined
       }
 
-      val interval = clue("The last interval that is over is reported") {
+      val interval = clue("the last interval that is over is reported") {
         eventually(timeUntilSuccess = 1.minute) {
           val interval = reportedInterval(last)
           interval.status shouldBe Status.Ok
@@ -206,7 +206,7 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
         }
       }
 
-      clue("Its total is the participants' traffic in the sequencer's journal over it") {
+      clue("its total is the participants' traffic in the sequencer's journal over it") {
         interval.trafficConsumed.value shouldBe TrafficReport.participantsConsumed(
           trafficStates(last),
           trafficStates(end),

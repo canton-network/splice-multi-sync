@@ -3,7 +3,6 @@
 
 package org.lfdecentralizedtrust.splice.syncoperator.admin.http
 
-import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import io.opentelemetry.api.trace.Tracer
 import org.lfdecentralizedtrust.splice.admin.http.HttpErrorHandler
@@ -16,10 +15,7 @@ import org.lfdecentralizedtrust.splice.util.Codec
 import java.time.OffsetDateTime
 import scala.concurrent.{ExecutionContext, Future}
 
-class HttpSyncOperatorHandler(
-    store: TrafficReportStore,
-    synchronizerId: SynchronizerId,
-)(implicit
+class HttpSyncOperatorHandler(store: TrafficReportStore)(implicit
     ec: ExecutionContext,
     tracer: Tracer,
 ) extends v0.SyncOperatorHandler[AuthenticatedRequest]
@@ -45,8 +41,8 @@ class HttpSyncOperatorHandler(
           for {
             // Read the latest interval first: intervals are stored in order, so one before it that
             // is missing now stays missing.
-            latest <- store.lookupLatestIntervalStart(synchronizerId)
-            stored <- store.listIntervals(synchronizerId, start, end)
+            latest <- store.lookupLatestIntervalStart()
+            stored <- store.listIntervals(start, end)
           } yield respond.OK(
             definitions.GetTrafficReportResponse(TrafficReport.report(starts, stored, latest))
           )
