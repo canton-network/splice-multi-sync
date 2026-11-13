@@ -37,7 +37,7 @@ use_bft=0
 collect_metrics=0
 enable_key_download=0
 logFileHint=canton
-# Base traffic rate on the splitwell synchronizer in bytes; empty means mainnet's.
+# Base traffic rate on the splitwell synchronizer in bytes; empty means no traffic control there.
 splitwell_max_base_traffic_amount="${SPLITWELL_MAX_BASE_TRAFFIC_AMOUNT-}"
 # Protocol version of the splitwell synchronizer; empty means the bootstrap script's default.
 splitwell_protocol_version="${SPLITWELL_PROTOCOL_VERSION-}"
