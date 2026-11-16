@@ -68,9 +68,10 @@ components:
         status:
           description: |
             `Ok`: the interval is over and `traffic_consumed` is final.
-            `Undetermined`: the interval is not over yet, or the app has not read it yet.
-            `CannotProvide`: the app can't read the interval, e.g., because it started after it,
-            or because the sequencer pruned it while the app was down.
+            `Undetermined`: the interval is not over yet, or the sequencer has not sequenced past
+            its end yet.
+            `CannotProvide`: the sequencer can't provide the interval anymore, because it pruned it
+            or because the interval predates the upgrade to the current sequencer.
           type: string
           enum:
             - "Ok"

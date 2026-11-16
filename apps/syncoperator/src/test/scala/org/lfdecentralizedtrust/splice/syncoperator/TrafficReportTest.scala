@@ -14,7 +14,6 @@ import com.digitalasset.canton.topology.DefaultTestIdentities.{
   participant3,
   participant4,
 }
-import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval.Status
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.time.{Duration, Instant}
@@ -78,30 +77,6 @@ class TrafficReportTest extends AnyWordSpec with BaseTest {
           mediatorId -> consumed(1000),
         ),
       ) shouldBe 37L
-    }
-  }
-
-  "report" should {
-    "report stored intervals as Ok, earlier gaps as CannotProvide, later ones as Undetermined" in {
-      val report = TrafficReport.report(
-        starts = (0L until 5L).map(interval),
-        stored = Map(interval(1) -> 10L, interval(3) -> 30L),
-        latestStored = Some(interval(3)),
-      )
-      report.map(i => (i.status, i.trafficConsumed)) shouldBe Seq(
-        Status.CannotProvide -> None,
-        Status.Ok -> Some(10L),
-        Status.CannotProvide -> None,
-        Status.Ok -> Some(30L),
-        Status.Undetermined -> None,
-      )
-      report.map(_.startRecordTime.toInstant) shouldBe (0L until 5L).map(interval(_).toInstant)
-    }
-
-    "report everything as Undetermined before the first interval is stored" in {
-      TrafficReport
-        .report(Seq(t0), Map.empty, latestStored = None)
-        .map(_.status) shouldBe Seq(Status.Undetermined)
     }
   }
 }

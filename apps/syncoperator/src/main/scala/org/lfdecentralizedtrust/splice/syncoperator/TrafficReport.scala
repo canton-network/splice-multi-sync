@@ -6,11 +6,9 @@ package org.lfdecentralizedtrust.splice.syncoperator
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.TrafficState
 import com.digitalasset.canton.topology.{Member, ParticipantId}
-import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval
-import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval.Status
 import org.lfdecentralizedtrust.splice.store.Limit
 
-import java.time.{Duration, ZoneOffset}
+import java.time.Duration
 
 /** The intervals of the traffic report: 10 minutes of record time each, aligned in UTC at XX:00,
   * XX:10, and so on.
@@ -26,8 +24,8 @@ object TrafficReport {
 
   /** The first interval that starts after the sequencer's pruning lower bound. Pruning keeps only
     * each member's latest journal row up to that bound, so readings at or before it are wrong.
-    * Canton prunes the journal before it moves the bound, so an app that catches up at the edge of
-    * the retention period can still race a prune and store a wrong total.
+    * Canton prunes the journal before it moves the bound, so a request at the edge of the retention
+    * period can still race a prune and report a wrong total.
     */
   def firstReadableStart(pruningLowerBound: CantonTimestamp): CantonTimestamp =
     alignDown(pruningLowerBound).plus(IntervalLength)
@@ -63,24 +61,4 @@ object TrafficReport {
       state.extraTrafficConsumed.value -
         atStart.get(participant).fold(0L)(_.extraTrafficConsumed.value)
     }.sum
-
-  /** Reports each interval as `Ok` with its stored total. An interval with no stored total is
-    * `CannotProvide` if a later one is stored, because intervals are stored in order and one that
-    * was skipped is never stored, and `Undetermined` otherwise.
-    */
-  def report(
-      starts: Seq[CantonTimestamp],
-      stored: Map[CantonTimestamp, Long],
-      latestStored: Option[CantonTimestamp],
-  ): Vector[TrafficReportInterval] =
-    starts.map { start =>
-      val startRecordTime = start.toInstant.atOffset(ZoneOffset.UTC)
-      stored.get(start) match {
-        case Some(trafficConsumed) =>
-          TrafficReportInterval(startRecordTime, Status.Ok, Some(trafficConsumed))
-        case None if latestStored.exists(_ > start) =>
-          TrafficReportInterval(startRecordTime, Status.CannotProvide)
-        case None => TrafficReportInterval(startRecordTime, Status.Undetermined)
-      }
-    }.toVector
 }

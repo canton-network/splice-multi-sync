@@ -8,14 +8,13 @@ import io.opentelemetry.api.trace.Tracer
 import org.lfdecentralizedtrust.splice.admin.http.HttpErrorHandler
 import org.lfdecentralizedtrust.splice.auth.AuthenticationOnlyAuthExtractor.AuthenticatedRequest
 import org.lfdecentralizedtrust.splice.http.v0.{definitions, sync_operator as v0}
-import org.lfdecentralizedtrust.splice.syncoperator.TrafficReport
-import org.lfdecentralizedtrust.splice.syncoperator.store.TrafficReportStore
+import org.lfdecentralizedtrust.splice.syncoperator.{TrafficReport, TrafficReportReader}
 import org.lfdecentralizedtrust.splice.util.Codec
 
 import java.time.OffsetDateTime
 import scala.concurrent.{ExecutionContext, Future}
 
-class HttpSyncOperatorHandler(store: TrafficReportStore)(implicit
+class HttpSyncOperatorHandler(reader: TrafficReportReader)(implicit
     ec: ExecutionContext,
     tracer: Tracer,
 ) extends v0.SyncOperatorHandler[AuthenticatedRequest]
@@ -34,18 +33,13 @@ class HttpSyncOperatorHandler(store: TrafficReportStore)(implicit
         start <- Codec.decode(Codec.OffsetDateTime)(startRecordTime)
         end <- Codec.decode(Codec.OffsetDateTime)(endRecordTime)
         starts <- TrafficReport.intervalStarts(start, end)
-      } yield (start, end, starts)
+      } yield starts
       range match {
         case Left(error) => Future.failed(HttpErrorHandler.badRequest(error))
-        case Right((start, end, starts)) =>
-          for {
-            // Read the latest interval first: intervals are stored in order, so one before it that
-            // is missing now stays missing.
-            latest <- store.lookupLatestIntervalStart()
-            stored <- store.listIntervals(start, end)
-          } yield respond.OK(
-            definitions.GetTrafficReportResponse(TrafficReport.report(starts, stored, latest))
-          )
+        case Right(starts) =>
+          reader
+            .read(starts)
+            .map(intervals => respond.OK(definitions.GetTrafficReportResponse(intervals.toVector)))
       }
     }
   }

@@ -41,7 +41,6 @@ import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorSynchronizerNodeConfig,
 }
 import org.lfdecentralizedtrust.splice.syncoperator.metrics.SyncOperatorAppMetrics
-import org.lfdecentralizedtrust.splice.syncoperator.store.TrafficReportStore
 import org.lfdecentralizedtrust.splice.util.HasHealth
 
 import scala.concurrent.{ExecutionContextExecutor, Future}
@@ -105,7 +104,6 @@ class SyncOperatorApp(
       _ <- appInitStep("Check the synchronizer is permissioned and runs traffic control") {
         requireDedicatedSynchronizerParameters(sequencerAdminConnection, synchronizerId)
       }
-      trafficReportStore = new TrafficReportStore(storage)
       automation = new SyncOperatorAutomationService(
         config.automation,
         clock,
@@ -116,7 +114,6 @@ class SyncOperatorApp(
         config.lsuDumpPath,
         config.trafficControl,
         config.trafficBalanceReconciliationDelay,
-        trafficReportStore,
         loggerFactory,
       )
       verifier = config.auth match {
@@ -128,7 +125,14 @@ class SyncOperatorApp(
             RSAVerifier.TimeoutsConfig(connectionTimeout, readTimeout),
           )
       }
-      handler = new HttpSyncOperatorHandler(trafficReportStore)
+      handler = new HttpSyncOperatorHandler(
+        new TrafficReportReader(
+          clock,
+          synchronizerId,
+          sequencerAdminConnection,
+          synchronizerNodes.successor.map(_.sequencerAdminConnection),
+        )
+      )
       route = withTraceContext { implicit traceContext =>
         HttpErrorHandler(loggerFactory)(traceContext) {
           SyncOperatorResource.routes(
