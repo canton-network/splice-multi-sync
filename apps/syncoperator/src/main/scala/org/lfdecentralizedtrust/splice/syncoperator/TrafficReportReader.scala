@@ -9,7 +9,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.TrafficState
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
-import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.StatusRuntimeException
@@ -33,7 +32,6 @@ import scala.concurrent.{ExecutionContext, Future}
   */
 class TrafficReportReader(
     report: TrafficReport,
-    clock: Clock,
     synchronizerId: SynchronizerId,
     current: SequencerAdminConnection,
     successor: Option[SequencerAdminConnection],
@@ -50,19 +48,15 @@ class TrafficReportReader(
         _.max(pruningStatus.lowerBound)
       )
       (unreadable, readable) = starts.partition(_ < report.firstReadableStart(readableAfter))
-      // Every reading logs on the sequencer, so only read the intervals the app clock says are over;
-      // the sequencer still refuses while its head lags behind.
-      now = clock.now
-      over = readable.takeWhile(_.plus(report.intervalLength) <= now)
-      consumed <- over.headOption.fold(Future.successful(List.empty[Long]))(first =>
+      consumed <- readable.headOption.fold(Future.successful(List.empty[Long]))(first =>
         readTrafficStates(upgrades, first).flatMap {
           case None => Future.successful(List.empty)
-          case Some(atFirst) => readConsumed(upgrades, over.toList, atFirst)
+          case Some(atFirst) => readConsumed(upgrades, readable.toList, atFirst)
         }
       )
     } yield {
       unreadable.map(interval(_, Status.CannotProvide)) ++
-        over.zip(consumed).map { case (start, trafficConsumed) =>
+        readable.zip(consumed).map { case (start, trafficConsumed) =>
           interval(start, Status.Ok, Some(trafficConsumed))
         } ++
         readable.drop(consumed.size).map(interval(_, Status.Undetermined))

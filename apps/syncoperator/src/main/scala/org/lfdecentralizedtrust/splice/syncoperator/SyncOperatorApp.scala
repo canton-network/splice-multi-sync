@@ -130,7 +130,6 @@ class SyncOperatorApp(
         trafficReport,
         new TrafficReportReader(
           trafficReport,
-          clock,
           synchronizerId,
           sequencerAdminConnection,
           synchronizerNodes.successor.map(_.sequencerAdminConnection),

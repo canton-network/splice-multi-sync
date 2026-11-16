@@ -13,7 +13,6 @@ import com.digitalasset.canton.sequencing.protocol.TrafficState
 import com.digitalasset.canton.synchronizer.sequencer.SequencerPruningStatus
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
-import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.DefaultTestIdentities.{
   namespace,
   participant1,
@@ -107,14 +106,12 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
   }
 
   private def read(
-      now: CantonTimestamp,
       starts: Seq[CantonTimestamp],
       current: SequencerAdminConnection,
       successor: Option[SequencerAdminConnection] = None,
   ) =
     new TrafficReportReader(
       TrafficReport(Duration.ofMinutes(10)),
-      new SimClock(now, loggerFactory),
       synchronizerId,
       current,
       successor,
@@ -134,17 +131,11 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
 
   "TrafficReportReader" should {
 
-    "report the intervals that are over" in {
+    "report Undetermined from the first interval the sequencer has not sequenced past" in {
       val sequencer =
         mockSequencer(Map(interval(0) -> 100, interval(1) -> 130, interval(2) -> 150))
-      read(interval(2).plusSeconds(300), Seq(interval(0), interval(1), interval(2)), sequencer)
-        .map(_ shouldBe Seq(ok(0, 30), ok(1, 20), undetermined(2)))
-    }
-
-    "report Undetermined from the first interval the sequencer has not sequenced past" in {
-      val sequencer = mockSequencer(Map(interval(0) -> 100, interval(1) -> 130))
-      read(interval(3), Seq(interval(0), interval(1), interval(2)), sequencer)
-        .map(_ shouldBe Seq(ok(0, 30), undetermined(1), undetermined(2)))
+      read((0L until 4L).map(interval), sequencer)
+        .map(_ shouldBe Seq(ok(0, 30), ok(1, 20), undetermined(2), undetermined(3)))
     }
 
     "report the intervals the sequencer pruned as CannotProvide" in {
@@ -152,7 +143,7 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
         Map(interval(2) -> 200, interval(3) -> 260),
         pruningLowerBound = interval(1).plusSeconds(300),
       )
-      read(interval(3), Seq(interval(0), interval(1), interval(2)), sequencer)
+      read(Seq(interval(0), interval(1), interval(2)), sequencer)
         .map(_ shouldBe Seq(cannotProvide(0), cannotProvide(1), ok(2, 60)))
     }
 
@@ -162,7 +153,7 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
       val current = mockSequencer(Map(interval(1) -> 100, interval(2) -> 100))
       val successor = mockSequencer(Map(interval(1) -> 0, interval(2) -> 150))
       announceUpgrade(current, NonNegativeInt.zero, upgradeTime = interval(1).plusSeconds(300))
-      read(interval(2), Seq(interval(1)), current, Some(successor))
+      read(Seq(interval(1)), current, Some(successor))
         .map(_ shouldBe Seq(ok(1, 50)))
     }
 
@@ -170,7 +161,7 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
       val current =
         mockSequencer(Map(interval(1) -> 0, interval(2) -> 150, interval(3) -> 170))
       announceUpgrade(current, NonNegativeInt.one, upgradeTime = interval(1).plusSeconds(300))
-      read(interval(3), Seq(interval(1), interval(2)), current)
+      read(Seq(interval(1), interval(2)), current)
         .map(_ shouldBe Seq(cannotProvide(1), ok(2, 20)))
     }
   }
