@@ -22,7 +22,8 @@ class TrafficReportTest extends AnyWordSpec with BaseTest {
 
   private val t0 = CantonTimestamp.assertFromInstant(Instant.parse("2026-11-02T10:00:00Z"))
 
-  // Literal 10 minutes rather than TrafficReport.IntervalLength, so the tests pin the length.
+  private val report = TrafficReport(Duration.ofMinutes(10))
+
   private def interval(n: Long) = t0.plus(Duration.ofMinutes(10L * n))
 
   private def consumed(bytes: Long) =
@@ -30,39 +31,39 @@ class TrafficReportTest extends AnyWordSpec with BaseTest {
 
   "alignDown" should {
     "align to the start of the 10-minute interval" in {
-      TrafficReport.alignDown(interval(1).immediatePredecessor) shouldBe t0
-      TrafficReport.alignDown(interval(1)) shouldBe interval(1)
+      report.alignDown(interval(1).immediatePredecessor) shouldBe t0
+      report.alignDown(interval(1)) shouldBe interval(1)
     }
   }
 
   "firstReadableStart" should {
     "start strictly after the pruning lower bound" in {
-      TrafficReport.firstReadableStart(t0) shouldBe interval(1)
-      TrafficReport.firstReadableStart(t0.immediateSuccessor) shouldBe interval(1)
+      report.firstReadableStart(t0) shouldBe interval(1)
+      report.firstReadableStart(t0.immediateSuccessor) shouldBe interval(1)
     }
   }
 
   "page" should {
     "list the intervals of an aligned range" in {
-      TrafficReport.page(t0, interval(3)) shouldBe Right(
+      report.page(t0, interval(3)) shouldBe Right(
         TrafficReport.Page(Seq(t0, interval(1), interval(2)), nextStart = None)
       )
     }
 
     "end a page after 100 intervals and say where the next one starts" in {
-      TrafficReport.page(t0, interval(100)) shouldBe Right(
+      report.page(t0, interval(100)) shouldBe Right(
         TrafficReport.Page((0L until 100L).map(interval), nextStart = None)
       )
-      TrafficReport.page(t0, interval(101)) shouldBe Right(
+      report.page(t0, interval(101)) shouldBe Right(
         TrafficReport.Page((0L until 100L).map(interval), nextStart = Some(interval(100)))
       )
     }
 
     "reject unaligned and empty ranges" in {
-      TrafficReport.page(t0.immediateSuccessor, interval(1)) shouldBe a[Left[?, ?]]
-      TrafficReport.page(t0, interval(1).immediateSuccessor) shouldBe a[Left[?, ?]]
-      TrafficReport.page(t0, t0) shouldBe a[Left[?, ?]]
-      TrafficReport.page(interval(1), t0) shouldBe a[Left[?, ?]]
+      report.page(t0.immediateSuccessor, interval(1)) shouldBe a[Left[?, ?]]
+      report.page(t0, interval(1).immediateSuccessor) shouldBe a[Left[?, ?]]
+      report.page(t0, t0) shouldBe a[Left[?, ?]]
+      report.page(interval(1), t0) shouldBe a[Left[?, ?]]
     }
   }
 

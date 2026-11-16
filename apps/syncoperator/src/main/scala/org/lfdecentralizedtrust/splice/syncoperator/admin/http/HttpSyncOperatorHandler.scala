@@ -14,7 +14,7 @@ import org.lfdecentralizedtrust.splice.util.Codec
 import java.time.{OffsetDateTime, ZoneOffset}
 import scala.concurrent.{ExecutionContext, Future}
 
-class HttpSyncOperatorHandler(reader: TrafficReportReader)(implicit
+class HttpSyncOperatorHandler(report: TrafficReport, reader: TrafficReportReader)(implicit
     ec: ExecutionContext,
     tracer: Tracer,
 ) extends v0.SyncOperatorHandler[AuthenticatedRequest]
@@ -32,7 +32,7 @@ class HttpSyncOperatorHandler(reader: TrafficReportReader)(implicit
       val range = for {
         start <- Codec.decode(Codec.OffsetDateTime)(startRecordTime)
         end <- Codec.decode(Codec.OffsetDateTime)(endRecordTime)
-        page <- TrafficReport.page(start, end)
+        page <- report.page(start, end)
       } yield page
       range match {
         case Left(error) => Future.failed(HttpErrorHandler.badRequest(error))

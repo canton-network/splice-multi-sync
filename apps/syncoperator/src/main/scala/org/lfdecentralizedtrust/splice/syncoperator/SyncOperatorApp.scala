@@ -125,13 +125,16 @@ class SyncOperatorApp(
             RSAVerifier.TimeoutsConfig(connectionTimeout, readTimeout),
           )
       }
+      trafficReport = TrafficReport(config.trafficReportIntervalLength.asJava)
       handler = new HttpSyncOperatorHandler(
+        trafficReport,
         new TrafficReportReader(
+          trafficReport,
           clock,
           synchronizerId,
           sequencerAdminConnection,
           synchronizerNodes.successor.map(_.sequencerAdminConnection),
-        )
+        ),
       )
       route = withTraceContext { implicit traceContext =>
         HttpErrorHandler(loggerFactory)(traceContext) {

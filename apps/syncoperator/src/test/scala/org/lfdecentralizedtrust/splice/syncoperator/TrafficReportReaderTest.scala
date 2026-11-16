@@ -112,8 +112,13 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
       current: SequencerAdminConnection,
       successor: Option[SequencerAdminConnection] = None,
   ) =
-    new TrafficReportReader(new SimClock(now, loggerFactory), synchronizerId, current, successor)
-      .read(starts)
+    new TrafficReportReader(
+      TrafficReport(Duration.ofMinutes(10)),
+      new SimClock(now, loggerFactory),
+      synchronizerId,
+      current,
+      successor,
+    ).read(starts)
       .map(_.map { i =>
         (i.startRecordTime.toInstant, i.endRecordTime.toInstant, i.status, i.trafficConsumed)
       })

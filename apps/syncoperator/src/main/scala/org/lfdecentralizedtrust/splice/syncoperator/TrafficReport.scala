@@ -9,17 +9,13 @@ import com.digitalasset.canton.topology.{Member, ParticipantId}
 
 import java.time.Duration
 
-/** The intervals of the traffic report: 10 minutes of record time each, aligned in UTC at XX:00,
-  * XX:10, and so on.
+/** The intervals of the traffic report, aligned at multiples of their length since the Unix epoch.
+  * At the default length of 10 minutes, they start at XX:00, XX:10, and so on in UTC.
   */
-object TrafficReport {
+final case class TrafficReport(intervalLength: Duration) {
+  import TrafficReport.*
 
-  val IntervalLength: Duration = Duration.ofMinutes(10)
-
-  /** Each interval takes a reading from the sequencer, so a response covers at most this many. */
-  val PageSize: Int = 100
-
-  private val intervalMicros: Long = IntervalLength.toNanos / 1000
+  private val intervalMicros: Long = intervalLength.toNanos / 1000
 
   def alignDown(time: CantonTimestamp): CantonTimestamp =
     CantonTimestamp.assertFromLong(time.toMicros - Math.floorMod(time.toMicros, intervalMicros))
@@ -30,18 +26,24 @@ object TrafficReport {
     * period can still race a prune and report a wrong total.
     */
   def firstReadableStart(pruningLowerBound: CantonTimestamp): CantonTimestamp =
-    alignDown(pruningLowerBound).plus(IntervalLength)
+    alignDown(pruningLowerBound).plus(intervalLength)
 
   /** The first page of the intervals in `[start, end)`, if both are aligned. */
   def page(start: CantonTimestamp, end: CantonTimestamp): Either[String, Page] =
     if (alignDown(start) != start || alignDown(end) != end)
-      Left(s"Start and end must be aligned to 10-minute boundaries, but got [$start, $end)")
+      Left(s"Start and end must be aligned to intervals of $intervalLength, but got [$start, $end)")
     else if (start >= end) Left(s"Start must be before end, but got [$start, $end)")
     else {
       val starts =
-        Iterator.iterate(start)(_.plus(IntervalLength)).takeWhile(_ < end).take(PageSize).toSeq
-      Right(Page(starts, starts.lastOption.map(_.plus(IntervalLength)).filter(_ < end)))
+        Iterator.iterate(start)(_.plus(intervalLength)).takeWhile(_ < end).take(PageSize).toSeq
+      Right(Page(starts, starts.lastOption.map(_.plus(intervalLength)).filter(_ < end)))
     }
+}
+
+object TrafficReport {
+
+  /** Each interval takes a reading from the sequencer, so a response covers at most this many. */
+  val PageSize: Int = 100
 
   /** The traffic charged to participants between two readings of the sequencer's traffic states.
     * A participant without a reading at the start joined since then and counts from zero. One

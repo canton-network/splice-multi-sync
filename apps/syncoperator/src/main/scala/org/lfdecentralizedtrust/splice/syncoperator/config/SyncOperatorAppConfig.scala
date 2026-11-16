@@ -100,6 +100,8 @@ case class SyncOperatorAppBackendConfig(
     lsuDumpPath: Option[Path] = None,
     trafficControl: SyncOperatorTrafficControlConfig = SyncOperatorTrafficControlConfig(),
     auth: AuthConfig,
+    // The length of the traffic report's intervals.
+    trafficReportIntervalLength: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(10),
     override val automation: AutomationConfig = AutomationConfig(),
     parameters: SpliceParametersConfig = SpliceParametersConfig(batching = BatchingConfig()),
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration =

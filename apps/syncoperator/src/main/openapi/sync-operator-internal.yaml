@@ -15,8 +15,10 @@ paths:
     get:
       description: |
         Returns the traffic charged to the participants of the synchronizer this app operates,
-        for each 10-minute interval of record time in `[start_record_time, end_record_time)`.
-        Intervals are aligned at XX:00, XX:10, ... UTC, so both bounds must be aligned too.
+        for each interval of record time in `[start_record_time, end_record_time)`.
+        Intervals are aligned at multiples of their length since the Unix epoch, so both bounds
+        must be aligned too. At the default length of 10 minutes, they start at XX:00, XX:10, ...
+        UTC.
         A response covers at most 100 intervals. If it has `next_start_record_time`, request the
         rest of the range from there.
       tags: [sync_operator]

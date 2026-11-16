@@ -182,8 +182,8 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
       val bob = bobValidatorBackend.participantClientWithAdminToken
 
       val last =
-        TrafficReport.alignDown(env.environment.clock.now).minus(TrafficReport.IntervalLength)
-      val end = last.plus(TrafficReport.IntervalLength)
+        trafficReport.alignDown(env.environment.clock.now).minus(trafficReport.intervalLength)
+      val end = last.plus(trafficReport.intervalLength)
       // An interval is reported once the sequencer has sequenced past its end, and an idle
       // synchronizer does not advance, so bob submits a topology transaction.
       bob.parties.enable(
@@ -194,7 +194,7 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
       )
 
       clue("the interval that is not over is Undetermined") {
-        reportedInterval(TrafficReport.alignDown(env.environment.clock.now)).status shouldBe
+        reportedInterval(trafficReport.alignDown(env.environment.clock.now)).status shouldBe
           Status.Undetermined
       }
 
@@ -218,13 +218,13 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
       implicit val sys = env.actorSystem
       registerHttpConnectionPoolsCleanup(env)
 
-      val start = TrafficReport.alignDown(env.environment.clock.now)
+      val start = trafficReport.alignDown(env.environment.clock.now)
       val request = Get(
         Uri(s"${syncOperatorBackend.httpClientConfig.url}/api/syncoperator/v0/traffic-report")
           .withQuery(
             Uri.Query(
               "start_record_time" -> start.toInstant.toString,
-              "end_record_time" -> start.plus(TrafficReport.IntervalLength).toInstant.toString,
+              "end_record_time" -> start.plus(trafficReport.intervalLength).toInstant.toString,
             )
           )
       )
@@ -254,6 +254,9 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
   private def unlimitedTrafficTrigger(implicit env: SpliceTestConsoleEnvironment) =
     syncOperatorBackend.appState.automation.trigger[UnlimitedTrafficTrigger]
 
+  private def trafficReport(implicit env: SpliceTestConsoleEnvironment) =
+    TrafficReport(syncOperatorBackend.config.trafficReportIntervalLength.asJava)
+
   private def trafficStates(time: CantonTimestamp)(implicit env: SpliceTestConsoleEnvironment) =
     LsuTrafficState
       .fromTrustedByteString(sequencer.getLsuTrafficControlState(Some(time)).futureValue)
@@ -264,7 +267,7 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
       env: SpliceTestConsoleEnvironment
   ): TrafficReportInterval = {
     val report =
-      syncOperatorBackend.getTrafficReport(start, start.plus(TrafficReport.IntervalLength))
+      syncOperatorBackend.getTrafficReport(start, start.plus(trafficReport.intervalLength))
     report.nextStartRecordTime shouldBe None
     report.intervals.loneElement
   }
