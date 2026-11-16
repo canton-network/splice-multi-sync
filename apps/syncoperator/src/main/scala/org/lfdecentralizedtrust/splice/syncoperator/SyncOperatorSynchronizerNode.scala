@@ -102,7 +102,8 @@ object SyncOperatorSynchronizerNode {
     Status.FAILED_PRECONDITION
       .withDescription(
         s"synchronizer-nodes.<node>.$field is not configured, which a logical synchronizer " +
-          "upgrade requires. Configure it on both the current and the successor node."
+          "upgrade requires. Configure it on the node being upgraded and on the node it is " +
+          "upgraded to."
       )
       .asRuntimeException()
 

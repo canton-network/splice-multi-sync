@@ -40,6 +40,8 @@ import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorAppClientConfig,
   SyncOperatorLsuConfig,
   SyncOperatorMediatorConfig,
+  SyncOperatorRollForwardLsuConfig,
+  SyncOperatorRollForwardLsuTimestampConfig,
   SyncOperatorSequencerConfig,
   SyncOperatorSynchronizerNodeConfig,
   SyncOperatorSynchronizerNodesConfig,
@@ -1042,6 +1044,12 @@ object SpliceConfig {
       deriveReader[SyncOperatorSynchronizerNodesConfig]
     implicit val syncOperatorLsuConfigReader: ConfigReader[SyncOperatorLsuConfig] =
       deriveReader[SyncOperatorLsuConfig]
+    implicit val syncOperatorRollForwardLsuTimestampConfigReader
+        : ConfigReader[SyncOperatorRollForwardLsuTimestampConfig] =
+      deriveReader[SyncOperatorRollForwardLsuTimestampConfig]
+    implicit val syncOperatorRollForwardLsuConfigReader
+        : ConfigReader[SyncOperatorRollForwardLsuConfig] =
+      deriveReader[SyncOperatorRollForwardLsuConfig]
     implicit val syncOperatorTrafficControlConfigReader
         : ConfigReader[SyncOperatorTrafficControlConfig] =
       deriveReader[SyncOperatorTrafficControlConfig]
@@ -1060,6 +1068,20 @@ object SpliceConfig {
             (),
             ConfigValidationFailed(
               "If synchronizer-nodes.successor is configured, lsu-dump-path must be configured"
+            ),
+          )
+          _ <- Either.cond(
+            conf.rollForwardLsu.isEmpty || conf.synchronizerNodes.legacy.isDefined,
+            (),
+            ConfigValidationFailed(
+              "If roll-forward-lsu is configured, synchronizer-nodes.legacy must be configured"
+            ),
+          )
+          _ <- Either.cond(
+            conf.rollForwardLsu.isEmpty || conf.lsuDumpPath.isDefined,
+            (),
+            ConfigValidationFailed(
+              "If roll-forward-lsu is configured, lsu-dump-path must be configured"
             ),
           )
         } yield conf
@@ -1419,6 +1441,12 @@ object SpliceConfig {
       deriveWriter[SyncOperatorSynchronizerNodesConfig]
     implicit val syncOperatorLsuConfigWriter: ConfigWriter[SyncOperatorLsuConfig] =
       deriveWriter[SyncOperatorLsuConfig]
+    implicit val syncOperatorRollForwardLsuTimestampConfigWriter
+        : ConfigWriter[SyncOperatorRollForwardLsuTimestampConfig] =
+      deriveWriter[SyncOperatorRollForwardLsuTimestampConfig]
+    implicit val syncOperatorRollForwardLsuConfigWriter
+        : ConfigWriter[SyncOperatorRollForwardLsuConfig] =
+      deriveWriter[SyncOperatorRollForwardLsuConfig]
     implicit val syncOperatorTrafficControlConfigWriter
         : ConfigWriter[SyncOperatorTrafficControlConfig] =
       deriveWriter[SyncOperatorTrafficControlConfig]
