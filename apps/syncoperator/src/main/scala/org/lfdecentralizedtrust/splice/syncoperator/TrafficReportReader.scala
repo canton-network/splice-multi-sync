@@ -21,10 +21,8 @@ import org.lfdecentralizedtrust.splice.syncoperator.TrafficReportReader.UpgradeT
 import java.time.ZoneOffset
 import scala.concurrent.{ExecutionContext, Future}
 
-/** Reads the traffic charged to participants in the intervals of the traffic report from the
-  * sequencer's traffic journal.
-  *
-  * Reads every participant's cumulative consumed traffic at both ends of an interval.
+/** Reads every participant's cumulative consumed traffic from the sequencer's traffic journal at
+  * both ends of each interval of the traffic report.
   * ReconcileDedicatedSynchronizerParametersTrigger keeps the base rate at zero, so extra traffic is
   * all of it, the difference is exactly what the interval charged, and it is the same on every
   * sequencer.
