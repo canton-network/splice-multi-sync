@@ -139,7 +139,12 @@ class TrafficReportReader(
       status: Status,
       trafficConsumed: Option[Long] = None,
   ) =
-    TrafficReportInterval(start.toInstant.atOffset(ZoneOffset.UTC), status, trafficConsumed)
+    TrafficReportInterval(
+      startRecordTime = start.toInstant.atOffset(ZoneOffset.UTC),
+      endRecordTime = start.plus(TrafficReport.IntervalLength).toInstant.atOffset(ZoneOffset.UTC),
+      status = status,
+      trafficConsumed = trafficConsumed,
+    )
 }
 
 object TrafficReportReader {

@@ -6,7 +6,6 @@ package org.lfdecentralizedtrust.splice.syncoperator
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.TrafficState
 import com.digitalasset.canton.topology.{Member, ParticipantId}
-import org.lfdecentralizedtrust.splice.store.Limit
 
 import java.time.Duration
 
@@ -16,6 +15,9 @@ import java.time.Duration
 object TrafficReport {
 
   val IntervalLength: Duration = Duration.ofMinutes(10)
+
+  /** Each interval takes a reading from the sequencer, so a response covers at most this many. */
+  val PageSize: Int = 100
 
   private val intervalMicros: Long = IntervalLength.toNanos / 1000
 
@@ -30,23 +32,15 @@ object TrafficReport {
   def firstReadableStart(pruningLowerBound: CantonTimestamp): CantonTimestamp =
     alignDown(pruningLowerBound).plus(IntervalLength)
 
-  /** The starts of the intervals in `[start, end)`, if both are aligned and the range has at most
-    * one page of intervals.
-    */
-  def intervalStarts(
-      start: CantonTimestamp,
-      end: CantonTimestamp,
-  ): Either[String, Seq[CantonTimestamp]] =
+  /** The first page of the intervals in `[start, end)`, if both are aligned. */
+  def page(start: CantonTimestamp, end: CantonTimestamp): Either[String, Page] =
     if (alignDown(start) != start || alignDown(end) != end)
       Left(s"Start and end must be aligned to 10-minute boundaries, but got [$start, $end)")
     else if (start >= end) Left(s"Start must be before end, but got [$start, $end)")
     else {
-      val count = (end.toMicros - start.toMicros) / intervalMicros
-      if (count > Limit.DefaultMaxPageSize)
-        Left(
-          s"[$start, $end) has $count intervals, at most ${Limit.DefaultMaxPageSize} are allowed"
-        )
-      else Right((0L until count).map(i => start.plus(IntervalLength.multipliedBy(i))))
+      val starts =
+        Iterator.iterate(start)(_.plus(IntervalLength)).takeWhile(_ < end).take(PageSize).toSeq
+      Right(Page(starts, starts.lastOption.map(_.plus(IntervalLength)).filter(_ < end)))
     }
 
   /** The traffic charged to participants between two readings of the sequencer's traffic states.
@@ -61,4 +55,7 @@ object TrafficReport {
       state.extraTrafficConsumed.value -
         atStart.get(participant).fold(0L)(_.extraTrafficConsumed.value)
     }.sum
+
+  /** The starts of a page of intervals, and where the next page starts if the range goes on. */
+  final case class Page(starts: Seq[CantonTimestamp], nextStart: Option[CantonTimestamp])
 }

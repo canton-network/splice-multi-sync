@@ -21,7 +21,7 @@ object HttpSyncOperatorAppClient {
   case class GetTrafficReport(start: CantonTimestamp, end: CantonTimestamp)
       extends BaseCommand[
         http.GetTrafficReportResponse,
-        Seq[definitions.TrafficReportInterval],
+        definitions.GetTrafficReportResponse,
       ] {
 
     override def submitRequest(client: Client, headers: List[HttpHeader]) =
@@ -32,7 +32,7 @@ object HttpSyncOperatorAppClient {
       )
 
     override def handleOk()(implicit decoder: TemplateJsonDecoder) = {
-      case http.GetTrafficReportResponse.OK(response) => Right(response.intervals)
+      case http.GetTrafficReportResponse.OK(response) => Right(response)
     }
   }
 }

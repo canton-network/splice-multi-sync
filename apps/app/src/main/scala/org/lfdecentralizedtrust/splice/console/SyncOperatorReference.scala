@@ -25,12 +25,12 @@ abstract class SyncOperatorAppReference(
   override def basePath = "/api/syncoperator"
 
   @Help.Summary(
-    "Get the traffic charged to participants for each 10-minute interval in [start, end)"
+    "Get the traffic charged to participants per 10-minute interval, for the first page of [start, end)"
   )
   def getTrafficReport(
       start: CantonTimestamp,
       end: CantonTimestamp,
-  ): Seq[definitions.TrafficReportInterval] =
+  ): definitions.GetTrafficReportResponse =
     consoleEnvironment.run {
       httpCommand(HttpSyncOperatorAppClient.GetTrafficReport(start, end))
     }

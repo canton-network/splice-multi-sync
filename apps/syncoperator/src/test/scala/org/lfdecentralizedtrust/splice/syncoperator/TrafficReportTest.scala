@@ -42,20 +42,27 @@ class TrafficReportTest extends AnyWordSpec with BaseTest {
     }
   }
 
-  "intervalStarts" should {
+  "page" should {
     "list the intervals of an aligned range" in {
-      TrafficReport.intervalStarts(t0, interval(3)) shouldBe Right(
-        Seq(t0, interval(1), interval(2))
+      TrafficReport.page(t0, interval(3)) shouldBe Right(
+        TrafficReport.Page(Seq(t0, interval(1), interval(2)), nextStart = None)
       )
-      TrafficReport.intervalStarts(t0, interval(1000)).map(_.size) shouldBe Right(1000)
     }
 
-    "reject unaligned, empty and too large ranges" in {
-      TrafficReport.intervalStarts(t0.immediateSuccessor, interval(1)) shouldBe a[Left[?, ?]]
-      TrafficReport.intervalStarts(t0, interval(1).immediateSuccessor) shouldBe a[Left[?, ?]]
-      TrafficReport.intervalStarts(t0, t0) shouldBe a[Left[?, ?]]
-      TrafficReport.intervalStarts(interval(1), t0) shouldBe a[Left[?, ?]]
-      TrafficReport.intervalStarts(t0, interval(1001)) shouldBe a[Left[?, ?]]
+    "end a page after 100 intervals and say where the next one starts" in {
+      TrafficReport.page(t0, interval(100)) shouldBe Right(
+        TrafficReport.Page((0L until 100L).map(interval), nextStart = None)
+      )
+      TrafficReport.page(t0, interval(101)) shouldBe Right(
+        TrafficReport.Page((0L until 100L).map(interval), nextStart = Some(interval(100)))
+      )
+    }
+
+    "reject unaligned and empty ranges" in {
+      TrafficReport.page(t0.immediateSuccessor, interval(1)) shouldBe a[Left[?, ?]]
+      TrafficReport.page(t0, interval(1).immediateSuccessor) shouldBe a[Left[?, ?]]
+      TrafficReport.page(t0, t0) shouldBe a[Left[?, ?]]
+      TrafficReport.page(interval(1), t0) shouldBe a[Left[?, ?]]
     }
   }
 

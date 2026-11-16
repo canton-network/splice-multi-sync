@@ -11,7 +11,7 @@ import org.lfdecentralizedtrust.splice.http.v0.{definitions, sync_operator as v0
 import org.lfdecentralizedtrust.splice.syncoperator.{TrafficReport, TrafficReportReader}
 import org.lfdecentralizedtrust.splice.util.Codec
 
-import java.time.OffsetDateTime
+import java.time.{OffsetDateTime, ZoneOffset}
 import scala.concurrent.{ExecutionContext, Future}
 
 class HttpSyncOperatorHandler(reader: TrafficReportReader)(implicit
@@ -32,14 +32,21 @@ class HttpSyncOperatorHandler(reader: TrafficReportReader)(implicit
       val range = for {
         start <- Codec.decode(Codec.OffsetDateTime)(startRecordTime)
         end <- Codec.decode(Codec.OffsetDateTime)(endRecordTime)
-        starts <- TrafficReport.intervalStarts(start, end)
-      } yield starts
+        page <- TrafficReport.page(start, end)
+      } yield page
       range match {
         case Left(error) => Future.failed(HttpErrorHandler.badRequest(error))
-        case Right(starts) =>
+        case Right(page) =>
           reader
-            .read(starts)
-            .map(intervals => respond.OK(definitions.GetTrafficReportResponse(intervals.toVector)))
+            .read(page.starts)
+            .map(intervals =>
+              respond.OK(
+                definitions.GetTrafficReportResponse(
+                  intervals.toVector,
+                  page.nextStart.map(_.toInstant.atOffset(ZoneOffset.UTC)),
+                )
+              )
+            )
       }
     }
   }

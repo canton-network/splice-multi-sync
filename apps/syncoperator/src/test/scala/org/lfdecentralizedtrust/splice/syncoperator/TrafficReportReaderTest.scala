@@ -114,14 +114,18 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
   ) =
     new TrafficReportReader(new SimClock(now, loggerFactory), synchronizerId, current, successor)
       .read(starts)
-      .map(_.map(i => (i.startRecordTime.toInstant, i.status, i.trafficConsumed)))
+      .map(_.map { i =>
+        (i.startRecordTime.toInstant, i.endRecordTime.toInstant, i.status, i.trafficConsumed)
+      })
 
   private def ok(n: Long, trafficConsumed: Long) =
-    (interval(n).toInstant, Status.Ok, Some(trafficConsumed))
+    (interval(n).toInstant, interval(n + 1).toInstant, Status.Ok, Some(trafficConsumed))
 
-  private def undetermined(n: Long) = (interval(n).toInstant, Status.Undetermined, None)
+  private def undetermined(n: Long) =
+    (interval(n).toInstant, interval(n + 1).toInstant, Status.Undetermined, None)
 
-  private def cannotProvide(n: Long) = (interval(n).toInstant, Status.CannotProvide, None)
+  private def cannotProvide(n: Long) =
+    (interval(n).toInstant, interval(n + 1).toInstant, Status.CannotProvide, None)
 
   "TrafficReportReader" should {
 

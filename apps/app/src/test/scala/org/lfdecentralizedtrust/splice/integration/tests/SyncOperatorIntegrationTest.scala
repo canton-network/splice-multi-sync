@@ -262,10 +262,12 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
 
   private def reportedInterval(start: CantonTimestamp)(implicit
       env: SpliceTestConsoleEnvironment
-  ): TrafficReportInterval =
-    syncOperatorBackend
-      .getTrafficReport(start, start.plus(TrafficReport.IntervalLength))
-      .loneElement
+  ): TrafficReportInterval = {
+    val report =
+      syncOperatorBackend.getTrafficReport(start, start.plus(TrafficReport.IntervalLength))
+    report.nextStartRecordTime shouldBe None
+    report.intervals.loneElement
+  }
 
   private def extraTrafficLimit(member: Member)(implicit
       env: SpliceTestConsoleEnvironment
