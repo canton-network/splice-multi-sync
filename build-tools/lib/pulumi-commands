@@ -12,6 +12,15 @@ function subcmd_pulumi() {
 
     pulumi_project="$1"
     pulumi_cmd="$2"
+    if [ $pulumi_project == "sv-canton" ]; then
+        if [ -z "${SPLICE_SV:-}" -a -z "${SPLICE_DSYNC_NODE:-}" ]; then
+        _error "Either SPLICE_SV or SPLICE_DSYNC_NODE must be specified for sv-canton stack"
+        fi
+        if [ -z "${SPLICE_MIGRATION_ID:-}" ]; then
+            _error "SPLICE_MIGRATION_ID must be specified for sv-canton stack"
+        fi
+    fi
+
     pulumi_stack=$(_resolve_pulumi_stack "$pulumi_project")
     shift 2
 
@@ -639,6 +648,30 @@ subcommand_whitelist[pulumi_up_canton]="Up the sv-canton migrations"
 function subcmd_pulumi_up_canton() {
   _info "Updating sv-canton stacks"
   _pulumi_automation_run_up "sv-canton"
+}
+
+###
+subcommand_whitelist[pulumi_preview_dsync]="Preview the changes for the dsync operator stacks"
+
+function subcmd_pulumi_preview_dsync() {
+  npm --prefix "${SPLICE_ROOT}/cluster/pulumi/dsync" run preview
+}
+
+
+###
+subcommand_whitelist[pulumi_down_dsync]="Down the dsync operator stacks"
+
+function subcmd_pulumi_down_dsync() {
+  _info "Resetting dsync stacks"
+  _pulumi_automation_run_down "dsync"
+}
+
+###
+subcommand_whitelist[pulumi_up_dsync]="Up the dsync operator stacks"
+
+function subcmd_pulumi_up_dsync() {
+  _info "Updating dsync stacks"
+  _pulumi_automation_run_up "dsync"
 }
 
 ###
