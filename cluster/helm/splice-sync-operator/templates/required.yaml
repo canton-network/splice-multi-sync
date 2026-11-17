@@ -8,3 +8,7 @@
 {{ $_ := required ".Values.defaultJvmOptions is required." .Values.defaultJvmOptions }}
 
 {{ $_ := required ".Values.sequencerAddress is required." .Values.sequencerAddress }}
+
+{{ $_ := required ".Values.auth.audience is required." (.Values.auth).audience }}
+
+{{ $_ := required ".Values.auth.jwksUrl is required." (.Values.auth).jwksUrl }}
