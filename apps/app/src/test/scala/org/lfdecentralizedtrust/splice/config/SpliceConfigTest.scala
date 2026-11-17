@@ -533,5 +533,93 @@ class SpliceConfigTest extends AsyncWordSpec with BaseTest {
         "If synchronizer-nodes.successor is configured, lsu-dump-path must be configured"
       )
     }
+
+    "load a roll-forward LSU and its legacy node" in {
+      val syncOperatorTopology = ConfigFactory.parseFile(
+        new java.io.File("apps/app/src/test/resources/sync-operator-topology.conf")
+      )
+      val rollForward = ConfigFactory.parseString(
+        """
+          |canton.sync-operator-apps.syncOperator {
+          |  synchronizer-nodes.legacy {
+          |    sequencer.admin-api.port = 5809
+          |    mediator.admin-api.port = 5807
+          |  }
+          |  roll-forward-lsu {
+          |    new-physical-synchronizer-serial = 2
+          |    new-physical-synchronizer-protocol-version = "37"
+          |    export-times {
+          |      topology-export-time = { type = "timestamp", time = "2026-12-01T00:00:00Z" }
+          |      traffic-export-time = { type = "timestamp", time = "2026-12-01T01:00:00Z" }
+          |    }
+          |  }
+          |  lsu-dump-path = "/tmp/sync-operator-lsu"
+          |}
+          """.stripMargin
+      )
+      val loaded =
+        SpliceConfig
+          .loadAndValidate(
+            CantonConfig.mergeConfigs(config, Seq(syncOperatorTopology, rollForward))
+          )
+          .value
+      val syncOperator = loaded.syncOperatorsByString("syncOperator")
+      val legacy = syncOperator.synchronizerNodes.legacy.value
+      legacy.sequencer.adminApi.port.unwrap shouldBe 5809
+      legacy.mediator.value.adminApi.port.unwrap shouldBe 5807
+      val rollForwardLsu = syncOperator.rollForwardLsu.value
+      rollForwardLsu.newPhysicalSynchronizerSerial.value shouldBe 2
+      rollForwardLsu.newPhysicalSynchronizerProtocolVersion shouldBe ProtocolVersion.v37
+      val exportTimes = rollForwardLsu.exportTimes.value
+      exportTimes.topologyExportTime.getTimestamp() shouldBe
+        CantonTimestamp.assertFromString("2026-12-01T00:00:00Z")
+      exportTimes.trafficExportTime.getTimestamp() shouldBe
+        CantonTimestamp.assertFromString("2026-12-01T01:00:00Z")
+    }
+
+    "reject a roll-forward LSU without a legacy node" in {
+      val syncOperatorTopology = ConfigFactory.parseFile(
+        new java.io.File("apps/app/src/test/resources/sync-operator-topology.conf")
+      )
+      val rollForward = ConfigFactory.parseString(
+        """
+          |canton.sync-operator-apps.syncOperator {
+          |  roll-forward-lsu {
+          |    new-physical-synchronizer-serial = 2
+          |    new-physical-synchronizer-protocol-version = "37"
+          |  }
+          |  lsu-dump-path = "/tmp/sync-operator-lsu"
+          |}
+          """.stripMargin
+      )
+      val buggyConfig = CantonConfig.mergeConfigs(config, Seq(syncOperatorTopology, rollForward))
+      SpliceConfig.loadAndValidate(buggyConfig).left.value.toString should include(
+        "If roll-forward-lsu is configured, synchronizer-nodes.legacy must be configured"
+      )
+    }
+
+    "reject a roll-forward LSU without an lsu dump path" in {
+      val syncOperatorTopology = ConfigFactory.parseFile(
+        new java.io.File("apps/app/src/test/resources/sync-operator-topology.conf")
+      )
+      val rollForward = ConfigFactory.parseString(
+        """
+          |canton.sync-operator-apps.syncOperator {
+          |  synchronizer-nodes.legacy {
+          |    sequencer.admin-api.port = 5809
+          |    mediator.admin-api.port = 5807
+          |  }
+          |  roll-forward-lsu {
+          |    new-physical-synchronizer-serial = 2
+          |    new-physical-synchronizer-protocol-version = "37"
+          |  }
+          |}
+          """.stripMargin
+      )
+      val buggyConfig = CantonConfig.mergeConfigs(config, Seq(syncOperatorTopology, rollForward))
+      SpliceConfig.loadAndValidate(buggyConfig).left.value.toString should include(
+        "If roll-forward-lsu is configured, lsu-dump-path must be configured"
+      )
+    }
   }
 }

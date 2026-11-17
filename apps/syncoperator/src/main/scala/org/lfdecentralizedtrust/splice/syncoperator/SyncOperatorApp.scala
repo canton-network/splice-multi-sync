@@ -25,9 +25,11 @@ import org.lfdecentralizedtrust.splice.environment.{
   SynchronizerNode,
   SynchronizerNodeService,
 }
+import org.lfdecentralizedtrust.splice.lsu.RollForwardLsuNodeInitializer
 import org.lfdecentralizedtrust.splice.syncoperator.automation.SyncOperatorAutomationService
 import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorAppBackendConfig,
+  SyncOperatorRollForwardLsuConfig,
   SyncOperatorSynchronizerNodeConfig,
 }
 import org.lfdecentralizedtrust.splice.syncoperator.metrics.SyncOperatorAppMetrics
@@ -69,7 +71,7 @@ class SyncOperatorApp(
     val synchronizerNodes = SynchronizerNode.LocalSynchronizerNodes(
       current = newSynchronizerNode(config.synchronizerNodes.current),
       successor = config.synchronizerNodes.successor.map(newSynchronizerNode),
-      legacy = None,
+      legacy = config.synchronizerNodes.legacy.map(newSynchronizerNode),
       additionalLegacy = Seq.empty,
     )
     val synchronizerNodeService = new SynchronizerNodeService(
@@ -80,6 +82,11 @@ class SyncOperatorApp(
     )
     val sequencerAdminConnection = synchronizerNodes.current.sequencerAdminConnection
     for {
+      _ <- config.rollForwardLsu.fold(Future.unit) { rollForwardConfig =>
+        appInitStep("Perform the roll-forward LSU") {
+          rollForward(synchronizerNodes, rollForwardConfig)
+        }
+      }
       physicalSynchronizerId <- appInitStep("Get the synchronizer id from the sequencer") {
         servedSynchronizerId(sequencerAdminConnection)
       }
@@ -140,6 +147,34 @@ class SyncOperatorApp(
       nodeConfig,
       loggerFactory.getTracedLogger(classOf[SyncOperatorSynchronizerNode]),
     )
+
+  /** Performs a roll-forward LSU: initializes the current node from the legacy one. The operator
+    * has no participant to migrate, so that is the whole job.
+    */
+  private def rollForward(
+      nodes: SynchronizerNode.LocalSynchronizerNodes[SyncOperatorSynchronizerNode],
+      rollForwardConfig: SyncOperatorRollForwardLsuConfig,
+  )(implicit traceContext: TraceContext): Future[Unit] =
+    new RollForwardLsuNodeInitializer(
+      nodes,
+      config.lsuDumpPath.getOrElse(
+        throw new IllegalArgumentException(
+          "lsu-dump-path must be set when roll-forward-lsu is configured"
+        )
+      ),
+      rollForwardConfig.newPhysicalSynchronizerSerial,
+      rollForwardConfig.newPhysicalSynchronizerProtocolVersion,
+      rollForwardConfig.exportTimes.map(times =>
+        RollForwardLsuNodeInitializer.ExportTimes(
+          times.topologyExportTime,
+          times.trafficExportTime,
+          upgradeTime = None,
+        )
+      ),
+      clock,
+      loggerFactory,
+      retryProvider,
+    ).initializeCurrentNode().map(_ => ())
 
   /** An upgraded node still reports the same logical synchronizer id, so without a successor to
     * switch to this app would grant traffic on a synchronizer nobody is connected to. The
@@ -271,7 +306,7 @@ object SyncOperatorApp {
     override def close(): Unit = {
       val instances =
         Seq[AutoCloseable](automation, storage, synchronizerNodes.current) ++
-          synchronizerNodes.successor.toList
+          synchronizerNodes.successor.toList ++ synchronizerNodes.legacy.toList
       LifeCycle.close(instances*)(logger)
     }
   }
