@@ -20,7 +20,6 @@ import org.lfdecentralizedtrust.splice.automation.Trigger
 import org.lfdecentralizedtrust.splice.config.ConfigTransforms
 import org.lfdecentralizedtrust.splice.console.ParticipantClientReference
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
-import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval.Status
 import org.lfdecentralizedtrust.splice.integration.EnvironmentDefinition
 import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   IntegrationTest,
@@ -251,13 +250,12 @@ class SyncOperatorLsuIntegrationTest
             s"the traffic report reads the interval that spans $upgradeTime from both sequencers"
           ) {
             val beforeStart = acrossStart.minus(trafficReport.intervalLength)
-            val intervals = eventually() {
-              val intervals =
-                syncOperatorBackend.getTrafficReport(beforeStart, acrossEnd).intervals
-              intervals.map(_.status) shouldBe Seq(Status.Ok, Status.Ok)
-              intervals
+            // The report rejects an interval the successor has not sequenced past yet.
+            eventually() {
+              trafficStates(successor, acrossEnd)
             }
-            inside(intervals.flatMap(_.trafficConsumed)) { case Seq(before, across) =>
+            val intervals = syncOperatorBackend.getTrafficReport(beforeStart, acrossEnd).intervals
+            inside(intervals.map(_.trafficConsumed)) { case Seq(before, across) =>
               before shouldBe TrafficReport.participantsConsumed(
                 trafficStates(sequencer, beforeStart),
                 trafficStates(sequencer, acrossStart),

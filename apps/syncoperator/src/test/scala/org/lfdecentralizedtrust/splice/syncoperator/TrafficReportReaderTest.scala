@@ -26,7 +26,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.nonempty.NonEmpty
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologyResult
-import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval.Status
+import org.lfdecentralizedtrust.splice.syncoperator.TrafficReportReader.{cannotProvide, notOver}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.{Duration, Instant}
@@ -116,35 +116,41 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
       current,
       successor,
     ).read(starts)
-      .map(_.map { i =>
-        (i.startRecordTime.toInstant, i.endRecordTime.toInstant, i.status, i.trafficConsumed)
-      })
+      .map(_.map(_.map { i =>
+        (i.startRecordTime.toInstant, i.endRecordTime.toInstant, i.trafficConsumed)
+      }))
 
   private def ok(n: Long, trafficConsumed: Long) =
-    (interval(n).toInstant, interval(n + 1).toInstant, Status.Ok, Some(trafficConsumed))
-
-  private def undetermined(n: Long) =
-    (interval(n).toInstant, interval(n + 1).toInstant, Status.Undetermined, None)
-
-  private def cannotProvide(n: Long) =
-    (interval(n).toInstant, interval(n + 1).toInstant, Status.CannotProvide, None)
+    (interval(n).toInstant, interval(n + 1).toInstant, trafficConsumed)
 
   "TrafficReportReader" should {
 
-    "report Undetermined from the first interval the sequencer has not sequenced past" in {
+    "report the traffic consumed in each interval" in {
+      val sequencer =
+        mockSequencer(Map(interval(0) -> 100, interval(1) -> 130, interval(2) -> 150))
+      read(Seq(interval(0), interval(1)), sequencer)
+        .map(_ shouldBe Right(Seq(ok(0, 30), ok(1, 20))))
+    }
+
+    "reject a range with an interval the sequencer has not sequenced past" in {
       val sequencer =
         mockSequencer(Map(interval(0) -> 100, interval(1) -> 130, interval(2) -> 150))
       read((0L until 4L).map(interval), sequencer)
-        .map(_ shouldBe Seq(ok(0, 30), ok(1, 20), undetermined(2), undetermined(3)))
+        .map(_ shouldBe Left(notOver(interval(2), interval(3))))
     }
 
-    "report the intervals the sequencer pruned as CannotProvide" in {
+    "reject a range with an interval the sequencer pruned" in {
       val sequencer = mockSequencer(
         Map(interval(2) -> 200, interval(3) -> 260),
         pruningLowerBound = interval(1).plusSeconds(300),
       )
-      read(Seq(interval(0), interval(1), interval(2)), sequencer)
-        .map(_ shouldBe Seq(cannotProvide(0), cannotProvide(1), ok(2, 60)))
+      for {
+        pruned <- read(Seq(interval(1), interval(2)), sequencer)
+        afterPruning <- read(Seq(interval(2)), sequencer)
+      } yield {
+        pruned shouldBe Left(cannotProvide(interval(2)))
+        afterPruning shouldBe Right(Seq(ok(2, 60)))
+      }
     }
 
     "read the interval that spans an upgrade from both sequencers" in {
@@ -154,15 +160,20 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
       val successor = mockSequencer(Map(interval(1) -> 0, interval(2) -> 150))
       announceUpgrade(current, NonNegativeInt.zero, upgradeTime = interval(1).plusSeconds(300))
       read(Seq(interval(1)), current, Some(successor))
-        .map(_ shouldBe Seq(ok(1, 50)))
+        .map(_ shouldBe Right(Seq(ok(1, 50))))
     }
 
-    "report the interval that spans the upgrade as CannotProvide once the successor is the current sequencer" in {
+    "reject the interval that spans the upgrade once the successor is the current sequencer" in {
       val current =
         mockSequencer(Map(interval(1) -> 0, interval(2) -> 150, interval(3) -> 170))
       announceUpgrade(current, NonNegativeInt.one, upgradeTime = interval(1).plusSeconds(300))
-      read(Seq(interval(1), interval(2)), current)
-        .map(_ shouldBe Seq(cannotProvide(1), ok(2, 20)))
+      for {
+        spanning <- read(Seq(interval(1), interval(2)), current)
+        afterUpgrade <- read(Seq(interval(2)), current)
+      } yield {
+        spanning shouldBe Left(cannotProvide(interval(2)))
+        afterUpgrade shouldBe Right(Seq(ok(2, 20)))
+      }
     }
   }
 }

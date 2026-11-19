@@ -37,16 +37,18 @@ class HttpSyncOperatorHandler(report: TrafficReport, reader: TrafficReportReader
       range match {
         case Left(error) => Future.failed(HttpErrorHandler.badRequest(error))
         case Right(page) =>
-          reader
-            .read(page.starts)
-            .map(intervals =>
-              respond.OK(
-                definitions.GetTrafficReportResponse(
-                  intervals.toVector,
-                  page.nextStart.map(_.toInstant.atOffset(ZoneOffset.UTC)),
+          reader.read(page.starts).flatMap {
+            case Left(error) => Future.failed(HttpErrorHandler.badRequest(error))
+            case Right(intervals) =>
+              Future.successful(
+                respond.OK(
+                  definitions.GetTrafficReportResponse(
+                    intervals.toVector,
+                    page.nextStart.map(_.toInstant.atOffset(ZoneOffset.UTC)),
+                  )
                 )
               )
-            )
+          }
       }
     }
   }

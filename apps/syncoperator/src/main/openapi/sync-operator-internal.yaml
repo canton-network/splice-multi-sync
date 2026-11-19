@@ -21,6 +21,10 @@ paths:
         UTC.
         A response covers at most 100 intervals. If it has `next_start_record_time`, request the
         rest of the range from there.
+        Fails with 400 if the sequencer can't serve an interval of the response: the interval is
+        not over yet, the sequencer has not sequenced past its end yet, the sequencer pruned it, or
+        it predates the upgrade to the current sequencer. The error says which part of the range to
+        request instead.
       tags: [sync_operator]
       x-jvm-package: sync_operator
       operationId: "getTrafficReport"
@@ -70,7 +74,7 @@ components:
       required:
         - start_record_time
         - end_record_time
-        - status
+        - traffic_consumed
       properties:
         start_record_time:
           type: string
@@ -78,21 +82,7 @@ components:
         end_record_time:
           type: string
           format: date-time
-        status:
-          description: |
-            `Ok`: the interval is over and `traffic_consumed` is final.
-            `Undetermined`: the interval is not over yet, or the sequencer has not sequenced past
-            its end yet.
-            `CannotProvide`: the sequencer can't provide the interval anymore, because it pruned it
-            or because the interval predates the upgrade to the current sequencer.
-          type: string
-          enum:
-            - "Ok"
-            - "Undetermined"
-            - "CannotProvide"
         traffic_consumed:
-          description: |
-            Traffic charged to the participants in the interval, in bytes.
-            Only set if `status` is `Ok`.
+          description: Traffic charged to the participants in the interval, in bytes.
           type: integer
           format: int64

@@ -24,7 +24,6 @@ import org.lfdecentralizedtrust.splice.auth.AuthUtil
 import org.lfdecentralizedtrust.splice.config.ConfigTransforms
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
 import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval
-import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval.Status
 import org.lfdecentralizedtrust.splice.integration.EnvironmentDefinition
 import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   IntegrationTest,
@@ -193,21 +192,16 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
         synchronize = Some(NonNegativeDuration.ofSeconds(60)),
       )
 
-      clue("the interval that is not over is Undetermined") {
-        reportedInterval(trafficReport.alignDown(env.environment.clock.now)).status shouldBe
-          Status.Undetermined
-      }
-
       val interval = clue("the last interval that is over is reported") {
+        // The report rejects an interval the sequencer has not sequenced past yet.
         eventually(timeUntilSuccess = 1.minute) {
-          val interval = reportedInterval(last)
-          interval.status shouldBe Status.Ok
-          interval
+          trafficStates(end)
         }
+        reportedInterval(last)
       }
 
       clue("its total is the participants' traffic in the sequencer's journal over it") {
-        interval.trafficConsumed.value shouldBe TrafficReport.participantsConsumed(
+        interval.trafficConsumed shouldBe TrafficReport.participantsConsumed(
           trafficStates(last),
           trafficStates(end),
         )

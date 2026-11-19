@@ -14,8 +14,11 @@ import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.StatusRuntimeException
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
 import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval
-import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval.Status
-import org.lfdecentralizedtrust.splice.syncoperator.TrafficReportReader.UpgradeTimes
+import org.lfdecentralizedtrust.splice.syncoperator.TrafficReportReader.{
+  UpgradeTimes,
+  cannotProvide,
+  notOver,
+}
 
 import java.time.ZoneOffset
 import scala.concurrent.{ExecutionContext, Future}
@@ -37,30 +40,44 @@ class TrafficReportReader(
     successor: Option[SequencerAdminConnection],
 )(implicit ec: ExecutionContext) {
 
-  /** Reports the intervals that start at `starts`, which are consecutive. */
+  /** Reports the intervals that start at `starts`, which are consecutive, or says why the sequencer
+    * can't serve all of them.
+    */
   def read(
       starts: Seq[CantonTimestamp]
-  )(implicit tc: TraceContext): Future[Seq[TrafficReportInterval]] =
+  )(implicit tc: TraceContext): Future[Either[String, Seq[TrafficReportInterval]]] =
     for {
       upgrades <- upgradeTimes()
       pruningStatus <- current.getSequencerPruningStatus()
-      readableAfter = upgrades.currentFrom.fold(pruningStatus.lowerBound)(
-        _.max(pruningStatus.lowerBound)
+      firstReadable = report.firstReadableStart(
+        upgrades.currentFrom.fold(pruningStatus.lowerBound)(_.max(pruningStatus.lowerBound))
       )
-      (unreadable, readable) = starts.partition(_ < report.firstReadableStart(readableAfter))
-      consumed <- readable.headOption.fold(Future.successful(List.empty[Long]))(first =>
+      intervals <-
+        if (starts.headOption.exists(_ < firstReadable))
+          Future.successful(Left(cannotProvide(firstReadable)))
+        else readIntervals(upgrades, starts.toList)
+    } yield intervals
+
+  private def readIntervals(
+      upgrades: UpgradeTimes,
+      starts: List[CantonTimestamp],
+  )(implicit tc: TraceContext): Future[Either[String, Seq[TrafficReportInterval]]] =
+    starts.headOption
+      .fold(Future.successful(List.empty[Long]))(first =>
         readTrafficStates(upgrades, first).flatMap {
           case None => Future.successful(List.empty)
-          case Some(atFirst) => readConsumed(upgrades, readable.toList, atFirst)
+          case Some(atFirst) => readConsumed(upgrades, starts, atFirst)
         }
       )
-    } yield {
-      unreadable.map(interval(_, Status.CannotProvide)) ++
-        readable.zip(consumed).map { case (start, trafficConsumed) =>
-          interval(start, Status.Ok, Some(trafficConsumed))
-        } ++
-        readable.drop(consumed.size).map(interval(_, Status.Undetermined))
-    }
+      .map(consumed =>
+        starts.drop(consumed.size).headOption match {
+          case Some(start) => Left(notOver(start, start.plus(report.intervalLength)))
+          case None =>
+            Right(starts.zip(consumed).map { case (start, trafficConsumed) =>
+              interval(start, trafficConsumed)
+            })
+        }
+      )
 
   /** The traffic consumed in each interval that starts at `starts`, up to the first one the
     * sequencer has not sequenced past yet.
@@ -127,20 +144,23 @@ class TrafficReportReader(
       }
   }
 
-  private def interval(
-      start: CantonTimestamp,
-      status: Status,
-      trafficConsumed: Option[Long] = None,
-  ) =
+  private def interval(start: CantonTimestamp, trafficConsumed: Long) =
     TrafficReportInterval(
       startRecordTime = start.toInstant.atOffset(ZoneOffset.UTC),
       endRecordTime = start.plus(report.intervalLength).toInstant.atOffset(ZoneOffset.UTC),
-      status = status,
       trafficConsumed = trafficConsumed,
     )
 }
 
 object TrafficReportReader {
+  def cannotProvide(firstReadable: CantonTimestamp): String =
+    s"The sequencer pruned the intervals before $firstReadable, or they predate the upgrade to " +
+      s"it. Request a range that starts at or after $firstReadable."
+
+  def notOver(start: CantonTimestamp, end: CantonTimestamp): String =
+    s"The interval [$start, $end) is not over yet, or the sequencer has not sequenced past its " +
+      s"end. Request a range that ends at or before $start."
+
   private final case class UpgradeTimes(
       currentFrom: Option[CantonTimestamp],
       successorFrom: Option[CantonTimestamp],
