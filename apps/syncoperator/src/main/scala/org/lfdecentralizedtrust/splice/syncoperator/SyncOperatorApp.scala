@@ -16,6 +16,8 @@ import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.http.scaladsl.server.Route
+import org.apache.pekko.stream.Materializer
 import org.lfdecentralizedtrust.splice.admin.api.TraceContextDirectives.withTraceContext
 import org.lfdecentralizedtrust.splice.admin.http.{AdminRoutes, HttpErrorHandler}
 import org.lfdecentralizedtrust.splice.auth.{
@@ -24,6 +26,7 @@ import org.lfdecentralizedtrust.splice.auth.{
   HMACVerifier,
   RSAVerifier,
 }
+import org.lfdecentralizedtrust.splice.auth.AuthenticationOnlyAuthExtractor.AuthenticatedRequest
 import org.lfdecentralizedtrust.splice.config.SharedSpliceAppParameters
 import org.lfdecentralizedtrust.splice.environment.{
   MediatorAdminConnection,
@@ -33,7 +36,11 @@ import org.lfdecentralizedtrust.splice.environment.{
   SynchronizerNode,
   SynchronizerNodeService,
 }
-import org.lfdecentralizedtrust.splice.http.v0.sync_operator.SyncOperatorResource
+import org.lfdecentralizedtrust.splice.http.HttpServerMetrics
+import org.lfdecentralizedtrust.splice.http.v0.sync_operator.{
+  SyncOperatorHandler,
+  SyncOperatorResource,
+}
 import org.lfdecentralizedtrust.splice.syncoperator.admin.http.HttpSyncOperatorHandler
 import org.lfdecentralizedtrust.splice.syncoperator.automation.SyncOperatorAutomationService
 import org.lfdecentralizedtrust.splice.syncoperator.config.{
@@ -116,15 +123,6 @@ class SyncOperatorApp(
         config.trafficBalanceReconciliationDelay,
         loggerFactory,
       )
-      verifier = config.auth match {
-        case AuthConfig.Hs256Unsafe(audience, secret) => new HMACVerifier(audience, secret)
-        case AuthConfig.Rs256(audience, jwksUrl, connectionTimeout, readTimeout) =>
-          new RSAVerifier(
-            audience,
-            jwksUrl,
-            RSAVerifier.TimeoutsConfig(connectionTimeout, readTimeout),
-          )
-      }
       trafficReport = TrafficReport(config.trafficReportIntervalLength.asJava)
       handler = new HttpSyncOperatorHandler(
         trafficReport,
@@ -135,22 +133,9 @@ class SyncOperatorApp(
           synchronizerNodes.successor.map(_.sequencerAdminConnection),
         ),
       )
-      route = withTraceContext { implicit traceContext =>
-        HttpErrorHandler(loggerFactory)(traceContext) {
-          SyncOperatorResource.routes(
-            handler,
-            operation =>
-              metrics.httpServerMetrics.withMetrics("syncOperator")(operation).tflatMap { _ =>
-                AuthenticationOnlyAuthExtractor(
-                  verifier,
-                  loggerFactory,
-                  SyncOperatorApp.OAuthRealm,
-                )(traceContext)(operation)
-              },
-          )
-        }
-      }
-      _ = adminRoutes.updateRoute(route)
+      _ = adminRoutes.updateRoute(
+        SyncOperatorApp.routes(handler, config.auth, metrics.httpServerMetrics, loggerFactory)
+      )
     } yield {
       SyncOperatorApp.State(
         automation,
@@ -297,6 +282,37 @@ class SyncOperatorApp(
 
 object SyncOperatorApp {
   val OAuthRealm = "splice sync operator realm"
+
+  /** The HTTP API, which takes a JWT for the audience in `auth`. */
+  def routes(
+      handler: SyncOperatorHandler[AuthenticatedRequest],
+      auth: AuthConfig,
+      httpServerMetrics: HttpServerMetrics,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit mat: Materializer): Route = {
+    val verifier = auth match {
+      case AuthConfig.Hs256Unsafe(audience, secret) => new HMACVerifier(audience, secret)
+      case AuthConfig.Rs256(audience, jwksUrl, connectionTimeout, readTimeout) =>
+        new RSAVerifier(
+          audience,
+          jwksUrl,
+          RSAVerifier.TimeoutsConfig(connectionTimeout, readTimeout),
+        )
+    }
+    withTraceContext { implicit traceContext =>
+      HttpErrorHandler(loggerFactory)(traceContext) {
+        SyncOperatorResource.routes(
+          handler,
+          operation =>
+            httpServerMetrics.withMetrics("syncOperator")(operation).tflatMap { _ =>
+              AuthenticationOnlyAuthExtractor(verifier, loggerFactory, OAuthRealm)(traceContext)(
+                operation
+              )
+            },
+        )
+      }
+    }
+  }
 
   case class State(
       automation: SyncOperatorAutomationService,

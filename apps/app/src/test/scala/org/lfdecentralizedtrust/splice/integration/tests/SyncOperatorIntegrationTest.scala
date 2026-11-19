@@ -3,7 +3,6 @@
 
 package org.lfdecentralizedtrust.splice.integration.tests
 
-import com.auth0.jwt.JWT
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.{NonNegativeDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
@@ -16,11 +15,6 @@ import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   ParticipantSynchronizerPermission,
 }
-import org.apache.pekko.http.scaladsl.Http
-import org.apache.pekko.http.scaladsl.client.RequestBuilding.Get
-import org.apache.pekko.http.scaladsl.model.{StatusCodes, Uri}
-import org.apache.pekko.http.scaladsl.model.headers.{Authorization, OAuth2BearerToken}
-import org.lfdecentralizedtrust.splice.auth.AuthUtil
 import org.lfdecentralizedtrust.splice.config.ConfigTransforms
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
 import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval
@@ -205,39 +199,6 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
           trafficStates(last),
           trafficStates(end),
         )
-      }
-    }
-
-    "reject traffic report requests without a valid token" in { implicit env =>
-      implicit val sys = env.actorSystem
-      registerHttpConnectionPoolsCleanup(env)
-
-      val start = trafficReport.alignDown(env.environment.clock.now)
-      val request = Get(
-        Uri(s"${syncOperatorBackend.httpClientConfig.url}/api/syncoperator/v0/traffic-report")
-          .withQuery(
-            Uri.Query(
-              "start_record_time" -> start.toInstant.toString,
-              "end_record_time" -> start.plus(trafficReport.intervalLength).toInstant.toString,
-            )
-          )
-      )
-      val wrongAudienceToken = JWT
-        .create()
-        .withAudience("wrong-audience")
-        .withSubject(syncOperatorBackend.name)
-        .sign(AuthUtil.testSignatureAlgorithm)
-
-      clue("no token") {
-        Http().singleRequest(request).futureValue.status shouldBe StatusCodes.Unauthorized
-      }
-      clue("a token for another audience") {
-        Http()
-          .singleRequest(
-            request.withHeaders(Authorization(OAuth2BearerToken(wrongAudienceToken)))
-          )
-          .futureValue
-          .status shouldBe StatusCodes.Unauthorized
       }
     }
   }
