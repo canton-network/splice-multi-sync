@@ -25,6 +25,7 @@ import org.lfdecentralizedtrust.splice.auth.{
   AuthenticationOnlyAuthExtractor,
   HMACVerifier,
   RSAVerifier,
+  SignatureVerifier,
 }
 import org.lfdecentralizedtrust.splice.auth.AuthenticationOnlyAuthExtractor.AuthenticatedRequest
 import org.lfdecentralizedtrust.splice.config.SharedSpliceAppParameters
@@ -123,6 +124,15 @@ class SyncOperatorApp(
         config.trafficBalanceReconciliationDelay,
         loggerFactory,
       )
+      verifier = config.auth match {
+        case AuthConfig.Hs256Unsafe(audience, secret) => new HMACVerifier(audience, secret)
+        case AuthConfig.Rs256(audience, jwksUrl, connectionTimeout, readTimeout) =>
+          new RSAVerifier(
+            audience,
+            jwksUrl,
+            RSAVerifier.TimeoutsConfig(connectionTimeout, readTimeout),
+          )
+      }
       trafficReport = TrafficReport(config.trafficReportIntervalLength.asJava)
       handler = new HttpSyncOperatorHandler(
         trafficReport,
@@ -133,9 +143,11 @@ class SyncOperatorApp(
           synchronizerNodes.successor.map(_.sequencerAdminConnection),
         ),
       )
-      _ = adminRoutes.updateRoute(
-        SyncOperatorApp.routes(handler, config.auth, metrics.httpServerMetrics, loggerFactory)
-      )
+      _ = adminRoutes.updateRoute(withTraceContext { implicit traceContext =>
+        HttpErrorHandler(loggerFactory)(traceContext) {
+          SyncOperatorApp.routes(handler, verifier, metrics.httpServerMetrics, loggerFactory)
+        }
+      })
     } yield {
       SyncOperatorApp.State(
         automation,
@@ -283,36 +295,22 @@ class SyncOperatorApp(
 object SyncOperatorApp {
   val OAuthRealm = "splice sync operator realm"
 
-  /** The HTTP API, which takes a JWT for the audience in `auth`. */
+  /** The HTTP API, which takes a JWT that `verifier` accepts. */
   def routes(
       handler: SyncOperatorHandler[AuthenticatedRequest],
-      auth: AuthConfig,
+      verifier: SignatureVerifier,
       httpServerMetrics: HttpServerMetrics,
       loggerFactory: NamedLoggerFactory,
-  )(implicit mat: Materializer): Route = {
-    val verifier = auth match {
-      case AuthConfig.Hs256Unsafe(audience, secret) => new HMACVerifier(audience, secret)
-      case AuthConfig.Rs256(audience, jwksUrl, connectionTimeout, readTimeout) =>
-        new RSAVerifier(
-          audience,
-          jwksUrl,
-          RSAVerifier.TimeoutsConfig(connectionTimeout, readTimeout),
-        )
-    }
-    withTraceContext { implicit traceContext =>
-      HttpErrorHandler(loggerFactory)(traceContext) {
-        SyncOperatorResource.routes(
-          handler,
-          operation =>
-            httpServerMetrics.withMetrics("syncOperator")(operation).tflatMap { _ =>
-              AuthenticationOnlyAuthExtractor(verifier, loggerFactory, OAuthRealm)(traceContext)(
-                operation
-              )
-            },
-        )
-      }
-    }
-  }
+  )(implicit traceContext: TraceContext, mat: Materializer): Route =
+    SyncOperatorResource.routes(
+      handler,
+      operation =>
+        httpServerMetrics.withMetrics("syncOperator")(operation).tflatMap { _ =>
+          AuthenticationOnlyAuthExtractor(verifier, loggerFactory, OAuthRealm)(traceContext)(
+            operation
+          )
+        },
+    )
 
   case class State(
       automation: SyncOperatorAutomationService,

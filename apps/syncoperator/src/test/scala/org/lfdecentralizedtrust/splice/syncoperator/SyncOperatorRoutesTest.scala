@@ -13,7 +13,8 @@ import org.apache.pekko.http.scaladsl.model.StatusCodes
 import org.apache.pekko.http.scaladsl.model.headers.OAuth2BearerToken
 import org.apache.pekko.http.scaladsl.server.Route
 import org.apache.pekko.http.scaladsl.testkit.ScalatestRouteTest
-import org.lfdecentralizedtrust.splice.auth.AuthConfig
+import org.lfdecentralizedtrust.splice.admin.http.HttpErrorHandler
+import org.lfdecentralizedtrust.splice.auth.HMACVerifier
 import org.lfdecentralizedtrust.splice.http.HttpServerMetrics
 import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval
 import org.lfdecentralizedtrust.splice.syncoperator.admin.http.HttpSyncOperatorHandler
@@ -32,17 +33,21 @@ class SyncOperatorRoutesTest extends AnyWordSpec with BaseTest with ScalatestRou
     val reader = mock[TrafficReportReader]
     when(reader.read(any[Seq[CantonTimestamp]])(any[TraceContext]))
       .thenReturn(Future.successful(read))
-    // Sealed, so rejections become responses like in the server.
+    implicit val traceContext: TraceContext = TraceContext.empty
+    // Sealed, so rejections become responses like in the server. Only the error handler's
+    // exceptions directive, since its timeout directive needs the server's request timeout.
     Route.seal(
-      SyncOperatorApp.routes(
-        new HttpSyncOperatorHandler(TrafficReport(Duration.ofMinutes(10)), reader)(
-          executor,
-          NoReportingTracerProvider.tracer,
-        ),
-        AuthConfig.Hs256Unsafe(audience, secret),
-        new HttpServerMetrics(new NoOpMetricsFactory, loggerFactory),
-        loggerFactory,
-      )
+      new HttpErrorHandler(loggerFactory).exceptionsDirective(traceContext) {
+        SyncOperatorApp.routes(
+          new HttpSyncOperatorHandler(TrafficReport(Duration.ofMinutes(10)), reader)(
+            executor,
+            NoReportingTracerProvider.tracer,
+          ),
+          new HMACVerifier(audience, secret),
+          new HttpServerMetrics(new NoOpMetricsFactory, loggerFactory),
+          loggerFactory,
+        )
+      }
     )
   }
 
