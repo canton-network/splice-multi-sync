@@ -171,7 +171,8 @@ object TrafficReportReader {
 
   def notOver(start: CantonTimestamp, end: CantonTimestamp): String =
     s"The interval [$start, $end) is not over yet, or the sequencer has not sequenced past its " +
-      s"end. Request a range that ends at or before $start."
+      s"end. Request a range that ends at or before $start (or wait for long enough after " +
+      s"$end and retry)."
 
   private final case class UpgradeTimes(
       currentFrom: Option[CantonTimestamp],
