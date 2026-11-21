@@ -49,6 +49,10 @@ spec:
           value: "{{ .Values.defaultJvmOptions }} {{ .Values.additionalJvmOptions }} -Dlogback.configurationFile=/app/logback/logback.xml"
         - name: SPLICE_APP_SYNC_OPERATOR_SEQUENCER_ADDRESS
           value: {{ .Values.sequencerAddress | quote }}
+        - name: SPLICE_APP_SYNC_OPERATOR_AUTH_AUDIENCE
+          value: {{ (.Values.auth).audience | quote }}
+        - name: SPLICE_APP_SYNC_OPERATOR_AUTH_JWKS_URL
+          value: {{ (.Values.auth).jwksUrl | quote }}
         {{- with .Values.persistence }}
         - name: ADDITIONAL_CONFIG_PERSISTENCE
           value: |
