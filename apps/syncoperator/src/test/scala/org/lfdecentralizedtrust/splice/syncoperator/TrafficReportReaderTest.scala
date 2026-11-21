@@ -153,6 +153,18 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
       }
     }
 
+    "reject a range the sequencer pruned while reading it" in {
+      val sequencer = mockSequencer(Map(interval(1) -> 100, interval(2) -> 130))
+      when(sequencer.getSequencerPruningStatus()(any[TraceContext]))
+        .thenReturn(
+          Future.successful(SequencerPruningStatus(CantonTimestamp.Epoch, interval(10), Set.empty)),
+          Future.successful(
+            SequencerPruningStatus(interval(1).plusSeconds(300), interval(10), Set.empty)
+          ),
+        )
+      read(Seq(interval(1)), sequencer).map(_ shouldBe Left(cannotProvide(interval(2))))
+    }
+
     "read the interval that spans an upgrade from both sequencers" in {
       // The current sequencer's counters freeze at the upgrade. The successor takes them over, but
       // reports zero before the upgrade.

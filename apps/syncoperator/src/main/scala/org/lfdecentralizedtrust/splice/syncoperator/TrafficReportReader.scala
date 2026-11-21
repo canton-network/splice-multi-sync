@@ -48,15 +48,27 @@ class TrafficReportReader(
   )(implicit tc: TraceContext): Future[Either[String, Seq[TrafficReportInterval]]] =
     for {
       upgrades <- upgradeTimes()
-      pruningStatus <- current.getSequencerPruningStatus()
-      firstReadable = report.firstReadableStart(
+      before <- unreadable(upgrades, starts)
+      intervals <- before.fold(readIntervals(upgrades, starts.toList))(error =>
+        Future.successful(Left(error))
+      )
+      // Canton prunes the journal before it moves the bound, so a prune that moved the bound
+      // during the read may have removed rows the readings used.
+      after <- if (intervals.isRight) unreadable(upgrades, starts) else Future.successful(None)
+    } yield after.fold(intervals)(Left(_))
+
+  /** Why the sequencer can't serve `starts`, if it pruned the first one or the first one predates
+    * the upgrade to it.
+    */
+  private def unreadable(upgrades: UpgradeTimes, starts: Seq[CantonTimestamp])(implicit
+      tc: TraceContext
+  ): Future[Option[String]] =
+    current.getSequencerPruningStatus().map { pruningStatus =>
+      val firstReadable = report.firstReadableStart(
         upgrades.currentFrom.fold(pruningStatus.lowerBound)(_.max(pruningStatus.lowerBound))
       )
-      intervals <-
-        if (starts.headOption.exists(_ < firstReadable))
-          Future.successful(Left(cannotProvide(firstReadable)))
-        else readIntervals(upgrades, starts.toList)
-    } yield intervals
+      Option.when(starts.headOption.exists(_ < firstReadable))(cannotProvide(firstReadable))
+    }
 
   private def readIntervals(
       upgrades: UpgradeTimes,
