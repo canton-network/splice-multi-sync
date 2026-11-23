@@ -5,7 +5,10 @@ package org.lfdecentralizedtrust.splice.syncoperator
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.synchronizer.sequencer.{SequencerMemberStatus, SequencerPruningStatus}
+import com.digitalasset.canton.synchronizer.sequencer.{
+  SequencerMemberStatus,
+  SequencerPruningStatus,
+}
 import com.digitalasset.canton.topology.DefaultTestIdentities.participant1
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.StatusRuntimeException
