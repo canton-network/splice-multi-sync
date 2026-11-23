@@ -188,10 +188,9 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
 
       val interval = clue("the last interval that is over is reported") {
         // The report rejects an interval the sequencer has not sequenced past yet.
-        eventually(timeUntilSuccess = 1.minute) {
-          trafficStates(end)
+        eventuallySucceeds(timeUntilSuccess = 1.minute) {
+          reportedInterval(last)
         }
-        reportedInterval(last)
       }
 
       clue("its total is the participants' traffic in the sequencer's journal over it") {

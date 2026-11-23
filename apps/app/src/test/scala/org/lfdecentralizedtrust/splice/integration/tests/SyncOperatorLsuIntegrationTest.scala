@@ -251,10 +251,9 @@ class SyncOperatorLsuIntegrationTest
           ) {
             val beforeStart = acrossStart.minus(trafficReport.intervalLength)
             // The report rejects an interval the successor has not sequenced past yet.
-            eventually() {
-              trafficStates(successor, acrossEnd)
+            val intervals = eventuallySucceeds() {
+              syncOperatorBackend.getTrafficReport(beforeStart, acrossEnd).intervals
             }
-            val intervals = syncOperatorBackend.getTrafficReport(beforeStart, acrossEnd).intervals
             inside(intervals.map(_.trafficConsumed)) { case Seq(before, across) =>
               before shouldBe TrafficReport.participantsConsumed(
                 trafficStates(sequencer, beforeStart),
