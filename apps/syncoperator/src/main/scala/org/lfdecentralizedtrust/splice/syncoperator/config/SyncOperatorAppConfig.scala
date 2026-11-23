@@ -89,6 +89,12 @@ case class SyncOperatorTrafficControlConfig(
     baseEventCost: NonNegativeLong = NonNegativeLong.zero,
 )
 
+/** Prunes the sequencer's data older than `retentionPeriod`, every `pruningInterval`. */
+final case class SyncOperatorSequencerPruningConfig(
+    pruningInterval: NonNegativeFiniteDuration,
+    retentionPeriod: NonNegativeFiniteDuration,
+)
+
 case class SyncOperatorAppBackendConfig(
     override val adminApi: AdminServerConfig = AdminServerConfig(),
     override val storage: DbConfig,
@@ -102,6 +108,8 @@ case class SyncOperatorAppBackendConfig(
     auth: AuthConfig,
     // Only for tests: paymasters rely on the default of 10 minutes.
     trafficReportIntervalLength: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(10),
+    // Prune the sequencer only through this: the traffic report doesn't read while the app prunes.
+    sequencerPruning: Option[SyncOperatorSequencerPruningConfig] = None,
     override val automation: AutomationConfig = AutomationConfig(),
     parameters: SpliceParametersConfig = SpliceParametersConfig(batching = BatchingConfig()),
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration =

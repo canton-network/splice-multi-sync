@@ -2,6 +2,20 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
   "properties": {
+    "sequencerPruningConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "pruningInterval": {
+          "type": "string"
+        },
+        "retentionPeriod": {
+          "type": "string"
+        }
+      }
+    },
     "serviceAccountName": {
       "type": "string"
     },

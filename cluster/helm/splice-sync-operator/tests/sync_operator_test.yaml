@@ -35,6 +35,28 @@ tests:
             name: SPLICE_APP_SYNC_OPERATOR_AUTH_JWKS_URL
             value: "https://mock-jwks.example.com/.well-known/jwks.json"
 
+  - it: "sets the sequencer pruning config"
+    set:
+      sequencerAddress: "dummy"
+      persistence.host: "dummy"
+      sequencerPruningConfig:
+        enabled: true
+        pruningInterval: "1h"
+        retentionPeriod: "30d"
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: ADDITIONAL_CONFIG_SEQUENCER_PRUNING
+            value: |
+              canton.sync-operator-apps.sync-operator.sequencer-pruning {
+                pruning-interval = "1h"
+                retention-period = "30d"
+              }
+
   - it: "sets the sequencer address"
     set:
       sequencerAddress: "mock-sequencer"

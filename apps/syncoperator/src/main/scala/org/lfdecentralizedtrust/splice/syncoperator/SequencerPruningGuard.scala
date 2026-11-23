@@ -11,11 +11,14 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
 
 /** Keeps traffic report reads and sequencer prunes apart. Canton prunes the traffic journal before
   * it moves the pruning bound, so a read during a prune can't tell that it read pruned rows.
+  * `startClosed` keeps reads closed until the first prune, since one may still run in Canton from
+  * before a restart.
   */
-final class SequencerPruningGuard(implicit ec: ExecutionContext) {
+final class SequencerPruningGuard(startClosed: Boolean = false)(implicit ec: ExecutionContext) {
   import SequencerPruningGuard.State
 
-  private val state = new AtomicReference(State(reads = 0, closed = None))
+  private val state =
+    new AtomicReference(State(reads = 0, closed = Option.when(startClosed)(Promise.successful(()))))
 
   /** Runs `body`, or fails with UNAVAILABLE while reads are closed. */
   def read[T](body: => Future[T]): Future[T] = {

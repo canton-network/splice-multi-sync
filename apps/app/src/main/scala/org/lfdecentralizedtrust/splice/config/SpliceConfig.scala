@@ -43,6 +43,7 @@ import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorSequencerConfig,
   SyncOperatorSynchronizerNodeConfig,
   SyncOperatorSynchronizerNodesConfig,
+  SyncOperatorSequencerPruningConfig,
   SyncOperatorTrafficControlConfig,
 }
 import org.lfdecentralizedtrust.splice.util.{
@@ -1045,6 +1046,9 @@ object SpliceConfig {
     implicit val syncOperatorTrafficControlConfigReader
         : ConfigReader[SyncOperatorTrafficControlConfig] =
       deriveReader[SyncOperatorTrafficControlConfig]
+    implicit val syncOperatorSequencerPruningConfigReader
+        : ConfigReader[SyncOperatorSequencerPruningConfig] =
+      deriveReader[SyncOperatorSequencerPruningConfig]
     implicit val syncOperatorConfigReader: ConfigReader[SyncOperatorAppBackendConfig] =
       deriveReader[SyncOperatorAppBackendConfig].emap { conf =>
         for {
@@ -1422,6 +1426,9 @@ object SpliceConfig {
     implicit val syncOperatorTrafficControlConfigWriter
         : ConfigWriter[SyncOperatorTrafficControlConfig] =
       deriveWriter[SyncOperatorTrafficControlConfig]
+    implicit val syncOperatorSequencerPruningConfigWriter
+        : ConfigWriter[SyncOperatorSequencerPruningConfig] =
+      deriveWriter[SyncOperatorSequencerPruningConfig]
     implicit val syncOperatorConfigWriter: ConfigWriter[SyncOperatorAppBackendConfig] =
       deriveWriter[SyncOperatorAppBackendConfig]
     implicit val syncOperatorClientConfigWriter: ConfigWriter[SyncOperatorAppClientConfig] =
