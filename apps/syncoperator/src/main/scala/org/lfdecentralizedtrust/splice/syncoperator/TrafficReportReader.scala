@@ -9,7 +9,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.TrafficState
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
-import com.digitalasset.canton.topology.{Member, SynchronizerId}
+import com.digitalasset.canton.topology.{Member, ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.StatusRuntimeException
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
@@ -18,6 +18,7 @@ import org.lfdecentralizedtrust.splice.syncoperator.TrafficReportReader.{
   UpgradeTimes,
   cannotProvide,
   notOver,
+  participantLeft,
 }
 
 import java.time.ZoneOffset
@@ -101,38 +102,40 @@ class TrafficReportReader(
       starts: List[CantonTimestamp],
   )(implicit tc: TraceContext): Future[Either[String, Seq[TrafficReportInterval]]] =
     starts.headOption
-      .fold(Future.successful(List.empty[Long]))(first =>
+      .fold(Future.successful[Either[String, List[Long]]](Right(Nil)))(first =>
         readTrafficStates(upgrades, first).flatMap {
-          case None => Future.successful(List.empty)
+          case None => Future.successful(Left(notOver(first, first.plus(report.intervalLength))))
           case Some(atFirst) => readConsumed(upgrades, starts, atFirst)
         }
       )
-      .map(consumed =>
-        starts.drop(consumed.size).headOption match {
-          case Some(start) => Left(notOver(start, start.plus(report.intervalLength)))
-          case None =>
-            Right(starts.zip(consumed).map { case (start, trafficConsumed) =>
-              interval(start, trafficConsumed)
-            })
-        }
+      .map(
+        _.map(consumed =>
+          starts.zip(consumed).map { case (start, trafficConsumed) =>
+            interval(start, trafficConsumed)
+          }
+        )
       )
 
-  /** The traffic consumed in each interval that starts at `starts`, up to the first one the
-    * sequencer has not sequenced past yet.
+  /** The traffic consumed in each interval that starts at `starts`, or why the sequencer can't
+    * serve the first one it fails on.
     */
   private def readConsumed(
       upgrades: UpgradeTimes,
       starts: List[CantonTimestamp],
       atStart: Map[Member, TrafficState],
-  )(implicit tc: TraceContext): Future[List[Long]] =
+  )(implicit tc: TraceContext): Future[Either[String, List[Long]]] =
     starts match {
-      case Nil => Future.successful(Nil)
+      case Nil => Future.successful(Right(Nil))
       case start :: rest =>
-        readTrafficStates(upgrades, start.plus(report.intervalLength)).flatMap {
-          case None => Future.successful(Nil)
+        val end = start.plus(report.intervalLength)
+        readTrafficStates(upgrades, end).flatMap {
+          case None => Future.successful(Left(notOver(start, end)))
           case Some(atEnd) =>
-            readConsumed(upgrades, rest, atEnd)
-              .map(TrafficReport.participantsConsumed(atStart, atEnd) :: _)
+            TrafficReport.participantsConsumed(atStart, atEnd) match {
+              case Left(participant) =>
+                Future.successful(Left(participantLeft(participant, start, end)))
+              case Right(consumed) => readConsumed(upgrades, rest, atEnd).map(_.map(consumed :: _))
+            }
         }
     }
 
@@ -195,6 +198,14 @@ object TrafficReportReader {
     s"The interval [$start, $end) is not over yet, or the sequencer has not sequenced past its " +
       s"end. Request a range that ends at or before $start (or wait for long enough after " +
       s"$end and retry)."
+
+  def participantLeft(
+      participant: ParticipantId,
+      start: CantonTimestamp,
+      end: CantonTimestamp,
+  ): String =
+    s"Participant $participant left the synchronizer during [$start, $end), so its traffic in " +
+      s"the interval can't be read. Request a range without the interval."
 
   private final case class UpgradeTimes(
       currentFrom: Option[CantonTimestamp],

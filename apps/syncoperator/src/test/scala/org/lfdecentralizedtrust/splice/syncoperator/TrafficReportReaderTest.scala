@@ -18,7 +18,7 @@ import com.digitalasset.canton.topology.DefaultTestIdentities.{
   participant1,
   synchronizerId,
 }
-import com.digitalasset.canton.topology.OpaquePhysicalSynchronizerId
+import com.digitalasset.canton.topology.{Member, OpaquePhysicalSynchronizerId}
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.{LsuAnnouncement, TopologyChangeOp}
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
@@ -26,7 +26,11 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.nonempty.NonEmpty
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologyResult
-import org.lfdecentralizedtrust.splice.syncoperator.TrafficReportReader.{cannotProvide, notOver}
+import org.lfdecentralizedtrust.splice.syncoperator.TrafficReportReader.{
+  cannotProvide,
+  notOver,
+  participantLeft,
+}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.{Duration, Instant}
@@ -38,12 +42,14 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
 
   private def interval(n: Long) = t0.plus(Duration.ofMinutes(10L * n))
 
-  /** A mocked sequencer that has sequenced past exactly the times in `consumed`, where
-    * participant1 had consumed the given traffic.
+  /** A mocked sequencer that has sequenced past exactly the times in `consumed` and `left`. At the
+    * times in `consumed`, participant1 had consumed the given traffic. At the times in `left`, it
+    * is no longer on the synchronizer.
     */
   private def mockSequencer(
       consumed: Map[CantonTimestamp, Long],
       pruningLowerBound: CantonTimestamp = CantonTimestamp.Epoch,
+      left: Set[CantonTimestamp] = Set.empty,
   ) = {
     val sequencer = mock[SequencerAdminConnection]
     when(sequencer.getSequencerPruningStatus()(any[TraceContext]))
@@ -53,15 +59,19 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
     when(sequencer.getLsuTrafficControlState(any[Option[CantonTimestamp]])(any[TraceContext]))
       .thenAnswer { (time: Option[CantonTimestamp]) =>
         val t = time.value
-        consumed.get(t) match {
-          case Some(bytes) =>
+        val states = consumed
+          .get(t)
+          .map(bytes =>
+            Map[Member, TrafficState](
+              participant1 -> TrafficState.empty
+                .copy(extraTrafficConsumed = NonNegativeLong.tryCreate(bytes))
+            )
+          )
+          .orElse(Option.when(left.contains(t))(Map.empty[Member, TrafficState]))
+        states match {
+          case Some(membersTraffic) =>
             Future.successful(
-              LsuTrafficState(
-                Map(
-                  participant1 -> TrafficState.empty
-                    .copy(extraTrafficConsumed = NonNegativeLong.tryCreate(bytes))
-                )
-              )(
+              LsuTrafficState(membersTraffic)(
                 LsuTrafficState.protocolVersionRepresentativeFor(testedProtocolVersion)
               ).toByteString
             )
@@ -173,6 +183,12 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
       announceUpgrade(current, NonNegativeInt.zero, upgradeTime = interval(1).plusSeconds(300))
       read(Seq(interval(1)), current, Some(successor))
         .map(_ shouldBe Right(Seq(ok(1, 50))))
+    }
+
+    "reject an interval in which a participant left" in {
+      val sequencer = mockSequencer(Map(interval(0) -> 100), left = Set(interval(1)))
+      read(Seq(interval(0)), sequencer)
+        .map(_ shouldBe Left(participantLeft(participant1, interval(0), interval(1))))
     }
 
     "reject a range the successor pruned" in {

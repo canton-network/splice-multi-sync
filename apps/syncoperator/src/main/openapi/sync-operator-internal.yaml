@@ -22,9 +22,9 @@ paths:
         A response covers at most 100 intervals. If it has `next_start_record_time`, request the
         rest of the range from there.
         Fails with 400 if the sequencer can't serve an interval of the response: the interval is
-        not over yet, the sequencer has not sequenced past its end yet, the sequencer pruned it, or
-        it predates the upgrade to the current sequencer. The error says which part of the range to
-        request instead.
+        not over yet, the sequencer has not sequenced past its end yet, the sequencer pruned it, it
+        predates the upgrade to the current sequencer, or a participant left the synchronizer
+        during it. The error says which part of the range to request instead.
       tags: [sync_operator]
       x-jvm-package: sync_operator
       operationId: "getTrafficReport"

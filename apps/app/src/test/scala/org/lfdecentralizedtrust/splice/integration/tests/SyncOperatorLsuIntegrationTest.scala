@@ -255,20 +255,26 @@ class SyncOperatorLsuIntegrationTest
               syncOperatorBackend.getTrafficReport(beforeStart, acrossEnd).intervals
             }
             inside(intervals.map(_.trafficConsumed)) { case Seq(before, across) =>
-              before shouldBe TrafficReport.participantsConsumed(
-                trafficStates(sequencer, beforeStart),
-                trafficStates(sequencer, acrossStart),
-              )
-              across shouldBe TrafficReport.participantsConsumed(
-                trafficStates(sequencer, acrossStart),
-                trafficStates(successor, acrossEnd),
-              )
+              before shouldBe TrafficReport
+                .participantsConsumed(
+                  trafficStates(sequencer, beforeStart),
+                  trafficStates(sequencer, acrossStart),
+                )
+                .value
+              across shouldBe TrafficReport
+                .participantsConsumed(
+                  trafficStates(sequencer, acrossStart),
+                  trafficStates(successor, acrossEnd),
+                )
+                .value
               // The successor has no history before the upgrade, so reading both ends from it
               // would also count everything consumed before the upgrade.
-              across should be < TrafficReport.participantsConsumed(
-                trafficStates(successor, acrossStart),
-                trafficStates(successor, acrossEnd),
-              )
+              across should be < TrafficReport
+                .participantsConsumed(
+                  trafficStates(successor, acrossStart),
+                  trafficStates(successor, acrossEnd),
+                )
+                .value
             }
           }
         }

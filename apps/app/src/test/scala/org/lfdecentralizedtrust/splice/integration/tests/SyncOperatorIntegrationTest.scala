@@ -194,10 +194,12 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
       }
 
       clue("its total is the participants' traffic in the sequencer's journal over it") {
-        interval.trafficConsumed shouldBe TrafficReport.participantsConsumed(
-          trafficStates(last),
-          trafficStates(end),
-        )
+        interval.trafficConsumed shouldBe TrafficReport
+          .participantsConsumed(
+            trafficStates(last),
+            trafficStates(end),
+          )
+          .value
       }
     }
   }

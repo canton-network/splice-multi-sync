@@ -73,8 +73,6 @@ class TrafficReportTest extends AnyWordSpec with BaseTest {
         atStart = Map(
           participant1 -> consumed(100),
           participant2 -> consumed(50),
-          // Left in between, so it is not counted.
-          participant4 -> consumed(500),
         ),
         atEnd = Map(
           participant1 -> consumed(130),
@@ -84,7 +82,14 @@ class TrafficReportTest extends AnyWordSpec with BaseTest {
           // Mediators are not participants.
           mediatorId -> consumed(1000),
         ),
-      ) shouldBe 37L
+      ) shouldBe Right(37L)
+    }
+
+    "name a participant that left in between" in {
+      TrafficReport.participantsConsumed(
+        atStart = Map(participant1 -> consumed(100), participant4 -> consumed(500)),
+        atEnd = Map(participant1 -> consumed(130)),
+      ) shouldBe Left(participant4)
     }
   }
 }
