@@ -24,6 +24,7 @@ import com.digitalasset.canton.topology.transaction.{LsuAnnouncement, TopologyCh
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.nonempty.NonEmpty
+import io.grpc.{Status, StatusRuntimeException}
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologyResult
 import org.lfdecentralizedtrust.splice.syncoperator.TrafficReportReader.{
@@ -119,12 +120,14 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
       starts: Seq[CantonTimestamp],
       current: SequencerAdminConnection,
       successor: Option[SequencerAdminConnection] = None,
+      pruningGuard: SequencerPruningGuard = new SequencerPruningGuard(),
   ) =
     new TrafficReportReader(
       TrafficReport(Duration.ofMinutes(10)),
       synchronizerId,
       current,
       successor,
+      pruningGuard,
     ).read(starts)
       .map(_.map(_.map { i =>
         (i.startRecordTime.toInstant, i.endRecordTime.toInstant, i.trafficConsumed)
@@ -183,6 +186,17 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
       announceUpgrade(current, NonNegativeInt.zero, upgradeTime = interval(1).plusSeconds(300))
       read(Seq(interval(1)), current, Some(successor))
         .map(_ shouldBe Right(Seq(ok(1, 50))))
+    }
+
+    "fail while the app prunes the sequencer" in {
+      val sequencer = mockSequencer(Map(interval(0) -> 100, interval(1) -> 130))
+      val pruningGuard = new SequencerPruningGuard()
+      for {
+        _ <- pruningGuard.closeReads()
+        failure <- read(Seq(interval(0)), sequencer, pruningGuard = pruningGuard).failed
+      } yield inside(failure) { case e: StatusRuntimeException =>
+        e.getStatus.getCode shouldBe Status.Code.UNAVAILABLE
+      }
     }
 
     "reject an interval in which a participant left" in {

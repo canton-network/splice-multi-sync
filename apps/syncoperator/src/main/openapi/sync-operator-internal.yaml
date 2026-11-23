@@ -25,6 +25,7 @@ paths:
         not over yet, the sequencer has not sequenced past its end yet, the sequencer pruned it, it
         predates the upgrade to the current sequencer, or a participant left the synchronizer
         during it. The error says which part of the range to request instead.
+        Fails with 503 while the app prunes the sequencer. Retry later.
       tags: [sync_operator]
       x-jvm-package: sync_operator
       operationId: "getTrafficReport"
@@ -50,6 +51,8 @@ paths:
                 "$ref": "#/components/schemas/GetTrafficReportResponse"
         "400":
           $ref: "../../../../common/src/main/openapi/common-external.yaml#/components/responses/400"
+        "503":
+          $ref: "../../../../common/src/main/openapi/common-external.yaml#/components/responses/503"
 
 components:
   schemas:

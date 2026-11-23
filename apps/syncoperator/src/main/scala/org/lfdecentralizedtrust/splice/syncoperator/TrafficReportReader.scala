@@ -39,6 +39,7 @@ class TrafficReportReader(
     synchronizerId: SynchronizerId,
     current: SequencerAdminConnection,
     successor: Option[SequencerAdminConnection],
+    pruningGuard: SequencerPruningGuard,
 )(implicit ec: ExecutionContext) {
 
   /** Reports the intervals that start at `starts`, which are consecutive, or says why the sequencer
@@ -47,17 +48,16 @@ class TrafficReportReader(
   def read(
       starts: Seq[CantonTimestamp]
   )(implicit tc: TraceContext): Future[Either[String, Seq[TrafficReportInterval]]] =
-    for {
+    pruningGuard.read(for {
       upgrades <- upgradeTimes()
       before <- unreadable(upgrades, starts)
       intervals <- before.fold(readIntervals(upgrades, starts.toList))(error =>
         Future.successful(Left(error))
       )
-      // Canton prunes the journal before it moves the bound, so check the bound again in case a
-      // prune ran during the read. A prune that hasn't moved the bound yet can't be seen here, so
-      // the sequencer must not be pruned while a report is read.
+      // The app doesn't prune while this reads. This catches a prune from outside the app that
+      // finished during the read.
       after <- if (intervals.isRight) unreadable(upgrades, starts) else Future.successful(None)
-    } yield after.fold(intervals)(Left(_))
+    } yield after.fold(intervals)(Left(_)))
 
   /** Why the sequencers can't serve `starts`: one of them pruned the first reading it serves, or
     * that reading predates the upgrade to the current sequencer.

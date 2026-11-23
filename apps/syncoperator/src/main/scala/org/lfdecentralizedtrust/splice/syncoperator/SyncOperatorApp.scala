@@ -112,6 +112,7 @@ class SyncOperatorApp(
       _ <- appInitStep("Check the synchronizer is permissioned and runs traffic control") {
         requireDedicatedSynchronizerParameters(sequencerAdminConnection, synchronizerId)
       }
+      pruningGuard = new SequencerPruningGuard()
       automation = new SyncOperatorAutomationService(
         config.automation,
         clock,
@@ -141,6 +142,7 @@ class SyncOperatorApp(
           synchronizerId,
           sequencerAdminConnection,
           synchronizerNodes.successor.map(_.sequencerAdminConnection),
+          pruningGuard,
         ),
       )
       _ = adminRoutes.updateRoute(withTraceContext { implicit traceContext =>
