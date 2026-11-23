@@ -18,7 +18,7 @@ function usage() {
   echo "  -F               same as -f, but does not start cometBFT, but rather assumes it is already running"
   echo "  -e               start canton using the canton provided BFT sequencer"
   echo "  -m               collect metrics and send them to our CI prometheus instance"
-  echo "  -t               zero base traffic rate, protocol version 37 and permissioned on the splitwell synchronizer"
+  echo "  -t               zero base traffic rate, protocol version 37 and permissioned on the splitwell and splitwellUpgrade synchronizers"
   echo "  -c <canton>      start a custom canton binary instead of the one on the PATH"
   echo "  -B <script>      path to a custom canton bootstrap script"
   echo "  -k               allow downloading private keys via the admin API (needed, e.g., for identities dumps)"
@@ -37,11 +37,11 @@ use_bft=0
 collect_metrics=0
 enable_key_download=0
 logFileHint=canton
-# Base traffic rate on the splitwell synchronizer in bytes; empty means no traffic control there.
+# Base traffic rate on the splitwell and splitwellUpgrade synchronizers in bytes; empty means no traffic control there.
 splitwell_max_base_traffic_amount="${SPLITWELL_MAX_BASE_TRAFFIC_AMOUNT-}"
-# Protocol version of the splitwell synchronizer; empty means the bootstrap script's default.
+# Protocol version of the splitwell and splitwellUpgrade synchronizers; empty means the bootstrap script's default.
 splitwell_protocol_version="${SPLITWELL_PROTOCOL_VERSION-}"
-# Whether the splitwell synchronizer only admits participants with a permission.
+# Whether the splitwell and splitwellUpgrade synchronizers only admit participants with a permission.
 splitwell_permissioned="${SPLITWELL_PERMISSIONED-}"
 
 args=$(getopt -o "hdDap:cB:wsbtfFegmk" -l "help" -- "$@")
@@ -111,7 +111,7 @@ do
             splitwell_protocol_version=37
             splitwell_permissioned=true
             logFileHint=canton-standalone-sync-operator
-            echo "starting canton with a zero base traffic rate, protocol version 37 and permissioned on the splitwell synchronizer"
+            echo "starting canton with a zero base traffic rate, protocol version 37 and permissioned on the splitwell and splitwellUpgrade synchronizers"
             ;;
         -B)
             bootstrapScriptPath="$2"

@@ -114,8 +114,8 @@ def bootstrapOtherDomain(
   )
 }
 
-// splitwell is the only non-global synchronizer a sync operator can be pointed at today, so it
-// carries traffic control under -t; see apps/app/src/test/resources/sync-operator-topology.conf.
+// The sync operator tests point their operator at splitwell, so it carries traffic control under
+// -t; see apps/app/src/test/resources/sync-operator-topology.conf.
 bootstrapOtherDomain(
   "splitwell",
   splitwellSequencer,
@@ -132,7 +132,23 @@ if (splitwellPermissioned) {
     ParticipantPermission.Submission,
   )
 }
-bootstrapOtherDomain("splitwellUpgrade", splitwellUpgradeSequencer, splitwellUpgradeMediator)
+// SyncOperatorRollForwardLsuIntegrationTest upgrades splitwellUpgrade, so -t sets it up like
+// splitwell. SyncOperatorLsuIntegrationTest upgrades splitwell, so the two can share a Canton.
+bootstrapOtherDomain(
+  "splitwellUpgrade",
+  splitwellUpgradeSequencer,
+  splitwellUpgradeMediator,
+  trafficControl = splitwellMaxBaseTrafficAmount.map(trafficControlParameters),
+  protocolVersion = splitwellProtocolVersion,
+  permissioned = splitwellPermissioned,
+)
+if (splitwellPermissioned) {
+  splitwellUpgradeSequencer.topology.participant_synchronizer_permissions.propose(
+    splitwellUpgradeSequencer.synchronizer_id,
+    aliceParticipant.id,
+    ParticipantPermission.Submission,
+  )
+}
 
 // These user allocations are only there
 // for local testing. Our tests allocate their own users.

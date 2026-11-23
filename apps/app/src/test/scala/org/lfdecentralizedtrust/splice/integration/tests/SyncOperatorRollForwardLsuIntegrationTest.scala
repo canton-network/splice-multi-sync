@@ -33,6 +33,7 @@ import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorSynchronizerNodeConfig,
 }
 import org.lfdecentralizedtrust.splice.util.StandaloneCanton
+import org.lfdecentralizedtrust.splice.validator.config.ValidatorExtraSynchronizerConfig
 
 import java.time.Duration
 import scala.concurrent.duration.*
@@ -54,7 +55,14 @@ class SyncOperatorRollForwardLsuIntegrationTest extends IntegrationTest with Sta
     s"mediator_${dbsSuffix}_successor",
   ) ++ super.usesDbs
 
-  private val splitwellAlias = SynchronizerAlias.tryCreate("splitwell")
+  // SyncOperatorLsuIntegrationTest upgrades splitwell, so this test upgrades the other non-global
+  // synchronizer and the two can run against the same Canton.
+  private val synchronizerAlias = SynchronizerAlias.tryCreate("splitwellUpgrade")
+
+  // Ports of the splitwellUpgrade node, see simple-topology-canton.conf.
+  private val oldSequencerAdminPort = Port.tryCreate(5509)
+  private val oldSequencerPublicPort = Port.tryCreate(5508)
+  private val oldMediatorAdminPort = Port.tryCreate(5507)
 
   // With start-canton.sh -t the synchronizer is bootstrapped at serial 0 and protocol version 37,
   // see bootstrap-canton.sc.
@@ -86,16 +94,36 @@ class SyncOperatorRollForwardLsuIntegrationTest extends IntegrationTest with Sta
         Seq("simple-topology-1sv.conf", "sync-operator-topology.conf"),
         this.getClass.getSimpleName,
       )
-      .withOnlyAliceValidatorConnectingToSplitwell
+      .withValidatorsDisconnectedFromSplitwell(
+        "aliceValidator",
+        "bobValidator",
+        "splitwellValidator",
+      )
       .withStandardSetup
       .addConfigTransform((_, config) => {
         val operatorName = InstanceName.tryCreate("syncOperator")
         val operator = config.syncOperatorApps(operatorName)
-        config.copy(syncOperatorApps =
-          Map(
+        config.copy(
+          syncOperatorApps = Map(
             operatorName -> announcingOperator(operator),
             InstanceName.tryCreate(rollForwardOperatorName) -> rollForwardOperator(operator),
-          )
+          ),
+          // Alice's validator connects its participant to the synchronizer.
+          validatorApps =
+            config.validatorApps.updatedWith(InstanceName.tryCreate("aliceValidator")) {
+              _.map { validator =>
+                validator.copy(domains =
+                  validator.domains.copy(extra =
+                    Seq(
+                      ValidatorExtraSynchronizerConfig(
+                        synchronizerAlias,
+                        s"http://localhost:${oldSequencerPublicPort.unwrap}",
+                      )
+                    )
+                  )
+                )
+              }
+            },
         )
       })
       // The roll-forward operator must only start once the announcing one has stopped.
@@ -112,17 +140,19 @@ class SyncOperatorRollForwardLsuIntegrationTest extends IntegrationTest with Sta
       serial = Some(serial),
     )
 
-  // The mediator is only read during an upgrade, so the shared topology leaves it out.
-  private def withMediator(node: SyncOperatorSynchronizerNodeConfig) =
-    node.copy(mediator =
-      Some(SyncOperatorMediatorConfig(FullClientConfig(port = Port.tryCreate(5707))))
+  // The shared topology points the operator at splitwell, and leaves out the mediator, which is
+  // only read during an upgrade.
+  private def oldNode(node: SyncOperatorSynchronizerNodeConfig) =
+    node.copy(
+      sequencer = node.sequencer.copy(adminApi = FullClientConfig(port = oldSequencerAdminPort)),
+      mediator = Some(SyncOperatorMediatorConfig(FullClientConfig(port = oldMediatorAdminPort))),
     )
 
   /** Schedules the upgrade to the announced serial, and never initializes its successor. */
   private def announcingOperator(c: SyncOperatorAppBackendConfig) =
     c.copy(
       synchronizerNodes = c.synchronizerNodes.copy(
-        current = withMediator(c.synchronizerNodes.current),
+        current = oldNode(c.synchronizerNodes.current),
         // An upgrade can only be scheduled with a successor configured.
         successor = Some(newNode(announcedSerial)),
       ),
@@ -145,7 +175,7 @@ class SyncOperatorRollForwardLsuIntegrationTest extends IntegrationTest with Sta
     c.copy(
       synchronizerNodes = c.synchronizerNodes.copy(
         current = newNode(newSerial),
-        legacy = Some(withMediator(c.synchronizerNodes.current)),
+        legacy = Some(oldNode(c.synchronizerNodes.current)),
       ),
       rollForwardLsu = Some(
         SyncOperatorRollForwardLsuConfig(
@@ -170,7 +200,8 @@ class SyncOperatorRollForwardLsuIntegrationTest extends IntegrationTest with Sta
       startAllSync(aliceValidatorBackend)
       val alice = aliceValidatorBackend.participantClientWithAdminToken
 
-      // The bootstrap admits alice's participant, which joins splitwell when its validator starts.
+      // The bootstrap admits alice's participant, which joins the synchronizer when its validator
+      // starts.
       clue("alice's participant is granted unlimited traffic") {
         eventually(2.minutes) {
           trafficState(sequencer, alice.id).map(_.extraTrafficLimit) shouldBe
@@ -279,7 +310,7 @@ class SyncOperatorRollForwardLsuIntegrationTest extends IntegrationTest with Sta
 
         clue("stop apps manually to prevent errors from the synchronizer being force stopped") {
           rollForwardBackend.stop()
-          alice.synchronizers.disconnect(splitwellAlias)
+          alice.synchronizers.disconnect(synchronizerAlias)
         }
       }
     }
@@ -297,14 +328,14 @@ class SyncOperatorRollForwardLsuIntegrationTest extends IntegrationTest with Sta
   private def connectedPsid(participant: ParticipantClientReference) =
     participant.synchronizers
       .list_connected()
-      .find(_.synchronizerAlias == splitwellAlias)
+      .find(_.synchronizerAlias == synchronizerAlias)
       .value
       .physicalSynchronizerId
 
   private def enableParty(participant: ParticipantClientReference, name: String) =
     participant.parties.enable(
       name,
-      synchronizer = Some(splitwellAlias),
+      synchronizer = Some(synchronizerAlias),
       synchronizeParticipants = Seq(participant),
       synchronize = Some(NonNegativeDuration.ofSeconds(60)),
     )
