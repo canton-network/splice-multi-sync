@@ -52,8 +52,9 @@ class TrafficReportReader(
       intervals <- before.fold(readIntervals(upgrades, starts.toList))(error =>
         Future.successful(Left(error))
       )
-      // Canton prunes the journal before it moves the bound, so a prune that moved the bound
-      // during the read may have removed rows the readings used.
+      // Canton prunes the journal before it moves the bound, so check the bound again in case a
+      // prune ran during the read. A prune that hasn't moved the bound yet can't be seen here, so
+      // the sequencer must not be pruned while a report is read.
       after <- if (intervals.isRight) unreadable(upgrades, starts) else Future.successful(None)
     } yield after.fold(intervals)(Left(_))
 

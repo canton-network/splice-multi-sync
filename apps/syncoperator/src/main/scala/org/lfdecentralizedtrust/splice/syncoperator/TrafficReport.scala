@@ -22,9 +22,6 @@ final case class TrafficReport(intervalLength: Duration) {
 
   /** The first interval that starts after the sequencer's pruning lower bound. Pruning keeps only
     * each member's latest journal row up to that bound, so readings at or before it are wrong.
-    * Canton prunes the journal before it moves the bound, so the reader checks the bound again
-    * after reading. Only a read that falls entirely between the prune and the move can still
-    * report a wrong total.
     */
   def firstReadableStart(pruningLowerBound: CantonTimestamp): CantonTimestamp =
     alignDown(pruningLowerBound).plus(intervalLength)
