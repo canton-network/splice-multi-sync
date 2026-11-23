@@ -180,7 +180,7 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
 
     "read the interval that spans an upgrade from both sequencers" in {
       // The current sequencer's counters freeze at the upgrade. The successor takes them over, but
-      // reports zero before the upgrade.
+      // not the history before it, so its reading before the upgrade is wrong.
       val current = mockSequencer(Map(interval(1) -> 100, interval(2) -> 100))
       val successor = mockSequencer(Map(interval(1) -> 0, interval(2) -> 150))
       announceUpgrade(current, NonNegativeInt.zero, upgradeTime = interval(1).plusSeconds(300))

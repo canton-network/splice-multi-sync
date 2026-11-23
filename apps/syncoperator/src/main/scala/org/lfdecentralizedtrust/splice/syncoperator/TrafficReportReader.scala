@@ -31,8 +31,8 @@ import scala.concurrent.{ExecutionContext, Future}
   * sequencer.
   *
   * Across a logical synchronizer upgrade, readings up to the upgrade time come from the current
-  * sequencer and later ones from the successor. A successor takes over the counters at the upgrade
-  * but not their history, so it reports zero for every member before it.
+  * sequencer and later ones from the successor. A successor takes over each member's counter at
+  * the upgrade but not the history before it.
   */
 class TrafficReportReader(
     report: TrafficReport,
