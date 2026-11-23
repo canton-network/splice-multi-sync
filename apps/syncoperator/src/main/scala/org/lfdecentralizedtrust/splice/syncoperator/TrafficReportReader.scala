@@ -58,18 +58,43 @@ class TrafficReportReader(
       after <- if (intervals.isRight) unreadable(upgrades, starts) else Future.successful(None)
     } yield after.fold(intervals)(Left(_))
 
-  /** Why the sequencer can't serve `starts`, if it pruned the first one or the first one predates
-    * the upgrade to it.
+  /** Why the sequencers can't serve `starts`: one of them pruned the first reading it serves, or
+    * that reading predates the upgrade to the current sequencer.
     */
   private def unreadable(upgrades: UpgradeTimes, starts: Seq[CantonTimestamp])(implicit
       tc: TraceContext
-  ): Future[Option[String]] =
-    current.getSequencerPruningStatus().map { pruningStatus =>
-      val firstReadable = report.firstReadableStart(
-        upgrades.currentFrom.fold(pruningStatus.lowerBound)(_.max(pruningStatus.lowerBound))
-      )
-      Option.when(starts.headOption.exists(_ < firstReadable))(cannotProvide(firstReadable))
+  ): Future[Option[String]] = {
+    val readings = starts ++ starts.lastOption.map(_.plus(report.intervalLength))
+    val (fromSuccessor, fromCurrent) = readings.partition(successorAt(upgrades, _).isDefined)
+    val checks =
+      fromCurrent.headOption.map(unreadableAt(current, upgrades.currentFrom, _)).toList ++
+        successor.zip(fromSuccessor.headOption).map { case (successorConnection, first) =>
+          unreadableAt(successorConnection, None, first)
+        }
+    Future.sequence(checks).map(_.flatten.headOption)
+  }
+
+  /** Why `sequencer` can't serve a reading at `first`: it pruned it, or it predates `from`, the
+    * upgrade to that sequencer.
+    */
+  private def unreadableAt(
+      sequencer: SequencerAdminConnection,
+      from: Option[CantonTimestamp],
+      first: CantonTimestamp,
+  )(implicit tc: TraceContext): Future[Option[String]] =
+    sequencer.getSequencerPruningStatus().map { pruningStatus =>
+      val bound = from.fold(pruningStatus.lowerBound)(_.max(pruningStatus.lowerBound))
+      Option.when(first <= bound)(cannotProvide(report.firstReadableStart(bound)))
     }
+
+  /** The successor, for a reading after the upgrade to it. Other readings come from the current
+    * sequencer.
+    */
+  private def successorAt(
+      upgrades: UpgradeTimes,
+      time: CantonTimestamp,
+  ): Option[SequencerAdminConnection] =
+    successor.filter(_ => upgrades.successorFrom.exists(time > _))
 
   private def readIntervals(
       upgrades: UpgradeTimes,
@@ -131,12 +156,9 @@ class TrafficReportReader(
     */
   private def readTrafficStates(upgrades: UpgradeTimes, time: CantonTimestamp)(implicit
       tc: TraceContext
-  ): Future[Option[Map[Member, TrafficState]]] = {
-    val sequencer = (successor, upgrades.successorFrom) match {
-      case (Some(successorConnection), Some(upgrade)) if time > upgrade => successorConnection
-      case _ => current
-    }
-    sequencer
+  ): Future[Option[Map[Member, TrafficState]]] =
+    successorAt(upgrades, time)
+      .getOrElse(current)
       .getLsuTrafficControlState(Some(time))
       .map(bytes =>
         Some(
@@ -155,7 +177,6 @@ class TrafficReportReader(
             if ErrorDetails.matches(e, SequencerError.NotAtUpgradeTimeOrBeyond) =>
           None
       }
-  }
 
   private def interval(start: CantonTimestamp, trafficConsumed: Long) =
     TrafficReportInterval(

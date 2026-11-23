@@ -175,6 +175,14 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
         .map(_ shouldBe Right(Seq(ok(1, 50))))
     }
 
+    "reject a range the successor pruned" in {
+      val current = mockSequencer(Map(interval(1) -> 100, interval(2) -> 100))
+      val successor = mockSequencer(Map(interval(2) -> 150), pruningLowerBound = interval(2))
+      announceUpgrade(current, NonNegativeInt.zero, upgradeTime = interval(1).plusSeconds(300))
+      read(Seq(interval(1)), current, Some(successor))
+        .map(_ shouldBe Left(cannotProvide(interval(3))))
+    }
+
     "reject the interval that spans the upgrade once the successor is the current sequencer" in {
       val current =
         mockSequencer(Map(interval(1) -> 0, interval(2) -> 150, interval(3) -> 170))
