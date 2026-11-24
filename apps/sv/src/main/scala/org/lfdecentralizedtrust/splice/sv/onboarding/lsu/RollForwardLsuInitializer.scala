@@ -55,13 +55,7 @@ class RollForwardLsuInitializer(
     ),
     rollForwardConfig.newPhysicalSynchronizerSerial,
     rollForwardConfig.newPhysicalSynchronizerProtocolVersion,
-    rollForwardConfig.exportTimes.map(times =>
-      RollForwardLsuNodeInitializer.ExportTimes(
-        times.topologyExportTime,
-        times.trafficExportTime,
-        times.upgradeTime,
-      )
-    ),
+    rollForwardConfig.exportTimes,
     clock,
     loggerFactory,
     retryProvider,

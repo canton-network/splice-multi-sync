@@ -3,22 +3,21 @@
 
 package org.lfdecentralizedtrust.splice.lsu
 
+import com.digitalasset.base.error.utils.ErrorDetails
 import com.digitalasset.canton.admin.api.client.data.NodeStatus
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.transaction.GrpcConnection
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
-import io.grpc.Status
+import io.grpc.{Status, StatusRuntimeException}
 import org.lfdecentralizedtrust.splice.environment.{RetryFor, RetryProvider, SynchronizerNode}
 import org.lfdecentralizedtrust.splice.environment.SynchronizerNode.LocalSynchronizerNodes
-import org.lfdecentralizedtrust.splice.lsu.RollForwardLsuNodeInitializer.{
-  ExportTimes,
-  RolledForward,
-}
+import org.lfdecentralizedtrust.splice.lsu.RollForwardLsuNodeInitializer.RolledForward
 
 import java.nio.file.Path
 import scala.concurrent.{ExecutionContext, Future}
@@ -34,7 +33,7 @@ class RollForwardLsuNodeInitializer[T <: SynchronizerNode & LsuSynchronizerNode]
     newPhysicalSynchronizerSerial: NonNegativeInt,
     newPhysicalSynchronizerProtocolVersion: ProtocolVersion,
     // If unset, we assume there is an LsuAnnouncement.
-    exportTimes: Option[ExportTimes],
+    exportTimes: Option[RollForwardLsuTimestampConfig],
     clock: Clock,
     val loggerFactory: NamedLoggerFactory,
     retryProvider: RetryProvider,
@@ -148,24 +147,29 @@ class RollForwardLsuNodeInitializer[T <: SynchronizerNode & LsuSynchronizerNode]
               upgradeTime = None,
               ignorePsidCheck = true,
             )
-            trafficState <- legacyNode.sequencerAdminConnection.getLsuTrafficControlState(ts =
-              exportTimes.map(_.trafficExportTime.getTimestamp())
-            )
-            _ <- currentNode.sequencerAdminConnection.setLsuTrafficControlState(trafficState)
           } yield ()
         }
+      // Also runs when the nodes are already initialized: an earlier run may have stopped before
+      // the transfer.
+      _ <- transferTrafficState()
     } yield RolledForward(legacyPhysicalSynchronizerId, newPhysicalSynchronizerId, upgradeTime)
+
+  private def transferTrafficState()(implicit tc: TraceContext): Future[Unit] =
+    (for {
+      trafficState <- legacyNode.sequencerAdminConnection
+        .getLsuTrafficControlState(ts = exportTimes.map(_.trafficExportTime.getTimestamp()))
+      _ <- currentNode.sequencerAdminConnection.setLsuTrafficControlState(trafficState)
+    } yield logger.info("Transferred LSU traffic control state from legacy to current sequencer"))
+      .recover {
+        case ex: StatusRuntimeException
+            if ErrorDetails.matches(ex, SequencerError.LsuTrafficAlreadyInitialized) =>
+          logger.info(
+            "Current sequencer has already been initialized with the LSU traffic control state"
+          )
+      }
 }
 
 object RollForwardLsuNodeInitializer {
-
-  /** The times at which the legacy node's state is exported. */
-  final case class ExportTimes(
-      topologyExportTime: LsuRollForwardTimestamp,
-      trafficExportTime: LsuRollForwardTimestamp,
-      // Returned in RolledForward, for callers that migrate a participant.
-      upgradeTime: Option[LsuRollForwardTimestamp],
-  )
 
   final case class RolledForward(
       legacyPhysicalSynchronizerId: PhysicalSynchronizerId,

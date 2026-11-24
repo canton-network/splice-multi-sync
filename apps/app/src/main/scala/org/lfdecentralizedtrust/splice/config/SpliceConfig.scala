@@ -10,6 +10,7 @@ import cats.syntax.functor.*
 import org.lfdecentralizedtrust.splice.auth.AuthConfig
 import org.lfdecentralizedtrust.splice.environment.{DarResources, PackageVettingLookupService}
 import org.lfdecentralizedtrust.splice.http.UrlValidator
+import org.lfdecentralizedtrust.splice.lsu.RollForwardLsuTimestampConfig
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.BftScanConnection.BftScanClientConfig
 import org.lfdecentralizedtrust.splice.scan.config.{
   AnalyzableTimeWindowConfig,
@@ -41,7 +42,6 @@ import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorLsuConfig,
   SyncOperatorMediatorConfig,
   SyncOperatorRollForwardLsuConfig,
-  SyncOperatorRollForwardLsuTimestampConfig,
   SyncOperatorSequencerConfig,
   SyncOperatorSynchronizerNodeConfig,
   SyncOperatorSynchronizerNodesConfig,
@@ -675,9 +675,8 @@ object SpliceConfig {
           _.as[SvOnboardingConfig.InitialPackageConfig].toTry
         }
       )
-    implicit val svOnboardingRollForwardLsuTimestampConfigReader
-        : ConfigReader[SvOnboardingConfig.RollForwardLsuTimestampConfig] =
-      deriveReader[SvOnboardingConfig.RollForwardLsuTimestampConfig]
+    implicit val rollForwardLsuTimestampConfigReader: ConfigReader[RollForwardLsuTimestampConfig] =
+      deriveReader[RollForwardLsuTimestampConfig]
     implicit val svOnboardingRollForwardLsuReader: ConfigReader[SvOnboardingConfig.RollForwardLsu] =
       deriveReader[SvOnboardingConfig.RollForwardLsu]
     implicit val svOnboardingConfigReader: ConfigReader[SvOnboardingConfig] =
@@ -870,6 +869,8 @@ object SpliceConfig {
           ),
         )
       })
+    implicit val validatorRollForwardLsuConfigReader: ConfigReader[ValidatorRollForwardLsuConfig] =
+      deriveReader[ValidatorRollForwardLsuConfig]
     implicit val validatorExtraSynchronizerConfigReader
         : ConfigReader[ValidatorExtraSynchronizerConfig] =
       deriveReader[ValidatorExtraSynchronizerConfig]
@@ -1044,9 +1045,6 @@ object SpliceConfig {
       deriveReader[SyncOperatorSynchronizerNodesConfig]
     implicit val syncOperatorLsuConfigReader: ConfigReader[SyncOperatorLsuConfig] =
       deriveReader[SyncOperatorLsuConfig]
-    implicit val syncOperatorRollForwardLsuTimestampConfigReader
-        : ConfigReader[SyncOperatorRollForwardLsuTimestampConfig] =
-      deriveReader[SyncOperatorRollForwardLsuTimestampConfig]
     implicit val syncOperatorRollForwardLsuConfigReader
         : ConfigReader[SyncOperatorRollForwardLsuConfig] =
       deriveReader[SyncOperatorRollForwardLsuConfig]
@@ -1278,9 +1276,8 @@ object SpliceConfig {
     implicit val svOnboardingInitialPackageConfigWriter
         : ConfigWriter[SvOnboardingConfig.InitialPackageConfig] =
       ConfigWriter.stringConfigWriter.contramap(_.asJson.noSpaces)
-    implicit val svOnboardingRollForwardLsuTimestampConfigWriter
-        : ConfigWriter[SvOnboardingConfig.RollForwardLsuTimestampConfig] =
-      deriveWriter[SvOnboardingConfig.RollForwardLsuTimestampConfig]
+    implicit val rollForwardLsuTimestampConfigWriter: ConfigWriter[RollForwardLsuTimestampConfig] =
+      deriveWriter[RollForwardLsuTimestampConfig]
     implicit val svOnboardingRollForwardLsuWriter: ConfigWriter[SvOnboardingConfig.RollForwardLsu] =
       deriveWriter[SvOnboardingConfig.RollForwardLsu]
     implicit val svOnboardingConfigWriter: ConfigWriter[SvOnboardingConfig] =
@@ -1391,6 +1388,8 @@ object SpliceConfig {
     implicit val validatorDecentralizedSynchronizerConfigWriter
         : ConfigWriter[ValidatorDecentralizedSynchronizerConfig] =
       deriveWriter[ValidatorDecentralizedSynchronizerConfig]
+    implicit val validatorRollForwardLsuConfigWriter: ConfigWriter[ValidatorRollForwardLsuConfig] =
+      deriveWriter[ValidatorRollForwardLsuConfig]
     implicit val validatorExtraSynchronizerConfigWriter
         : ConfigWriter[ValidatorExtraSynchronizerConfig] =
       deriveWriter[ValidatorExtraSynchronizerConfig]
@@ -1441,9 +1440,6 @@ object SpliceConfig {
       deriveWriter[SyncOperatorSynchronizerNodesConfig]
     implicit val syncOperatorLsuConfigWriter: ConfigWriter[SyncOperatorLsuConfig] =
       deriveWriter[SyncOperatorLsuConfig]
-    implicit val syncOperatorRollForwardLsuTimestampConfigWriter
-        : ConfigWriter[SyncOperatorRollForwardLsuTimestampConfig] =
-      deriveWriter[SyncOperatorRollForwardLsuTimestampConfig]
     implicit val syncOperatorRollForwardLsuConfigWriter
         : ConfigWriter[SyncOperatorRollForwardLsuConfig] =
       deriveWriter[SyncOperatorRollForwardLsuConfig]

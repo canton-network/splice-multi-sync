@@ -23,7 +23,7 @@ import org.lfdecentralizedtrust.splice.environment.{
 import monocle.macros.syntax.lens.*
 import org.lfdecentralizedtrust.splice.integration.EnvironmentDefinition
 import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.IntegrationTest
-import org.lfdecentralizedtrust.splice.lsu.LsuRollForwardTimestamp
+import org.lfdecentralizedtrust.splice.lsu.{LsuRollForwardTimestamp, RollForwardLsuTimestampConfig}
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.commands.HttpScanAppClient.DomainSequencers
 import org.lfdecentralizedtrust.splice.sv.config.{
   SvOnboardingConfig,
@@ -146,7 +146,7 @@ class RollForwardLsuDRIntegrationTest
                           NonNegativeInt.tryCreate(2),
                           ProtocolVersion.v37,
                           exportTimes = Some(
-                            SvOnboardingConfig.RollForwardLsuTimestampConfig(
+                            RollForwardLsuTimestampConfig(
                               topologyExportTime = LsuRollForwardTimestamp.TimestampFromFile(
                                 topologyExportTimeFile.path
                               ),

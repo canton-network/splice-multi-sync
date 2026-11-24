@@ -164,13 +164,8 @@ class SyncOperatorApp(
       ),
       rollForwardConfig.newPhysicalSynchronizerSerial,
       rollForwardConfig.newPhysicalSynchronizerProtocolVersion,
-      rollForwardConfig.exportTimes.map(times =>
-        RollForwardLsuNodeInitializer.ExportTimes(
-          times.topologyExportTime,
-          times.trafficExportTime,
-          upgradeTime = None,
-        )
-      ),
+      // The upgrade time is for a participant's manual LSU, which the operator does not perform.
+      rollForwardConfig.exportTimes.map(_.copy(upgradeTime = None)),
       clock,
       loggerFactory,
       retryProvider,

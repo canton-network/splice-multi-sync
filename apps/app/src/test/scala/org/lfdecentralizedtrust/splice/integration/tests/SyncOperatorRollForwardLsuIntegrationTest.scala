@@ -9,11 +9,8 @@ import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.{FullClientConfig, NonNegativeDuration}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.topology.transaction.GrpcConnection
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.nonempty.NonEmpty
 import org.lfdecentralizedtrust.splice.console.ParticipantClientReference
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
 import org.lfdecentralizedtrust.splice.integration.EnvironmentDefinition
@@ -33,7 +30,11 @@ import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorSynchronizerNodeConfig,
 }
 import org.lfdecentralizedtrust.splice.util.StandaloneCanton
-import org.lfdecentralizedtrust.splice.validator.config.ValidatorExtraSynchronizerConfig
+import org.lfdecentralizedtrust.splice.validator.config.{
+  ValidatorAppBackendConfig,
+  ValidatorExtraSynchronizerConfig,
+  ValidatorRollForwardLsuConfig,
+}
 
 import java.time.Duration
 import scala.concurrent.duration.*
@@ -43,7 +44,8 @@ import scala.concurrent.duration.*
   *
   * Same scenario as RollForwardLsuIntegrationTest: the operator schedules an upgrade from serial 0
   * to 1 and never initializes the successor. It then restarts with the roll-forward config and
-  * initializes new nodes at serial 2. A second operator instance stands in for the restart.
+  * initializes new nodes at serial 2. A second operator instance stands in for the restart, and a
+  * second instance of alice's validator moves her participant to the new nodes.
   */
 class SyncOperatorRollForwardLsuIntegrationTest extends IntegrationTest with StandaloneCanton {
 
@@ -103,31 +105,44 @@ class SyncOperatorRollForwardLsuIntegrationTest extends IntegrationTest with Sta
       .addConfigTransform((_, config) => {
         val operatorName = InstanceName.tryCreate("syncOperator")
         val operator = config.syncOperatorApps(operatorName)
+        val aliceValidatorName = InstanceName.tryCreate("aliceValidator")
+        val aliceValidator = config.validatorApps(aliceValidatorName)
         config.copy(
           syncOperatorApps = Map(
             operatorName -> announcingOperator(operator),
             InstanceName.tryCreate(rollForwardOperatorName) -> rollForwardOperator(operator),
           ),
-          // Alice's validator connects its participant to the synchronizer.
-          validatorApps =
-            config.validatorApps.updatedWith(InstanceName.tryCreate("aliceValidator")) {
-              _.map { validator =>
-                validator.copy(domains =
-                  validator.domains.copy(extra =
-                    Seq(
-                      ValidatorExtraSynchronizerConfig(
-                        synchronizerAlias,
-                        s"http://localhost:${oldSequencerPublicPort.unwrap}",
-                      )
-                    )
-                  )
-                )
-              }
-            },
+          validatorApps = config.validatorApps +
+            (aliceValidatorName -> onSynchronizer(aliceValidator, oldSequencerPublicPort)) +
+            // The instance after the roll-forward, which moves alice's participant.
+            (InstanceName.tryCreate("aliceValidatorLocal") ->
+              onSynchronizer(
+                aliceValidator,
+                newSequencerPublicPort,
+                Some(ValidatorRollForwardLsuConfig(newSerial, newPv)),
+              )),
         )
       })
       // The roll-forward operator must only start once the announcing one has stopped.
       .withManualStart
+
+  // The validator connects its participant to the synchronizer through the given sequencer.
+  private def onSynchronizer(
+      validator: ValidatorAppBackendConfig,
+      sequencerPublicPort: Port,
+      rollForwardLsu: Option[ValidatorRollForwardLsuConfig] = None,
+  ) =
+    validator.copy(domains =
+      validator.domains.copy(extra =
+        Seq(
+          ValidatorExtraSynchronizerConfig(
+            synchronizerAlias,
+            s"http://localhost:${sequencerPublicPort.unwrap}",
+            rollForwardLsu,
+          )
+        )
+      )
+    )
 
   private def newNode(serial: NonNegativeInt) =
     SyncOperatorSynchronizerNodeConfig(
@@ -263,8 +278,9 @@ class SyncOperatorRollForwardLsuIntegrationTest extends IntegrationTest with Sta
           syncOperatorBackend.stop()
           rollForwardBackend.startSync()
         }
-        val newNodes = rollForwardBackend.appState.synchronizerNodes.current
-        val newSequencer = newNodes.sequencerAdminConnection
+        // Read from the running app, as the operator restarts again below.
+        def newNodes = rollForwardBackend.appState.synchronizerNodes.current
+        def newSequencer = newNodes.sequencerAdminConnection
 
         clue("the new nodes are initialized from the legacy ones at the new serial") {
           eventually() {
@@ -273,31 +289,22 @@ class SyncOperatorRollForwardLsuIntegrationTest extends IntegrationTest with Sta
           }
         }
 
-        clue("alice's traffic state is carried onto the new synchronizer") {
+        val consumedCarried = clue("alice's traffic state is carried onto the new synchronizer") {
           eventually() {
             val state = trafficState(newSequencer, alice.id).value
             state.extraTrafficLimit shouldBe UnlimitedTraffic
             // Without the transfer this resets to zero and members get back what they spent.
             state.extraTrafficConsumed.value should be >= consumedBefore
+            state.extraTrafficConsumed.value
           }
         }
 
-        // The sync operator has no counterpart to Scan's roll-forward endpoint, so the participant
-        // is migrated manually.
-        clue("alice's participant moves to the new synchronizer") {
-          alice.synchronizers.perform_manual_lsu(
-            legacyPsid,
-            newPsid,
-            Some(upgradeTime),
-            Map(
-              newSequencer.getSequencerId.futureValue -> new GrpcConnection(
-                NonEmpty.mk(Set, Endpoint("localhost", newSequencerPublicPort)),
-                transportSecurity = false,
-                customTrustCertificates = None,
-              )
-            ),
-          )
-          eventually(2.minutes) {
+        // The sync operator has no counterpart to Scan's roll-forward endpoint, so alice's
+        // validator restarts with the roll-forward config of the synchronizer.
+        clue("alice's validator moves its participant to the new synchronizer") {
+          aliceValidatorBackend.stop()
+          aliceValidatorLocalBackend.startSync()
+          eventually() {
             connectedPsid(alice) shouldBe newPsid
           }
         }
@@ -306,6 +313,19 @@ class SyncOperatorRollForwardLsuIntegrationTest extends IntegrationTest with Sta
         // topology transactions instead.
         clue("alice's participant transacts on the new synchronizer") {
           enableParty(alice, "roll-forward-after")
+        }
+
+        // The roll-forward config is still set, so a restart runs the roll-forward again.
+        clue("the operator restarts without resetting the traffic state") {
+          val consumedSince = eventually() {
+            val consumedOnNewNodes = consumed(newSequencer, alice.id)
+            consumedOnNewNodes should be > consumedCarried
+            consumedOnNewNodes
+          }
+          rollForwardBackend.stop()
+          rollForwardBackend.startSync()
+          newSequencer.getPhysicalSynchronizerId().futureValue shouldBe newPsid
+          consumed(newSequencer, alice.id) should be >= consumedSince
         }
 
         clue("stop apps manually to prevent errors from the synchronizer being force stopped") {

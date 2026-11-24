@@ -20,7 +20,7 @@ import org.lfdecentralizedtrust.splice.config.{
   SpliceParametersConfig,
   SplicePostgresConfig,
 }
-import org.lfdecentralizedtrust.splice.lsu.LsuRollForwardTimestamp
+import org.lfdecentralizedtrust.splice.lsu.{LsuRollForwardTimestamp, RollForwardLsuTimestampConfig}
 
 import java.nio.file.Path
 
@@ -78,20 +78,15 @@ case class SyncOperatorLsuConfig(
     newPhysicalSynchronizerProtocolVersion: ProtocolVersion,
 )
 
-// The times at which a roll-forward LSU exports the legacy node's state.
-case class SyncOperatorRollForwardLsuTimestampConfig(
-    topologyExportTime: LsuRollForwardTimestamp,
-    trafficExportTime: LsuRollForwardTimestamp,
-)
-
 /** A roll-forward LSU, mirroring the SV app's `SvOnboardingConfig.RollForwardLsu`. The app
   * initializes the current node from the legacy one when it starts.
   */
 case class SyncOperatorRollForwardLsuConfig(
     newPhysicalSynchronizerSerial: NonNegativeInt,
     newPhysicalSynchronizerProtocolVersion: ProtocolVersion,
-    // If unset, we assume there is an LsuAnnouncement.
-    exportTimes: Option[SyncOperatorRollForwardLsuTimestampConfig] = None,
+    // If unset, we assume there is an LsuAnnouncement. The operator has no participant to migrate,
+    // so it does not use the upgrade time.
+    exportTimes: Option[RollForwardLsuTimestampConfig] = None,
 )
 
 /** Traffic control parameters for the dedicated synchronizer. These should always match mainnet.

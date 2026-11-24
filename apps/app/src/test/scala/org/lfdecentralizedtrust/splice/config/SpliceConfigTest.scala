@@ -33,6 +33,30 @@ class SpliceConfigTest extends AsyncWordSpec with BaseTest {
       "topup interval 1 second must not be smaller than the polling interval 30 seconds"
     )
   }
+  "Validator config loads a roll-forward LSU of an extra synchronizer" in {
+    val rollForward = ConfigFactory.parseString(
+      """
+      |canton.validator-apps.aliceValidator.domains.extra = [
+      |  {
+      |    alias = "splitwell"
+      |    url = "http://localhost:27608"
+      |    roll-forward-lsu {
+      |      new-physical-synchronizer-serial = 2
+      |      new-physical-synchronizer-protocol-version = "37"
+      |    }
+      |  }
+      |]
+     """.stripMargin
+    )
+    val loaded =
+      SpliceConfig.loadAndValidate(CantonConfig.mergeConfigs(config, Seq(rollForward))).value
+    val synchronizer = loaded.validatorsByString("aliceValidator").domains.extra.loneElement
+    synchronizer.url shouldBe "http://localhost:27608"
+    val rollForwardLsu = synchronizer.rollForwardLsu.value
+    rollForwardLsu.newPhysicalSynchronizerSerial.value shouldBe 2
+    rollForwardLsu.newPhysicalSynchronizerProtocolVersion shouldBe ProtocolVersion.v37
+  }
+
   "disableSvValidatorBftSequencerConnection" should {
     "be rejected if svValidator is not true" in {
       val overwrite = ConfigFactory.parseString(
