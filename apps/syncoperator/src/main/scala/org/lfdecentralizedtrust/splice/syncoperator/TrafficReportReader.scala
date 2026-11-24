@@ -9,7 +9,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.TrafficState
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
-import com.digitalasset.canton.topology.{Member, ParticipantId, SynchronizerId}
+import com.digitalasset.canton.topology.{Member, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.StatusRuntimeException
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
@@ -18,7 +18,6 @@ import org.lfdecentralizedtrust.splice.syncoperator.TrafficReportReader.{
   UpgradeTimes,
   cannotProvide,
   notOver,
-  participantLeft,
 }
 
 import java.time.ZoneOffset
@@ -131,11 +130,8 @@ class TrafficReportReader(
         readTrafficStates(upgrades, end).flatMap {
           case None => Future.successful(Left(notOver(start, end)))
           case Some(atEnd) =>
-            TrafficReport.participantsConsumed(atStart, atEnd) match {
-              case Left(participant) =>
-                Future.successful(Left(participantLeft(participant, start, end)))
-              case Right(consumed) => readConsumed(upgrades, rest, atEnd).map(_.map(consumed :: _))
-            }
+            readConsumed(upgrades, rest, atEnd)
+              .map(_.map(TrafficReport.participantsConsumed(atStart, atEnd) :: _))
         }
     }
 
@@ -198,14 +194,6 @@ object TrafficReportReader {
     s"The interval [$start, $end) is not over yet, or the sequencer has not sequenced past its " +
       s"end. Request a range that ends at or before $start (or wait for long enough after " +
       s"$end and retry)."
-
-  def participantLeft(
-      participant: ParticipantId,
-      start: CantonTimestamp,
-      end: CantonTimestamp,
-  ): String =
-    s"Participant $participant left the synchronizer during [$start, $end), so its traffic in " +
-      s"the interval can't be read. Request a range without the interval."
 
   private final case class UpgradeTimes(
       currentFrom: Option[CantonTimestamp],

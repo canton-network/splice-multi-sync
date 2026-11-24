@@ -6,7 +6,8 @@ package org.lfdecentralizedtrust.splice.syncoperator.admin.api.client.commands
 import com.digitalasset.canton.data.CantonTimestamp
 import org.apache.pekko.http.scaladsl.model.HttpHeader
 import org.lfdecentralizedtrust.splice.admin.api.client.commands.HttpCommand
-import org.lfdecentralizedtrust.splice.http.v0.{definitions, sync_operator as http}
+import org.lfdecentralizedtrust.splice.http.v0.definitions
+import org.lfdecentralizedtrust.splice.http.v0.external.sync_operator as http
 import org.lfdecentralizedtrust.splice.util.TemplateJsonDecoder
 
 import java.time.ZoneOffset

@@ -7,7 +7,8 @@ import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import io.opentelemetry.api.trace.Tracer
 import org.lfdecentralizedtrust.splice.admin.http.HttpErrorHandler
 import org.lfdecentralizedtrust.splice.auth.AuthenticationOnlyAuthExtractor.AuthenticatedRequest
-import org.lfdecentralizedtrust.splice.http.v0.{definitions, sync_operator as v0}
+import org.lfdecentralizedtrust.splice.http.v0.definitions
+import org.lfdecentralizedtrust.splice.http.v0.external.sync_operator as v0
 import org.lfdecentralizedtrust.splice.syncoperator.{TrafficReport, TrafficReportReader}
 import org.lfdecentralizedtrust.splice.util.Codec
 
