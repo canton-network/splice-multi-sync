@@ -1949,13 +1949,13 @@ lazy val `apps-syncoperator` =
       Compile / guardrailTasks :=
         List(
           ScalaServer(
-            new File("apps/syncoperator/src/main/openapi/sync-operator-internal.yaml"),
+            new File("apps/syncoperator/src/main/openapi/sync-operator-external.yaml"),
             pkg = "org.lfdecentralizedtrust.splice.http.v0",
             modules = List("pekko-http-v1.0.0", "circe"),
             customExtraction = true,
           ),
           ScalaClient(
-            new File("apps/syncoperator/src/main/openapi/sync-operator-internal.yaml"),
+            new File("apps/syncoperator/src/main/openapi/sync-operator-external.yaml"),
             pkg = "org.lfdecentralizedtrust.splice.http.v0",
             modules = List("pekko-http-v1.0.0", "circe"),
           ),

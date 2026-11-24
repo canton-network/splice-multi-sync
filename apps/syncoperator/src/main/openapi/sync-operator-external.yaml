@@ -28,7 +28,7 @@ paths:
         A participant that leaves the synchronizer during an interval isn't counted in it, because
         the sequencer no longer reports its traffic.
       tags: [sync_operator]
-      x-jvm-package: sync_operator
+      x-jvm-package: external.sync_operator
       operationId: "getTrafficReport"
       parameters:
         - name: "start_record_time"

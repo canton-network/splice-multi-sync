@@ -38,7 +38,7 @@ import org.lfdecentralizedtrust.splice.environment.{
   SynchronizerNodeService,
 }
 import org.lfdecentralizedtrust.splice.http.HttpServerMetrics
-import org.lfdecentralizedtrust.splice.http.v0.sync_operator.{
+import org.lfdecentralizedtrust.splice.http.v0.external.sync_operator.{
   SyncOperatorHandler,
   SyncOperatorResource,
 }
