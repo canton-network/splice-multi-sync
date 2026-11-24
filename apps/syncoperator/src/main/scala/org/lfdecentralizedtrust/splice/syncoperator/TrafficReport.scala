@@ -43,23 +43,19 @@ object TrafficReport {
   /** Each interval takes a reading from the sequencer, so a response covers at most this many. */
   val PageSize: Int = 100
 
-  /** The traffic charged to participants between two readings of the sequencer's traffic states,
-    * or a participant that left in between: the reading at the end no longer lists it, so its
-    * traffic up to when it left can't be read. A participant without a reading at the start joined
-    * since then and counts from zero.
+  /** The traffic charged to participants between two readings of the sequencer's traffic states.
+    * A participant without a reading at the start joined since then and counts from zero. One
+    * without a reading at the end left since then and isn't counted: the sequencer no longer
+    * lists it, so its traffic up to when it left can't be read.
     */
   def participantsConsumed(
       atStart: Map[Member, TrafficState],
       atEnd: Map[Member, TrafficState],
-  ): Either[ParticipantId, Long] =
-    atStart.keys
-      .collectFirst {
-        case participant: ParticipantId if !atEnd.contains(participant) => participant
-      }
-      .toLeft(atEnd.iterator.collect { case (participant: ParticipantId, state) =>
-        state.extraTrafficConsumed.value -
-          atStart.get(participant).fold(0L)(_.extraTrafficConsumed.value)
-      }.sum)
+  ): Long =
+    atEnd.iterator.collect { case (participant: ParticipantId, state) =>
+      state.extraTrafficConsumed.value -
+        atStart.get(participant).fold(0L)(_.extraTrafficConsumed.value)
+    }.sum
 
   /** The starts of a page of intervals, and where the next page starts if the range goes on. */
   final case class Page(starts: Seq[CantonTimestamp], nextStart: Option[CantonTimestamp])

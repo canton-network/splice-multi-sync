@@ -26,11 +26,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.nonempty.NonEmpty
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologyResult
-import org.lfdecentralizedtrust.splice.syncoperator.TrafficReportReader.{
-  cannotProvide,
-  notOver,
-  participantLeft,
-}
+import org.lfdecentralizedtrust.splice.syncoperator.TrafficReportReader.{cannotProvide, notOver}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.{Duration, Instant}
@@ -185,10 +181,9 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
         .map(_ shouldBe Right(Seq(ok(1, 50))))
     }
 
-    "reject an interval in which a participant left" in {
+    "drop the traffic of a participant that left during an interval" in {
       val sequencer = mockSequencer(Map(interval(0) -> 100), left = Set(interval(1)))
-      read(Seq(interval(0)), sequencer)
-        .map(_ shouldBe Left(participantLeft(participant1, interval(0), interval(1))))
+      read(Seq(interval(0)), sequencer).map(_ shouldBe Right(Seq(ok(0, 0))))
     }
 
     "reject a range the successor pruned" in {

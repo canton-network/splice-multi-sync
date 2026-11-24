@@ -255,18 +255,14 @@ class SyncOperatorLsuIntegrationTest
               syncOperatorBackend.getTrafficReport(beforeStart, acrossEnd).intervals
             }
             inside(intervals.map(_.trafficConsumed)) { case Seq(before, across) =>
-              before shouldBe TrafficReport
-                .participantsConsumed(
-                  trafficStates(sequencer, beforeStart),
-                  trafficStates(sequencer, acrossStart),
-                )
-                .value
-              across shouldBe TrafficReport
-                .participantsConsumed(
-                  trafficStates(sequencer, acrossStart),
-                  trafficStates(successor, acrossEnd),
-                )
-                .value
+              before shouldBe TrafficReport.participantsConsumed(
+                trafficStates(sequencer, beforeStart),
+                trafficStates(sequencer, acrossStart),
+              )
+              across shouldBe TrafficReport.participantsConsumed(
+                trafficStates(sequencer, acrossStart),
+                trafficStates(successor, acrossEnd),
+              )
             }
           }
         }
