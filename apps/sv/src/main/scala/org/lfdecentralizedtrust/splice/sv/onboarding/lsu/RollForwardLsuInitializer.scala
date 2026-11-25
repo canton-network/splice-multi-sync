@@ -3,7 +3,6 @@
 
 package org.lfdecentralizedtrust.splice.sv.onboarding.lsu
 
-import cats.syntax.foldable.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.time.Clock
@@ -99,14 +98,6 @@ class RollForwardLsuInitializer(
               r
             }
         }
-      result @ (_, _, _, _, store, _) <- newJoiningNodeInitializer(None).joinDsoAndOnboardNodes()
-      rulesAndState <- store.getDsoRulesWithSvNodeStates()
-      owningNodeSvName <- rulesAndState.getSvNameInDso(store.key.svParty)
-      _ <- currentNode.cometbftNode.traverse_(
-        _.rotateGenesisGovernanceKeyForSV1(owningNodeSvName)
-      )
-      _ <- currentNode.cometbftNode.traverse_(
-        _.reconcileNetworkConfig(owningNodeSvName, rulesAndState)
-      )
+      result <- newJoiningNodeInitializer(None).joinDsoAndOnboardNodes()
     } yield result
 }
