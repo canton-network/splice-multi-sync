@@ -1,0 +1,90 @@
+openapi: 3.0.0
+info:
+  title: Sync Operator API
+  version: 0.0.1
+tags:
+  - name: sync_operator
+servers:
+  - url: https://example.com/api/syncoperator
+paths:
+  /readyz:
+    $ref: "../../../../common/src/main/openapi/common-external.yaml#/paths/~1readyz"
+  /livez:
+    $ref: "../../../../common/src/main/openapi/common-external.yaml#/paths/~1livez"
+  /v0/traffic-report:
+    get:
+      description: |
+        Returns the traffic charged to the participants of the synchronizer this app operates,
+        for each interval of record time in `[start_record_time, end_record_time)`.
+        Intervals are aligned at multiples of their length since the Unix epoch, so both bounds
+        must be aligned too. At the default length of 10 minutes, they start at XX:00, XX:10, ...
+        UTC.
+        A response covers at most 100 intervals. If it has `next_start_record_time`, request the
+        rest of the range from there.
+        Fails with 400 if the sequencer can't serve an interval of the response: the interval is
+        not over yet, the sequencer has not sequenced past its end yet, the sequencer pruned it, or
+        it predates the upgrade to the current sequencer. The error says which part of the range to
+        request instead.
+        A participant that leaves the synchronizer during an interval isn't counted in it, because
+        the sequencer no longer reports its traffic.
+      tags: [sync_operator]
+      x-jvm-package: external.sync_operator
+      operationId: "getTrafficReport"
+      parameters:
+        - name: "start_record_time"
+          in: "query"
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: "end_record_time"
+          in: "query"
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/GetTrafficReportResponse"
+        "400":
+          $ref: "../../../../common/src/main/openapi/common-external.yaml#/components/responses/400"
+
+components:
+  schemas:
+    GetTrafficReportResponse:
+      type: object
+      required:
+        - intervals
+      properties:
+        intervals:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrafficReportInterval"
+        next_start_record_time:
+          description: |
+            Where the rest of the range starts. Absent once the response reaches
+            `end_record_time`.
+          type: string
+          format: date-time
+
+    TrafficReportInterval:
+      type: object
+      required:
+        - start_record_time
+        - end_record_time
+        - traffic_consumed
+      properties:
+        start_record_time:
+          type: string
+          format: date-time
+        end_record_time:
+          type: string
+          format: date-time
+        traffic_consumed:
+          description: Traffic charged to the participants in the interval, in bytes.
+          type: integer
+          format: int64

@@ -9,9 +9,11 @@ import com.digitalasset.canton.config.{
   FullClientConfig,
   NonNegativeDuration,
   NonNegativeFiniteDuration,
+  PositiveFiniteDuration,
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.version.ProtocolVersion
 import org.lfdecentralizedtrust.splice.automation.Trigger
@@ -24,6 +26,7 @@ import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   SpliceTestConsoleEnvironment,
 }
 import org.lfdecentralizedtrust.splice.lsu.{LsuRollForwardTimestamp, LsuTransferTrafficTrigger}
+import org.lfdecentralizedtrust.splice.syncoperator.TrafficReport
 import org.lfdecentralizedtrust.splice.syncoperator.automation.DedicatedLsuTrigger
 import org.lfdecentralizedtrust.splice.syncoperator.automation.UnlimitedTrafficTrigger.UnlimitedTraffic
 import org.lfdecentralizedtrust.splice.syncoperator.config.{
@@ -38,7 +41,7 @@ import java.time.Duration
 import scala.concurrent.duration.*
 
 /** Upgrades the synchronizer the operator runs, on a schedule the operator sets itself, and checks
-  * that members keep unlimited traffic.
+  * that members keep unlimited traffic and that the traffic report reads across the upgrade.
   *
   * The successor's sequencer and mediator are started only for this test, uninitialized, so the
   * operator's LSU trigger initializes them from the synchronizer it is upgrading.
@@ -121,6 +124,8 @@ class SyncOperatorLsuIntegrationTest
               )
             ),
             lsuDumpPath = Some((scheduleDir / "lsu-dump.json").path),
+            // Short enough that the interval spanning the upgrade is over within the test.
+            trafficReportIntervalLength = PositiveFiniteDuration.ofSeconds(10),
             parameters = c.parameters.copy(
               spliceCachingConfigs = c.parameters.spliceCachingConfigs.copy(
                 physicalSynchronizerExpiration = NonNegativeFiniteDuration.ofSeconds(1)
@@ -227,10 +232,38 @@ class SyncOperatorLsuIntegrationTest
             }
           }
 
+          val acrossStart = trafficReport.alignDown(upgradeTime)
+          val acrossEnd = acrossStart.plus(trafficReport.intervalLength)
+          // An interval is reported once the sequencer has sequenced past its end, so alice
+          // transacts after the interval that spans the upgrade is over.
+          eventually() {
+            CantonTimestamp.now() should be > acrossEnd
+          }
+
           // The participant admin API in tests does not allow pings, so the participant submits
           // topology transactions instead.
           clue("alice's participant transacts on the upgraded synchronizer") {
             enableParty(alice, "lsu-after-upgrade")
+          }
+
+          clue(
+            s"the traffic report reads the interval that spans $upgradeTime from both sequencers"
+          ) {
+            val beforeStart = acrossStart.minus(trafficReport.intervalLength)
+            // The report rejects an interval the successor has not sequenced past yet.
+            val intervals = eventuallySucceeds() {
+              syncOperatorBackend.getTrafficReport(beforeStart, acrossEnd).intervals
+            }
+            inside(intervals.map(_.trafficConsumed)) { case Seq(before, across) =>
+              before shouldBe TrafficReport.participantsConsumed(
+                trafficStates(sequencer, beforeStart),
+                trafficStates(sequencer, acrossStart),
+              )
+              across shouldBe TrafficReport.participantsConsumed(
+                trafficStates(sequencer, acrossStart),
+                trafficStates(successor, acrossEnd),
+              )
+            }
           }
         }
 
@@ -244,6 +277,15 @@ class SyncOperatorLsuIntegrationTest
 
   private def sequencer(implicit env: SpliceTestConsoleEnvironment) =
     syncOperatorBackend.appState.sequencerAdminConnection
+
+  private def trafficReport(implicit env: SpliceTestConsoleEnvironment) =
+    TrafficReport(syncOperatorBackend.config.trafficReportIntervalLength.asJava)
+
+  private def trafficStates(connection: SequencerAdminConnection, time: CantonTimestamp) =
+    LsuTrafficState
+      .fromTrustedByteString(connection.getLsuTrafficControlState(Some(time)).futureValue)
+      .value
+      .membersTraffic
 
   private def trafficState(connection: SequencerAdminConnection, member: Member) =
     connection.lookupSequencerTrafficControlState(member).futureValue

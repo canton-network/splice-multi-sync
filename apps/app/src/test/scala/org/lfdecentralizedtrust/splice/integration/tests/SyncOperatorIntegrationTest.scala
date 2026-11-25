@@ -6,6 +6,8 @@ package org.lfdecentralizedtrust.splice.integration.tests
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.{NonNegativeDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
 import com.digitalasset.canton.time.PositiveFiniteDuration as InternalPositiveFiniteDuration
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
@@ -15,14 +17,18 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import org.lfdecentralizedtrust.splice.config.ConfigTransforms
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologySnapshot
+import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval
 import org.lfdecentralizedtrust.splice.integration.EnvironmentDefinition
 import org.lfdecentralizedtrust.splice.integration.tests.SpliceTests.{
   IntegrationTest,
   SpliceTestConsoleEnvironment,
 }
+import org.lfdecentralizedtrust.splice.syncoperator.TrafficReport
 import org.lfdecentralizedtrust.splice.syncoperator.automation.UnlimitedTrafficTrigger
 import org.lfdecentralizedtrust.splice.syncoperator.automation.UnlimitedTrafficTrigger.UnlimitedTraffic
 import org.lfdecentralizedtrust.splice.syncoperator.config.SyncOperatorTrafficControlConfig
+
+import scala.concurrent.duration.DurationInt
 
 class SyncOperatorIntegrationTest extends IntegrationTest {
 
@@ -163,6 +169,37 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
         )
       }
     }
+
+    // Needs the traffic the case above grants.
+    "report the traffic charged to participants per 10-minute interval" in { implicit env =>
+      val bob = bobValidatorBackend.participantClientWithAdminToken
+
+      val last =
+        trafficReport.alignDown(env.environment.clock.now).minus(trafficReport.intervalLength)
+      val end = last.plus(trafficReport.intervalLength)
+      // An interval is reported once the sequencer has sequenced past its end, and an idle
+      // synchronizer does not advance, so bob submits a topology transaction.
+      bob.parties.enable(
+        "traffic-report",
+        synchronizer = Some(SynchronizerAlias.tryCreate("splitwell")),
+        synchronizeParticipants = Seq(bob),
+        synchronize = Some(NonNegativeDuration.ofSeconds(60)),
+      )
+
+      val interval = clue("the last interval that is over is reported") {
+        // The report rejects an interval the sequencer has not sequenced past yet.
+        eventuallySucceeds(timeUntilSuccess = 1.minute) {
+          reportedInterval(last)
+        }
+      }
+
+      clue("its total is the participants' traffic in the sequencer's journal over it") {
+        interval.trafficConsumed shouldBe TrafficReport.participantsConsumed(
+          trafficStates(last),
+          trafficStates(end),
+        )
+      }
+    }
   }
 
   private def sequencer(implicit env: SpliceTestConsoleEnvironment) =
@@ -170,6 +207,24 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
 
   private def unlimitedTrafficTrigger(implicit env: SpliceTestConsoleEnvironment) =
     syncOperatorBackend.appState.automation.trigger[UnlimitedTrafficTrigger]
+
+  private def trafficReport(implicit env: SpliceTestConsoleEnvironment) =
+    TrafficReport(syncOperatorBackend.config.trafficReportIntervalLength.asJava)
+
+  private def trafficStates(time: CantonTimestamp)(implicit env: SpliceTestConsoleEnvironment) =
+    LsuTrafficState
+      .fromTrustedByteString(sequencer.getLsuTrafficControlState(Some(time)).futureValue)
+      .value
+      .membersTraffic
+
+  private def reportedInterval(start: CantonTimestamp)(implicit
+      env: SpliceTestConsoleEnvironment
+  ): TrafficReportInterval = {
+    val report =
+      syncOperatorBackend.getTrafficReport(start, start.plus(trafficReport.intervalLength))
+    report.nextStartRecordTime shouldBe None
+    report.intervals.loneElement
+  }
 
   private def extraTrafficLimit(member: Member)(implicit
       env: SpliceTestConsoleEnvironment
