@@ -150,7 +150,7 @@ class SynchronizerConnector(
     }
   }
 
-  def ensureExtraDomainsRegistered()(implicit tc: TraceContext): Future[Unit] =
+  def ensureExtraSynchronizersRegisteredOrManualLsu()(implicit tc: TraceContext): Future[Unit] =
     MonadUtil.sequentialTraverse_(config.domains.extra) { synchronizer =>
       val sequencerConnection = GrpcSequencerConnection
         .create(synchronizer.url)
@@ -163,24 +163,34 @@ class SynchronizerConnector(
               .asRuntimeException(),
           identity,
         )
-      for {
-        _ <- synchronizer.rollForwardLsu.fold(Future.unit)(
-          rollForwardExtraSynchronizer(synchronizer.alias, sequencerConnection, _)
-        )
-        _ <- ensureDomainRegistered(
-          buildSynchronizerConfig(
+      synchronizer.rollForwardLsu match {
+        case Some(rollForward) =>
+          rollForwardOrRegisterExtraSynchronizer(
             synchronizer.alias,
-            None,
-            SequencerConnections.single(sequencerConnection),
+            sequencerConnection,
+            rollForward,
           )
-        )
-      } yield ()
+        case None =>
+          ensureExtraSynchronizerRegistered(synchronizer.alias, sequencerConnection)
+      }
     }
 
+  private def ensureExtraSynchronizerRegistered(
+      alias: SynchronizerAlias,
+      sequencerConnection: GrpcSequencerConnection,
+  )(implicit tc: TraceContext): Future[Unit] =
+    ensureDomainRegistered(
+      buildSynchronizerConfig(
+        alias,
+        None,
+        SequencerConnections.single(sequencerConnection),
+      )
+    )
+
   /** Moves the participant to the nodes an extra synchronizer was rolled forward to, with a manual
-    * LSU. Does nothing unless the participant is still on an earlier serial.
+    * LSU, if it is still on an earlier serial. Otherwise registers the synchronizer.
     */
-  private def rollForwardExtraSynchronizer(
+  private def rollForwardOrRegisterExtraSynchronizer(
       alias: SynchronizerAlias,
       newSequencerConnection: GrpcSequencerConnection,
       rollForward: ValidatorRollForwardLsuConfig,
@@ -234,7 +244,7 @@ class SynchronizerConnector(
               ),
             )
           } yield logger.info("Manual LSU completed")
-        case _ => Future.unit
+        case _ => ensureExtraSynchronizerRegistered(alias, newSequencerConnection)
       }
     }
 
