@@ -38,3 +38,13 @@ final object LsuRollForwardTimestamp {
   implicit val configWriter: ConfigWriter[LsuRollForwardTimestamp] =
     deriveWriter[LsuRollForwardTimestamp]
 }
+
+/** The times at which a roll-forward LSU exports the legacy node's state. */
+final case class RollForwardLsuTimestampConfig(
+    topologyExportTime: LsuRollForwardTimestamp,
+    trafficExportTime: LsuRollForwardTimestamp,
+    // If upgradeTime is not set, performManualLsu is called without a timestamp
+    // which means it uses ledger end. Only use this after confirming that your node has caught up as far as it can
+    // e.g. wait for not observing new events for several minutes.
+    upgradeTime: Option[LsuRollForwardTimestamp],
+)

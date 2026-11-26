@@ -22,7 +22,12 @@ import com.digitalasset.canton.admin.api.client.data.{
   SubscriptionLivenessLimits,
 }
 import com.digitalasset.canton.config.*
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, NonNegativeNumeric}
+import com.digitalasset.canton.config.RequireTypes.{
+  NonNegativeInt,
+  NonNegativeLong,
+  NonNegativeNumeric,
+}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.{PackageName, PackageVersion}
 
 import java.nio.file.Path
@@ -123,10 +128,22 @@ case class ValidatorTrustedSynchronizerConfig(
     threshold: Int,
 )
 
+/** A roll-forward LSU of an extra synchronizer, mirroring the SV app's
+  * `SvOnboardingConfig.RollForwardLsu`. The upgrade time is taken from the LSU announcement.
+  */
+case class ValidatorRollForwardLsuConfig(
+    newPhysicalSynchronizerSerial: NonNegativeInt,
+    newPhysicalSynchronizerProtocolVersion: ProtocolVersion,
+)
+
 // Validators are responsible for establishing connections to domains and so need more information than just a `SynchronizerConfig`
 case class ValidatorExtraSynchronizerConfig(
     alias: SynchronizerAlias,
     url: String,
+    // Set once the synchronizer has been rolled forward to new nodes, with url pointing at the node
+    // that replaces the sequencer in use. The validator then moves its participant there with a
+    // manual LSU.
+    rollForwardLsu: Option[ValidatorRollForwardLsuConfig] = None,
 )
 
 case class ValidatorSynchronizerConfig(

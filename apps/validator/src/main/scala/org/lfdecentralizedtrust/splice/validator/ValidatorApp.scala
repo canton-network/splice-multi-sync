@@ -223,7 +223,7 @@ class ValidatorApp(
                     .ensureDecentralizedSynchronizerRegisteredAndConnectedWithCurrentConfig(clock)
                 }
             _ <- appInitStep("Ensuring extra domains registered") {
-              domainConnector.ensureExtraDomainsRegistered()
+              domainConnector.ensureExtraSynchronizersRegisteredOrManualLsu()
             }
             // Prevet early to make sure we have the required packages even
             // before the automation kicks in.

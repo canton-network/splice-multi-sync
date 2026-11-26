@@ -20,6 +20,7 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
+import com.digitalasset.canton.topology.transaction.GrpcConnection
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import io.grpc.Status
@@ -31,7 +32,10 @@ import org.lfdecentralizedtrust.splice.environment.{
 }
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.BftScanConnection
 import org.lfdecentralizedtrust.splice.scan.admin.api.client.commands.HttpScanAppClient.DsoSequencer
-import org.lfdecentralizedtrust.splice.validator.config.ValidatorAppBackendConfig
+import org.lfdecentralizedtrust.splice.validator.config.{
+  ValidatorAppBackendConfig,
+  ValidatorRollForwardLsuConfig,
+}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -146,28 +150,103 @@ class SynchronizerConnector(
     }
   }
 
-  def ensureExtraDomainsRegistered()(implicit tc: TraceContext): Future[Unit] =
-    MonadUtil.sequentialTraverse_(config.domains.extra)(synchronizer =>
-      ensureDomainRegistered(
-        buildSynchronizerConfig(
-          synchronizer.alias,
-          None,
-          SequencerConnections.single(
-            GrpcSequencerConnection
-              .create(synchronizer.url)
-              .fold(
-                error =>
-                  throw Status.INVALID_ARGUMENT
-                    .withDescription(
-                      s"Invalid synchronizer url for synchronizer $synchronizer: $error"
-                    )
-                    .asRuntimeException(),
-                identity,
+  def ensureExtraSynchronizersRegisteredOrManualLsu()(implicit tc: TraceContext): Future[Unit] =
+    MonadUtil.sequentialTraverse_(config.domains.extra) { synchronizer =>
+      val sequencerConnection = GrpcSequencerConnection
+        .create(synchronizer.url)
+        .fold(
+          error =>
+            throw Status.INVALID_ARGUMENT
+              .withDescription(
+                s"Invalid synchronizer url for synchronizer $synchronizer: $error"
               )
-          ),
+              .asRuntimeException(),
+          identity,
         )
+      synchronizer.rollForwardLsu match {
+        case Some(rollForward) =>
+          rollForwardOrRegisterExtraSynchronizer(
+            synchronizer.alias,
+            sequencerConnection,
+            rollForward,
+          )
+        case None =>
+          ensureExtraSynchronizerRegistered(synchronizer.alias, sequencerConnection)
+      }
+    }
+
+  private def ensureExtraSynchronizerRegistered(
+      alias: SynchronizerAlias,
+      sequencerConnection: GrpcSequencerConnection,
+  )(implicit tc: TraceContext): Future[Unit] =
+    ensureDomainRegistered(
+      buildSynchronizerConfig(
+        alias,
+        None,
+        SequencerConnections.single(sequencerConnection),
       )
     )
+
+  /** Moves the participant to the nodes an extra synchronizer was rolled forward to, with a manual
+    * LSU, if it is still on an earlier serial. Otherwise registers the synchronizer.
+    */
+  private def rollForwardOrRegisterExtraSynchronizer(
+      alias: SynchronizerAlias,
+      newSequencerConnection: GrpcSequencerConnection,
+      rollForward: ValidatorRollForwardLsuConfig,
+  )(implicit tc: TraceContext): Future[Unit] =
+    participantAdminConnection.lookupRegisteredSynchronizer(alias).flatMap {
+      _.flatMap(registered => registered.psid.toOption.map(registered -> _)) match {
+        case Some((registered, currentPsid))
+            if currentPsid.serial < rollForward.newPhysicalSynchronizerSerial =>
+          val successorPsid = PhysicalSynchronizerId(
+            currentPsid.logical,
+            rollForward.newPhysicalSynchronizerSerial,
+            rollForward.newPhysicalSynchronizerProtocolVersion,
+          )
+          for {
+            upgradeTime <- participantAdminConnection
+              .listLsuAnnouncements(currentPsid.logical)
+              .map {
+                case Seq(announcement) => announcement.mapping.upgradeTime
+                case announcements =>
+                  throw Status.FAILED_PRECONDITION
+                    .withDescription(
+                      s"Expected exactly one LSU announcement on $currentPsid but got $announcements"
+                    )
+                    .asRuntimeException()
+              }
+            // The new sequencer keeps the id of the one it replaces.
+            sequencerId = registered.config.sequencerConnections.aliasToConnection.forgetNE.values
+              .flatMap(_.sequencerId)
+              .toSeq match {
+              case Seq(sequencerId) => sequencerId
+              case sequencerIds =>
+                throw Status.FAILED_PRECONDITION
+                  .withDescription(
+                    s"Expected exactly one sequencer for $alias but got $sequencerIds"
+                  )
+                  .asRuntimeException()
+            }
+            _ = logger.info(
+              s"Participant is on physical synchronizer id $currentPsid, initiating manual LSU to $successorPsid"
+            )
+            _ <- participantAdminConnection.performManualLsu(
+              currentPsid,
+              successorPsid,
+              Some(upgradeTime),
+              Map(
+                sequencerId -> GrpcConnection(
+                  newSequencerConnection.endpoints,
+                  newSequencerConnection.transportSecurity,
+                  newSequencerConnection.customTrustCertificates,
+                )
+              ),
+            )
+          } yield logger.info("Manual LSU completed")
+        case _ => ensureExtraSynchronizerRegistered(alias, newSequencerConnection)
+      }
+    }
 
   private def ensureDomainRegistered(
       syncConfig: SynchronizerConnectionConfig

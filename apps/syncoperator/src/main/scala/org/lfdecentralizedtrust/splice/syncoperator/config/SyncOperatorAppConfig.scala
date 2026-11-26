@@ -20,7 +20,7 @@ import org.lfdecentralizedtrust.splice.config.{
   SpliceParametersConfig,
   SplicePostgresConfig,
 }
-import org.lfdecentralizedtrust.splice.lsu.LsuRollForwardTimestamp
+import org.lfdecentralizedtrust.splice.lsu.{LsuRollForwardTimestamp, RollForwardLsuTimestampConfig}
 
 import java.nio.file.Path
 
@@ -62,6 +62,8 @@ case class SyncOperatorSynchronizerNodesConfig(
     current: SyncOperatorSynchronizerNodeConfig,
     // Set once the successor's sequencer and mediator are deployed, ahead of the upgrade time.
     successor: Option[SyncOperatorSynchronizerNodeConfig] = None,
+    // Only needed for a roll-forward LSU: the node that current is initialized from.
+    legacy: Option[SyncOperatorSynchronizerNodeConfig] = None,
 )
 
 /** An upgrade the operator has scheduled, mirroring the DSO's
@@ -74,6 +76,17 @@ case class SyncOperatorLsuConfig(
     newPhysicalSynchronizerSerial: NonNegativeInt,
     // An upgrade may keep the protocol version, it cannot go back to an earlier one.
     newPhysicalSynchronizerProtocolVersion: ProtocolVersion,
+)
+
+/** A roll-forward LSU, mirroring the SV app's `SvOnboardingConfig.RollForwardLsu`. The app
+  * initializes the current node from the legacy one when it starts.
+  */
+case class SyncOperatorRollForwardLsuConfig(
+    newPhysicalSynchronizerSerial: NonNegativeInt,
+    newPhysicalSynchronizerProtocolVersion: ProtocolVersion,
+    // If unset, we assume there is an LsuAnnouncement. The operator has no participant to migrate,
+    // so it does not use the upgrade time.
+    exportTimes: Option[RollForwardLsuTimestampConfig] = None,
 )
 
 /** Traffic control parameters for the dedicated synchronizer. These should always match mainnet.
@@ -97,6 +110,8 @@ case class SyncOperatorAppBackendConfig(
     lsu: Option[SyncOperatorLsuConfig] = None,
     // Where the predecessor's synchronizer state is dumped during an upgrade.
     lsuDumpPath: Option[Path] = None,
+    // The roll-forward LSU to perform at startup, if any.
+    rollForwardLsu: Option[SyncOperatorRollForwardLsuConfig] = None,
     trafficControl: SyncOperatorTrafficControlConfig = SyncOperatorTrafficControlConfig(),
     override val automation: AutomationConfig = AutomationConfig(),
     parameters: SpliceParametersConfig = SpliceParametersConfig(batching = BatchingConfig()),
