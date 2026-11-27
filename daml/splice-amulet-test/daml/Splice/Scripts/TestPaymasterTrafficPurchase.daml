@@ -11,7 +11,7 @@ module Splice.Scripts.TestPaymasterTrafficPurchase where
 
 import DA.Assert
 import DA.Foldable (forA_)
-import DA.Optional (fromSome)
+import DA.Optional (fromSome, optionalToList)
 import qualified DA.TextMap as TextMap
 import DA.Time
 
@@ -21,7 +21,7 @@ import Splice.Api.Token.MetadataV1
 import Splice.Api.Token.TransferInstructionV2 qualified as V2
 import Splice.TokenStandard.Utils qualified as TSU
 
-import Splice.Amulet (ValidatorRewardCoupon(..))
+import Splice.Amulet (ActivityRecorder, ActivityRecorder_DsoRecordActivity(..), ValidatorRewardCoupon(..))
 import Splice.Amulet.DedicatedSynchronizer (DedicatedSynchronizer(..), DedicatedSynchronizerConfig(..), PaymasterTrafficPurchase(..))
 import Splice.Amulet.TokenApiUtils (dedicatedSynchronizerContextKey, reasonMetaKey)
 import Splice.AmuletRules
@@ -615,3 +615,89 @@ test_merge_rejectsPaymasterAndMemberTraffic = do
   submitMustFail'' (expectMessageContains "Contract group identifier mismatch") (actAs setup.app.dso) $
     fmap (const ()) $ exerciseCmd setup.amuletRulesCid AmuletRules_MergeMemberTrafficContracts with
       trafficCids = [paymasterTrafficCid, memberTrafficCid]
+
+
+-- Activity recording
+---------------------
+
+-- | The activity that a transaction records through the `ActivityRecorder`.
+recordedActivity : TransactionTree -> [ActivityRecorder_DsoRecordActivity]
+recordedActivity txTree = do
+  exercised <- concatMap exercisedEvents txTree.rootEvents
+  optionalToList $ fromAnyChoice @ActivityRecorder exercised.argument
+
+-- | The exercise events of a tree event and of all its descendants.
+exercisedEvents : TreeEvent -> [Exercised]
+exercisedEvents (ExercisedEvent exercised) = exercised :: concatMap exercisedEvents exercised.childEvents
+exercisedEvents (CreatedEvent _) = []
+
+-- | The recording of the given app and asset activity for `paymaster`, leaving out zero activity.
+expectedActivity : Party -> Int -> Int -> [ActivityRecorder_DsoRecordActivity]
+expectedActivity paymaster appActivity assetActivity =
+  [ ActivityRecorder_DsoRecordActivity with
+      appActivity = [(paymaster, appActivity) | appActivity > 0]
+      assetActivity = [(paymaster, assetActivity) | assetActivity > 0]
+  ]
+
+-- | Submits a direct purchase and returns the activity it recorded.
+directPurchaseRecordedActivity : DirectSetup -> AmuletRules_BuyMemberTraffic -> Script [ActivityRecorder_DsoRecordActivity]
+directPurchaseRecordedActivity setup choiceArg = do
+  (_, txTree) <- submitResultAndTree (actAs choiceArg.provider <> readAs setup.app.dso) $
+    exerciseCmd setup.amuletRulesCid choiceArg
+  pure (recordedActivity txTree)
+
+-- A paymaster's purchase records the activity its weights earn on the purchased bytes, here the
+-- dedicated synchronizer's max weights of 1.0 and 0.5, and leaves no `ActivityRecorder` behind.
+test_activity_directPurchaseRecordsActivity : Script ()
+test_activity_directPurchaseRecordsActivity = do
+  setup <- setupDirect
+  let paymaster = setup.paymaster.primaryParty
+  choiceArg <- paymasterPurchase setup setup.paymaster
+  recorded <- directPurchaseRecordedActivity setup choiceArg
+  recorded === expectedActivity paymaster purchasedBytes (purchasedBytes / 2)
+  recorders <- query @ActivityRecorder setup.app.dso
+  recorders === []
+
+-- The recorded activity follows the requested weights, capped at the max, and a zero weight
+-- records nothing of that kind.
+test_activity_directPurchaseRecordsActivityAtTheRequestedWeights : Script ()
+test_activity_directPurchaseRecordsActivityAtTheRequestedWeights = do
+  setup <- setupDirect
+  let paymaster = setup.paymaster.primaryParty
+  forA_
+    [ ((Some 0.25, Some 0.1), expectedActivity paymaster (purchasedBytes / 4) (purchasedBytes / 10))
+    , ((Some 2.0, Some 0.0), expectedActivity paymaster purchasedBytes 0)
+    , ((Some 0.0, Some 0.0), [])
+    ] $ \((optAppActivityWeight, optAssetActivityWeight), expected) -> do
+      choiceArg <- paymasterPurchase setup setup.paymaster
+      recorded <- directPurchaseRecordedActivity setup choiceArg with
+        optPaymasterTrafficPurchase = paymasterTrafficPurchase setup.registrationCid optAppActivityWeight optAssetActivityWeight
+      recorded === expected
+  -- Neither a recording nor a purchase that records nothing leaves an ActivityRecorder behind.
+  recorders <- query @ActivityRecorder setup.app.dso
+  recorders === []
+
+-- A purchase of member traffic for the decentralized synchronizer records no activity.
+test_activity_memberTrafficPurchaseRecordsNoActivity : Script ()
+test_activity_memberTrafficPurchaseRecordsNoActivity = do
+  setup <- setupDirect
+  choiceArg <- paymasterPurchase setup setup.paymaster
+  recorded <- directPurchaseRecordedActivity setup choiceArg with
+    synchronizerId = decentralizedSynchronizerId
+    memberId = testMemberId
+    optPaymasterTrafficPurchase = None
+  recorded === []
+
+-- A paymaster's token standard purchase records activity as a direct purchase does, here for
+-- `purchasedBytes` at the memo's uneven weights, so that swapped weights fail the test.
+test_activity_tokenStandardPurchaseRecordsActivity : Script ()
+test_activity_tokenStandardPurchaseRecordsActivity = do
+  setup <- setupTokenStandard
+  enrichedChoice <-
+    trafficPurchaseTransfer setup setup.paymaster
+      (paymasterMemoParams dedicatedSynchronizerId <> "&app-activity-weight=0.25&asset-activity-weight=0.1") >>=
+    transferFactoryChoice setup (Some setup.registrationCid)
+  (_, txTree) <- submitResultAndTree (actAs setup.paymaster <> discloseMany' enrichedChoice.disclosures) $
+    exerciseCmd enrichedChoice.factoryCid enrichedChoice.arg
+  recordedActivity txTree === expectedActivity setup.paymaster (purchasedBytes / 4) (purchasedBytes / 10)
+

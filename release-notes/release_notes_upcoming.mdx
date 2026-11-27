@@ -19,7 +19,9 @@
       the SVs can register, update and archive a dedicated synchronizer and its paymaster by vote, through the new
       `DsoRules` actions `SRARC_RegisterSynchronizer`, `SRARC_UpdateSynchronizerRegistration` and
       `SRARC_ArchiveSynchronizerRegistration`. A registered synchronizer's paymaster can buy traffic for it through
-      `AmuletRules_BuyMemberTraffic` or the token standard.
+      `AmuletRules_BuyMemberTraffic` or the token standard. The purchase records app and asset activity for the
+      paymaster through the `ActivityRecorder`: the purchased bytes, scaled by the activity weights the purchase gives,
+      which default to and are capped at the registration's max. A purchase that earns no activity records nothing.
 
   - Scan App
 
