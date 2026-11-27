@@ -1,0 +1,173 @@
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+import * as k8s from '@pulumi/kubernetes';
+import {
+  Auth0Config,
+  ChartValues,
+  CnChartVersion,
+  DomainMigrationIndex,
+  ExactNamespace,
+  getAdditionalJvmOptions,
+  getClientId,
+  getLedgerApiAudience,
+  getParticipantAdminApiAudience,
+  getParticipantKmsHelmResources,
+  InstalledHelmChart,
+  installSpliceHelmChart,
+  loadYamlFromFile,
+  persistentHeapDumpsPvc,
+  SPLICE_ROOT,
+  spliceConfig,
+  SpliceCustomResourceOptions,
+} from '@canton-network/splice-pulumi-common';
+import { installPostgres, Postgres } from '@canton-network/splice-pulumi-common/src/postgres';
+
+import { SingleSvConfiguration } from './singleSvConfig';
+
+export async function installParticipant(
+  args: ParticipantArgs,
+  customOptions?: SpliceCustomResourceOptions
+): Promise<ParticipantOutput> {
+  const { existingDb } = args;
+  const db = existingDb ?? (await installParticipantPostgres(args));
+  const chart = installParticipantChart(args, db, customOptions);
+  return { db, chart };
+}
+
+export function svParticipantKeyDownloadEnabled(
+  participant: SingleSvConfiguration['participant']
+): boolean {
+  // TODO(DACH-NY/canton-network-internal#7687): Revisit enabling this for all SVs by default.
+  return participant?.enableKeyDownload ?? true;
+}
+
+export type ParticipantArgs = {
+  xns: ExactNamespace;
+  participant: SingleSvConfiguration['participant'];
+  logging: SingleSvConfiguration['logging'];
+  version: CnChartVersion;
+  migrationId: DomainMigrationIndex;
+  auth0: Auth0Config;
+  existingDb?: Postgres;
+  disableProtection?: boolean;
+  participantAdminUserNameFrom?: k8s.types.input.core.v1.EnvVarSource;
+  imagePullServiceAccountName?: string;
+  nodeIdentifier: string;
+  enableAutoInit: boolean;
+  // Auth0 clients allowed to use the admin API: the first is the main user, the rest are additional users.
+  adminApiClients: ['validator' | 'sv' | 'dsync', ...('validator' | 'sv' | 'dsync')[]];
+};
+
+export type ParticipantOutput = {
+  db: Postgres;
+  chart: InstalledHelmChart;
+};
+
+async function installParticipantPostgres({
+  xns,
+  participant,
+  version,
+  disableProtection,
+}: ParticipantArgs): Promise<Postgres> {
+  return await installPostgres(
+    xns,
+    'participant-pg',
+    'participant-pg',
+    version,
+    participant?.cloudSql ?? spliceConfig.pulumiProjectConfig.cloudSql,
+    spliceConfig.pulumiProjectConfig.defaultSplicePostgresConfig,
+    true,
+    {
+      disableProtection,
+    }
+  );
+}
+
+function installParticipantChart(
+  {
+    xns,
+    participant,
+    logging,
+    version,
+    migrationId,
+    auth0,
+    participantAdminUserNameFrom,
+    imagePullServiceAccountName,
+    nodeIdentifier,
+    enableAutoInit,
+    adminApiClients,
+  }: ParticipantArgs,
+  db: Postgres,
+  customOptions?: SpliceCustomResourceOptions
+): InstalledHelmChart {
+  const defaultValues: ChartValues = loadDefaultParticipantValues(xns, auth0, migrationId);
+
+  const { kmsValues, kmsDependencies } = participant?.kms
+    ? getParticipantKmsHelmResources(xns, participant.kms)
+    : { kmsValues: {}, kmsDependencies: [] };
+
+  const values: ChartValues = {
+    ...defaultValues,
+    persistence: {
+      ...defaultValues.persistence,
+      postgresName: db.instanceName,
+      host: db.address,
+      secretName: db.secretName,
+      // the following will not be needed when the MIGRATION_ID gets removed from defaults
+      databaseName: `participant_${migrationId}`,
+    },
+    adminApi: {
+      ...defaultValues.adminApi,
+      // TODO(DACH-NY/canton-network-internal#8256): remove this once we remove the separate admin API auth flag
+      disableAuth: participant?.disableParticipantAdminApiAuth ?? false,
+      auth: {
+        ...defaultValues.adminApi?.auth,
+        user: `${getClientId(auth0, adminApiClients[0], xns.logicalName)}@clients`,
+        additionalUsers: adminApiClients
+          .slice(1)
+          .map(client => `${getClientId(auth0, client, xns.logicalName)}@clients`),
+      },
+    },
+    ...kmsValues,
+    additionalEnvVars: [
+      ...(kmsValues.additionalEnvVars ?? []),
+      ...(participant?.additionalEnvVars ?? []),
+    ],
+    logLevel: logging?.cantonLogLevel,
+    logLevelStdout: logging?.cantonStdoutLogLevel,
+    logAsyncFlush: logging?.cantonAsync,
+    participantAdminUserNameFrom,
+    metrics: {
+      enable: true,
+    },
+    additionalJvmOptions: getAdditionalJvmOptions(participant?.additionalJvmOptions),
+    enablePostgresMetrics: true,
+    enableKeyDownload: svParticipantKeyDownloadEnabled(participant),
+    serviceAccountName: imagePullServiceAccountName,
+    resources: participant?.resources,
+    nodeIdentifier,
+    enableAutoInit,
+    pvc: persistentHeapDumpsPvc(),
+  };
+
+  return installSpliceHelmChart(xns, 'participant', 'splice-participant', values, version, {
+    ...(customOptions ?? {}),
+    dependsOn: [...(customOptions?.dependsOn ?? []), db, ...kmsDependencies],
+  });
+}
+
+function loadDefaultParticipantValues(
+  xns: ExactNamespace,
+  auth0: Auth0Config,
+  migrationId: DomainMigrationIndex
+): ChartValues {
+  return loadYamlFromFile(
+    `${SPLICE_ROOT}/apps/app/src/pack/examples/sv-helm/participant-values.yaml`,
+    {
+      MIGRATION_ID: `${migrationId}`,
+      OIDC_AUTHORITY_URL: auth0.auth0Domain,
+      OIDC_AUTHORITY_LEDGER_API_AUDIENCE: getLedgerApiAudience(auth0, xns.logicalName),
+      OIDC_AUTHORITY_ADMIN_API_AUDIENCE: getParticipantAdminApiAudience(auth0, xns.logicalName),
+    }
+  );
+}

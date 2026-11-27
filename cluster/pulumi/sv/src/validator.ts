@@ -8,6 +8,7 @@ import {
   svUserIds,
 } from '@canton-network/splice-pulumi-common';
 import {
+  svParticipantKeyDownloadEnabled,
   SynchronizerNodes,
   valuesForSvValidatorApp,
 } from '@canton-network/splice-pulumi-common-sv';
@@ -17,7 +18,6 @@ import { spliceConfig } from '@canton-network/splice-pulumi-common/src/config/co
 import { Postgres } from '@canton-network/splice-pulumi-common/src/postgres';
 import { Resource } from '@pulumi/pulumi';
 
-import { svParticipantKeyDownloadEnabled } from './participant';
 import { persistenceConfig } from './persistence';
 import { internalScanUrl } from './scan';
 
@@ -75,5 +75,8 @@ export async function installValidator(
     additionalJvmOptions: svConfig.validatorApp?.additionalJvmOptions || '',
     resources: svConfig.validatorApp?.resources,
     version: svConfig.version,
+    participant: {
+      disableParticipantAdminApiAuth: svConfig.participant?.disableParticipantAdminApiAuth,
+    },
   });
 }

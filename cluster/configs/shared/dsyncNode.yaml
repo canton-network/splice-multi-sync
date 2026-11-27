@@ -1,0 +1,26 @@
+mediator:
+  resources:
+    limits:
+      memory: "4Gi"
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+participant:
+  enableKeyDownload: false
+  # TODO(splice#7780): enable once bootstrap-dsync passes admin API tokens to the remote participants
+  disableParticipantAdminApiAuth: true
+  resources:
+    limits:
+      memory: "18Gi"
+    requests:
+      cpu: "1"
+      memory: "12Gi"
+sequencer:
+  enableAntiAffinity: false
+  resources:
+    limits:
+      cpu: "3"
+      memory: "4Gi"
+    requests:
+      cpu: "1"
+      memory: "2Gi"

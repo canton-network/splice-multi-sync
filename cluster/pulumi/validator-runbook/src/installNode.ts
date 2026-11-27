@@ -218,6 +218,7 @@ async function installValidator(
       false, // We don't currently support non-auth for validator-runbook
       validatorVersion,
       postgres,
+      [],
       {
         dependsOn: imagePullDeps.concat([postgres]),
       }
@@ -301,6 +302,12 @@ async function installValidator(
     additionalEnvVars: validatorConfig.validatorApp?.additionalEnvVars,
     additionalJvmOptions: validatorConfig.validatorApp?.additionalJvmOptions,
     resources: validatorConfig.validatorApp?.resources,
+    participantClient: {
+      adminApi: {
+        // TODO(DACH-NY/canton-network-internal#8256): remove this once we remove the separate admin API auth flag
+        disableAuth: validatorConfig.participant?.disableParticipantAdminApiAuth ?? false,
+      },
+    },
   };
 
   const validatorValuesWithOnboardingOverride = onboardingSecret
@@ -330,7 +337,7 @@ async function installValidator(
     topup: topupConfig ? { enabled: true, ...topupConfig } : { enabled: false },
   };
 
-  const cnsUiClientId = getNamespaceConfig(auth0Client.getCfg(), xns.logicalName).uiClientIds.cns;
+  const cnsUiClientId = getNamespaceConfig(auth0Client.getCfg(), xns.logicalName).uiClientIds?.cns;
   if (!cnsUiClientId) {
     throw new Error('No validator ui client id in auth0 config');
   }

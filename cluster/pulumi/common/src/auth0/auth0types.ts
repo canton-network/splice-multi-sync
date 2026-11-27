@@ -9,14 +9,16 @@ export type Auth0SecretMap = Map<string, Auth0ClientSecret>;
 
 export type Auth0NamespaceAudiences = {
   ledgerApi: string;
-  validatorApi: string;
+  participantAdminApi: string;
+  validatorApi?: string; // Empty for dSync namespaces
   svAppApi?: string; // Empty for validator-only namespaces
 };
 
 export type Auth0NamespaceBackendClientIds = {
-  validator: string;
-  svApp?: string; // Empty for validator-only namespaces
+  validator?: string;
+  svApp?: string;
   splitwell?: string;
+  dSync?: string;
 };
 
 export type Auth0NamespaceUiClientIds = {
@@ -31,7 +33,7 @@ export type Auth0NamespaceConfig = {
   // TODO(#2873): Audiences can be fully determined at preview time so they don't need to be passed through the stack output.
   audiences: Auth0NamespaceAudiences;
   backendClientIds: Auth0NamespaceBackendClientIds;
-  uiClientIds: Auth0NamespaceUiClientIds;
+  uiClientIds?: Auth0NamespaceUiClientIds;
 };
 
 // Map<> doesn't work as Pulumi outputs, so we use Record<> here. See https://github.com/pulumi/pulumi/issues/9787
@@ -57,7 +59,7 @@ export interface Auth0Client {
     clientId: string,
     clientSecret: string,
     audience: string,
-    api: 'ledgerApi'
+    api: 'ledgerApi' | 'participantAdminApi'
   ) => Promise<string>;
   getCfg: () => Auth0Config;
 }
@@ -67,4 +69,5 @@ export type Auth0ClusterConfig = {
   svRunbook?: Auth0Config;
   validatorRunbook?: Auth0Config;
   mainnet?: Auth0Config;
+  dSync?: Auth0Config;
 };
