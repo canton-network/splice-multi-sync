@@ -4,8 +4,8 @@ import * as k8s from '@pulumi/kubernetes';
 
 import { isMainNet } from '../config';
 import { ExactNamespace, fixedTokens } from '../utils';
-import { getClientId, getNamespaceConfig } from './auth0';
 import { getParticipantAdminApiAudience } from './audiences';
+import { getClientId, getNamespaceConfig } from './auth0';
 import { Auth0Client, Auth0ClientSecret, Auth0SecretMap } from './auth0types';
 
 function lookupClientSecrets(

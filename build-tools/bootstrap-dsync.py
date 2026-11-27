@@ -7,17 +7,17 @@ import logging
 import subprocess
 import sys
 
+import argparse
 import signal
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
-from kubernetes import client, config
+from kubernetes import client, config  # type: ignore[import-untyped]  # no stubs available
 import time
 import os
 
 
 
-def parse_args():
-    import argparse
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Bootstrap a dedicated sync in the Kubernetes cluster.")
     parser.add_argument("--dsync-name", required=True, help="The name of the dedicated sync to bootstrap.")
     parser.add_argument("--migration-id", required=False, default=1, help="The physical node ID (migration ID) of the dSync to be bootstrapped")
@@ -29,7 +29,7 @@ class NodePods(NamedTuple):
     mediator: client.V1Pod
     participant: client.V1Pod
 
-def wait_for_pod_to_be_running(pod, namespace):
+def wait_for_pod_to_be_running(pod: Any, namespace: str) -> None:
     api_instance = client.CoreV1Api()
     start_time = time.time()
     while True:
@@ -68,8 +68,8 @@ def wait_and_get_node_pods(node_namespace: str, migration_id: int) -> NodePods:
     wait_for_pod_to_be_running(participant, node_namespace)
     return NodePods(sequencer=sequencer, mediator=mediator, participant=participant)
 
-def setup_port_forwarding(pods: list[NodePods]):
-    processes = []
+def setup_port_forwarding(pods: list[NodePods]) -> list[subprocess.Popen[bytes]]:
+    processes: list[subprocess.Popen[bytes]] = []
 
     for idx, node_pods in enumerate(pods):
         local_mediator_admin_api = 11001 + (idx+1) * 100
@@ -113,7 +113,7 @@ def setup_port_forwarding(pods: list[NodePods]):
     return processes
 
 
-def start_canton(console_only: bool = False):
+def start_canton(console_only: bool = False) -> subprocess.CompletedProcess[bytes]:
     config_file = os.path.join(os.path.dirname(__file__), "local-dsync.conf")
     bootstrap_file = os.path.join(os.path.dirname(__file__), "bootstrap-dsync.sc")
     return subprocess.run(
@@ -123,7 +123,7 @@ def start_canton(console_only: bool = False):
         check=False,
     )
 
-def main(args):
+def main(args: argparse.Namespace) -> int:
     config.load_kube_config()
     api_instance = client.CoreV1Api()
 
