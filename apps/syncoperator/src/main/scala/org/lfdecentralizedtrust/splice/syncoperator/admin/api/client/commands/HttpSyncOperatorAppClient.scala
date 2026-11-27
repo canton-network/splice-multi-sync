@@ -16,8 +16,7 @@ object HttpSyncOperatorAppClient {
     override val createGenClientFn = (fn, host, ec, mat) => Client.httpClient(fn, host)(ec, mat)
   }
 
-  case object CheckAuth
-      extends BaseCommand[http.CheckAuthResponse, definitions.CheckAuthResponse] {
+  case object CheckAuth extends BaseCommand[http.CheckAuthResponse, definitions.CheckAuthResponse] {
 
     override def submitRequest(client: Client, headers: List[HttpHeader]) =
       client.checkAuth(headers)
