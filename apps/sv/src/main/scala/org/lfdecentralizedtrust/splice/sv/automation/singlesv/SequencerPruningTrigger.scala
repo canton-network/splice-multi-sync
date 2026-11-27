@@ -4,7 +4,7 @@
 package org.lfdecentralizedtrust.splice.sv.automation.singlesv
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import org.lfdecentralizedtrust.splice.automation.{PollingTrigger, TriggerContext}
+import org.lfdecentralizedtrust.splice.automation.{SequencerPruningTriggerBase, TriggerContext}
 import org.lfdecentralizedtrust.splice.environment.{
   MediatorAdminConnection,
   ParticipantAdminConnection,
@@ -13,21 +13,11 @@ import org.lfdecentralizedtrust.splice.environment.{
 import org.lfdecentralizedtrust.splice.sv.store.SvDsoStore
 import org.lfdecentralizedtrust.splice.util.TemplateJsonDecoder
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
-import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{AsyncOrSyncCloseable, SyncCloseable}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.synchronizer.sequencer.{
-  SequencerMemberStatus,
-  SequencerPruningStatus,
-}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.util.ShowUtil.*
 import io.opentelemetry.api.trace.Tracer
-
-import scala.jdk.DurationConverters.*
-import io.grpc.Status
 import org.apache.pekko.stream.Materializer
 import org.lfdecentralizedtrust.splice.admin.api.client.GrpcClientMetrics
 import org.lfdecentralizedtrust.splice.config.{NetworkAppClientConfig, UpgradesConfig}
@@ -64,7 +54,7 @@ class SequencerPruningTrigger(
     httpClient: HttpClient,
     templateDecoder: TemplateJsonDecoder,
     esf: ExecutionSequencerFactory,
-) extends PollingTrigger {
+) extends SequencerPruningTriggerBase(retentionPeriod) {
 
   private lazy val currentMediatorClient =
     new MediatorVerdictsClient(
@@ -73,10 +63,6 @@ class SequencerPruningTrigger(
       grpcClientMetrics,
       loggerFactory,
     )(ec, esf)
-
-  val pruningMetrics = new SequencerPruningMetrics(
-    context.metricsFactory
-  )
 
   // Similar to PublishScanConfigTrigger, this class creates its own scan connection
   // on demand, because scan might not be available at application startup.
@@ -93,9 +79,15 @@ class SequencerPruningTrigger(
         retryConnectionOnInitialFailure = true,
       )
 
-  override def performWorkIfAvailable()(implicit traceContext: TraceContext): Future[Boolean] =
+  override protected def sequencerToPrune()(implicit
+      tc: TraceContext
+  ): Future[SequencerAdminConnection] = Future.successful(sequencerAdminConnection)
+
+  override protected def readyToPrune(sequencer: SequencerAdminConnection)(implicit
+      traceContext: TraceContext
+  ): Future[Boolean] =
     for {
-      synchronizerId <- sequencerAdminConnection.getStatus.map(_.trySuccess.synchronizerId)
+      synchronizerId <- sequencer.getStatus.map(_.trySuccess.synchronizerId)
       scanConnection <- createScanConnection()
       // while sequencer pruning status does have a `now` timestamp that one is
       // just wallclock so doesn't work properly with backup/restore and similar stuff.
@@ -105,133 +97,35 @@ class SequencerPruningTrigger(
         .getMigrationInfo(migrationId)
         .map(_.flatMap(_.recordTimeRange.get(synchronizerId.logical).map(_.max)))
       lowestRecordTimeO <- currentMediatorClient.earliestUnprunedRecordTime()
-      _ <- (lowestRecordTimeO, highestRecordTimeO) match {
+      ready <- (lowestRecordTimeO, highestRecordTimeO) match {
         case (Some(min), Some(max))
             if (max - min).compareTo((retentionPeriod * pruningSafetyCheckPercentage).asJava) > 0 =>
-          for {
-            rulesAndState <- store.getDsoRulesWithSvNodeState(store.key.svParty)
-            dsoRulesActiveSequencerConfig = rulesAndState.lookupActiveSequencerIdConfigFor(
+          store.getDsoRulesWithSvNodeState(store.key.svParty).map { rulesAndState =>
+            val dsoRulesActiveSequencerConfig = rulesAndState.lookupActiveSequencerIdConfigFor(
               rulesAndState.dsoRules.domain,
               clock.now.toInstant,
             )
-            _ <- dsoRulesActiveSequencerConfig.fold {
+            if (dsoRulesActiveSequencerConfig.isEmpty)
               logger.debug(
                 show"Member info or sequencer info not (yet) published to DsoRules for our own party ${store.key.svParty}, skipping"
               )
-              Future.unit
-            } { _ =>
-              {
-                logger.info("Attempt pruning our sequencer...")
-                prune().map { prunedResult =>
-                  logger.info(s"Completed pruning our sequencer with result: $prunedResult")
-                }
-              }
-            }
-          } yield ()
+            dsoRulesActiveSequencerConfig.nonEmpty
+          }
         case _ =>
           logger.debug(
             s"Synchronizer on migration id $migrationId does not yet have $retentionPeriod of data, record time range: ${lowestRecordTimeO}, ${highestRecordTimeO}"
           )
-          Future.unit
+          Future.successful(false)
       }
-    } yield false
+    } yield ready
 
-  // This method is replicating the force_prune command defined in `com.digitalasset.canton.console.commands.SequencerAdministrationGroupCommon`
-  // Which will prunes the member preventing pruning
-  private def prune()(implicit traceContext: TraceContext) = for {
-    status <- sequencerAdminConnection.getSequencerPruningStatus()
-    pruningTimestamp = status.now.minus(retentionPeriod.underlying.toJava)
-    membersToDisable = clientsPreventingPruning(status, pruningTimestamp)
-    _ <-
-      // disabling member preventing pruning
-      if (membersToDisable.nonEmpty) {
-        filterToOurMembers(membersToDisable).flatMap { ourLaggingMembers =>
-          if (ourLaggingMembers.isEmpty) {
-            logger.info(
-              show"disabling ${membersToDisable.size} member clients preventing pruning to $pruningTimestamp: $membersToDisable"
-            )
-            pruningMetrics.disabledMembers.updateValue(membersToDisable.size)
-            Future.traverse(membersToDisable)(m => sequencerAdminConnection.disableMember(m.member))
-          } else {
-            throw Status.INTERNAL
-              .withDescription(
-                show"Failed to prune sequencer to $pruningTimestamp because our own nodes have not acknowledged that timestamp: ${ourLaggingMembers}"
-              )
-              .asRuntimeException()
-          }
-        }
-      } else Future.unit
-    statusAfterDisabling <- sequencerAdminConnection.getSequencerPruningStatus()
-    safeTimestamp = statusAfterDisabling.safePruningTimestamp
-    res <-
-      if (safeTimestamp < pruningTimestamp) {
-        val message = (
-          s"We disabled all clients preventing pruning at $pruningTimestamp however the safe timestamp is set to $safeTimestamp"
-        )
-        Future.failed(Status.INTERNAL.withDescription(message).asRuntimeException())
-      } else
-        pruningMetrics.latency
-          .timeFuture(
-            sequencerAdminConnection
-              .prune(pruningTimestamp)
-          )
-          .transform(
-            identity,
-            err => {
-              val lastAcknowledged =
-                statusAfterDisabling.members
-                  .collect { case m: SequencerMemberStatus.Active =>
-                    m.member.toProtoPrimitive -> m.safePruningTimestamp
-                  }
-              val message = s"failed to prune with sequencer pruning status: $lastAcknowledged"
-              if (context.retryProvider.isClosing)
-                logger.info(message)
-              else
-                logger.warn(message)
-              err
-            },
-          )
-
-  } yield res
-
-  private def filterToOurMembers(
-      laggingMembers: Seq[SequencerPruningTrigger.LaggingMember]
-  )(implicit traceContext: TraceContext): Future[Seq[SequencerPruningTrigger.LaggingMember]] = for {
+  override protected def ownMembers(members: Seq[Member])(implicit
+      traceContext: TraceContext
+  ): Future[Seq[Member]] = for {
     participantId <- participantAdminConnection.getParticipantId()
     mediatorId <- mediatorAdminConnection.getMediatorId
     sequencerId <- sequencerAdminConnection.getSequencerId
-  } yield laggingMembers.filter(m =>
-    Seq[Member](participantId.member, mediatorId.member, sequencerId.member).contains(m.member)
+  } yield members.filter(m =>
+    Seq[Member](participantId.member, mediatorId.member, sequencerId.member).contains(m)
   )
-
-  private def clientsPreventingPruning(
-      status: SequencerPruningStatus,
-      timestamp: CantonTimestamp,
-  ): Seq[SequencerPruningTrigger.LaggingMember] = {
-    val memberToSafePruningTimestamp: Map[Member, CantonTimestamp] =
-      status.members.view.collect { case m: SequencerMemberStatus.Active =>
-        m.member -> m.safePruningTimestamp
-      }.toMap
-    status
-      .clientsPreventingPruning(timestamp)
-      .members
-      .toList
-      .map(m => SequencerPruningTrigger.LaggingMember(m, memberToSafePruningTimestamp(m)))
-  }
-
-  override def closeAsync(): Seq[AsyncOrSyncCloseable] =
-    SyncCloseable("Pruning Metrics", pruningMetrics.close()) +: super.closeAsync()
-}
-
-private object SequencerPruningTrigger {
-  final case class LaggingMember(
-      member: Member,
-      safePruningTimestamp: CantonTimestamp,
-  ) extends PrettyPrinting {
-    override def pretty: Pretty[this.type] =
-      prettyOfClass(
-        param("member", _.member),
-        param("safePruningTimestamp", _.safePruningTimestamp),
-      )
-  }
 }
