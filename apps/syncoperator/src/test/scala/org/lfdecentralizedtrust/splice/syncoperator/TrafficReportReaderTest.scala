@@ -24,7 +24,6 @@ import com.digitalasset.canton.topology.transaction.{LsuAnnouncement, TopologyCh
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.nonempty.NonEmpty
-import io.grpc.{Status, StatusRuntimeException}
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
 import org.lfdecentralizedtrust.splice.environment.TopologyAdminConnection.TopologyResult
 import org.lfdecentralizedtrust.splice.syncoperator.TrafficReportReader.{cannotProvide, notOver}
@@ -116,14 +115,14 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
       starts: Seq[CantonTimestamp],
       current: SequencerAdminConnection,
       successor: Option[SequencerAdminConnection] = None,
-      pruningGuard: SequencerPruningGuard = new SequencerPruningGuard(),
+      retentionPeriod: Option[Duration] = None,
   ) =
     new TrafficReportReader(
       TrafficReport(Duration.ofMinutes(10)),
       synchronizerId,
       current,
       successor,
-      pruningGuard,
+      retentionPeriod,
     ).read(starts)
       .map(_.map(_.map { i =>
         (i.startRecordTime.toInstant, i.endRecordTime.toInstant, i.trafficConsumed)
@@ -184,15 +183,28 @@ class TrafficReportReaderTest extends AsyncWordSpec with BaseTest {
         .map(_ shouldBe Right(Seq(ok(1, 50))))
     }
 
-    "fail while the app prunes the sequencer" in {
-      val sequencer = mockSequencer(Map(interval(0) -> 100, interval(1) -> 130))
-      val pruningGuard = new SequencerPruningGuard()
+    "reject a range older than the retention period" in {
+      // The sequencer is at interval(10), so 85 minutes back is 5 minutes into interval(1).
+      val sequencer = mockSequencer(Map(interval(1) -> 100, interval(2) -> 130, interval(3) -> 150))
+      val retention = Some(Duration.ofMinutes(85))
       for {
-        _ <- pruningGuard.closeReads()
-        failure <- read(Seq(interval(0)), sequencer, pruningGuard = pruningGuard).failed
-      } yield inside(failure) { case e: StatusRuntimeException =>
-        e.getStatus.getCode shouldBe Status.Code.UNAVAILABLE
+        tooOld <- read(Seq(interval(1)), sequencer, retentionPeriod = retention)
+        kept <- read(Seq(interval(2)), sequencer, retentionPeriod = retention)
+      } yield {
+        tooOld shouldBe Left(cannotProvide(interval(2)))
+        kept shouldBe Right(Seq(ok(2, 20)))
       }
+    }
+
+    "reject a range the retention period moved past while reading it" in {
+      val sequencer = mockSequencer(Map(interval(2) -> 100, interval(3) -> 130))
+      when(sequencer.getSequencerPruningStatus()(any[TraceContext]))
+        .thenReturn(
+          Future.successful(SequencerPruningStatus(CantonTimestamp.Epoch, interval(10), Set.empty)),
+          Future.successful(SequencerPruningStatus(CantonTimestamp.Epoch, interval(11), Set.empty)),
+        )
+      read(Seq(interval(2)), sequencer, retentionPeriod = Some(Duration.ofMinutes(85)))
+        .map(_ shouldBe Left(cannotProvide(interval(3))))
     }
 
     "drop the traffic of a participant that left during an interval" in {

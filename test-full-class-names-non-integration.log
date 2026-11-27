@@ -73,11 +73,10 @@ org.lfdecentralizedtrust.splice.sv.automation.singlesv.onboarding.SvOnboardingPa
 org.lfdecentralizedtrust.splice.sv.onboarding.SequencerBftPeerReconcilerSpec
 org.lfdecentralizedtrust.splice.sv.util.SvOnboardingTokenTest
 org.lfdecentralizedtrust.splice.sv.util.WeightDistributionForSvTest
-org.lfdecentralizedtrust.splice.syncoperator.SequencerPrunerTest
-org.lfdecentralizedtrust.splice.syncoperator.SequencerPruningGuardTest
 org.lfdecentralizedtrust.splice.syncoperator.SyncOperatorRoutesTest
 org.lfdecentralizedtrust.splice.syncoperator.TrafficReportReaderTest
 org.lfdecentralizedtrust.splice.syncoperator.TrafficReportTest
+org.lfdecentralizedtrust.splice.syncoperator.automation.SequencerPruningTriggerTest
 org.lfdecentralizedtrust.splice.unit.http.HttpClientProxyTest
 org.lfdecentralizedtrust.splice.unit.store.db.AcsJdbcTypesTest
 org.lfdecentralizedtrust.splice.util.AmuletConfigScheduleTest

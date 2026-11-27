@@ -21,7 +21,6 @@ import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorSequencerPruningConfig,
   SyncOperatorTrafficControlConfig,
 }
-import org.lfdecentralizedtrust.splice.syncoperator.{SequencerPruner, SequencerPruningGuard}
 
 import java.nio.file.Path
 
@@ -39,7 +38,6 @@ class SyncOperatorAutomationService(
     trafficControlConfig: SyncOperatorTrafficControlConfig,
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
     sequencerPruning: Option[SyncOperatorSequencerPruningConfig],
-    pruningGuard: SequencerPruningGuard,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
     ec: ExecutionContextExecutor,
@@ -80,7 +78,8 @@ class SyncOperatorAutomationService(
           config = triggerContext.config.copy(pollingInterval = pruning.pruningInterval)
         ),
         synchronizerNodeService,
-        new SequencerPruner(pruning.retentionPeriod.asJava, pruningGuard, loggerFactory),
+        synchronizerId,
+        pruning.retentionPeriod,
       )
     )
   }

@@ -28,7 +28,7 @@ persistence:
 #    postgresPassword: ""
 
 # Prunes the sequencer's data older than retentionPeriod, every pruningInterval (optional).
-# Prune the sequencer only through this: the traffic report doesn't read while the app prunes.
+# Participants offline for longer than retentionPeriod are disabled.
 # sequencerPruningConfig:
 #   enabled: true
 #   pruningInterval: "1h"
