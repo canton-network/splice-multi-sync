@@ -14,13 +14,9 @@ import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.StatusRuntimeException
 import org.lfdecentralizedtrust.splice.environment.SequencerAdminConnection
 import org.lfdecentralizedtrust.splice.http.v0.definitions.TrafficReportInterval
-import org.lfdecentralizedtrust.splice.syncoperator.TrafficReportReader.{
-  UpgradeTimes,
-  cannotProvide,
-  notOver,
-}
+import org.lfdecentralizedtrust.splice.syncoperator.TrafficReportReader.{cannotProvide, notOver}
 
-import java.time.ZoneOffset
+import java.time.{Duration, ZoneOffset}
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Reads every participant's cumulative consumed traffic from the sequencer's traffic journal at
@@ -38,6 +34,7 @@ class TrafficReportReader(
     synchronizerId: SynchronizerId,
     current: SequencerAdminConnection,
     successor: Option[SequencerAdminConnection],
+    retentionPeriod: Option[Duration],
 )(implicit ec: ExecutionContext) {
 
   /** Reports the intervals that start at `starts`, which are consecutive, or says why the sequencer
@@ -47,19 +44,19 @@ class TrafficReportReader(
       starts: Seq[CantonTimestamp]
   )(implicit tc: TraceContext): Future[Either[String, Seq[TrafficReportInterval]]] =
     for {
-      upgrades <- upgradeTimes()
+      upgrades <- UpgradeTimes.of(current, synchronizerId)
       before <- unreadable(upgrades, starts)
       intervals <- before.fold(readIntervals(upgrades, starts.toList))(error =>
         Future.successful(Left(error))
       )
-      // Canton prunes the journal before it moves the bound, so check the bound again in case a
-      // prune ran during the read. A prune that hasn't moved the bound yet can't be seen here, so
-      // the sequencer must not be pruned while a report is read.
+      // Canton prunes the journal before it moves the bound, so check again in case the retention
+      // period moved past the first reading while a prune ran.
       after <- if (intervals.isRight) unreadable(upgrades, starts) else Future.successful(None)
     } yield after.fold(intervals)(Left(_))
 
-  /** Why the sequencers can't serve `starts`: one of them pruned the first reading it serves, or
-    * that reading predates the upgrade to the current sequencer.
+  /** Why the sequencers can't serve `starts`: one of them pruned the first reading it serves or may
+    * prune it, as it is older than the retention period, or that reading predates the upgrade to
+    * the current sequencer.
     */
   private def unreadable(upgrades: UpgradeTimes, starts: Seq[CantonTimestamp])(implicit
       tc: TraceContext
@@ -74,8 +71,8 @@ class TrafficReportReader(
     Future.sequence(checks).map(_.flatten.headOption)
   }
 
-  /** Why `sequencer` can't serve a reading at `first`: it pruned it, or it predates `from`, the
-    * upgrade to that sequencer.
+  /** Why `sequencer` can't serve a reading at `first`: it pruned it or may prune it, or it predates
+    * `from`, the upgrade to that sequencer.
     */
   private def unreadableAt(
       sequencer: SequencerAdminConnection,
@@ -83,7 +80,8 @@ class TrafficReportReader(
       first: CantonTimestamp,
   )(implicit tc: TraceContext): Future[Option[String]] =
     sequencer.getSequencerPruningStatus().map { pruningStatus =>
-      val bound = from.fold(pruningStatus.lowerBound)(_.max(pruningStatus.lowerBound))
+      val bound = (from.toList ++ retentionPeriod.map(pruningStatus.now.minus))
+        .foldLeft(pruningStatus.lowerBound)(_ max _)
       Option.when(first <= bound)(cannotProvide(report.firstReadableStart(bound)))
     }
 
@@ -135,21 +133,6 @@ class TrafficReportReader(
         }
     }
 
-  /** The current sequencer's topology still lists the upgrade that made it current. */
-  private def upgradeTimes()(implicit tc: TraceContext): Future[UpgradeTimes] =
-    for {
-      psid <- current.getPhysicalSynchronizerId()
-      announcements <- current.listLsuAnnouncements(synchronizerId)
-    } yield {
-      val upgrades = announcements.map(_.mapping)
-      UpgradeTimes(
-        currentFrom =
-          upgrades.find(_.successorSynchronizerId.serial == psid.serial).map(_.upgradeTime),
-        successorFrom =
-          upgrades.find(_.successorSynchronizerId.serial > psid.serial).map(_.upgradeTime),
-      )
-    }
-
   /** Every member's traffic state from just before `time`, or None while the sequencer has not
     * sequenced past `time` yet.
     */
@@ -187,16 +170,11 @@ class TrafficReportReader(
 
 object TrafficReportReader {
   def cannotProvide(firstReadable: CantonTimestamp): String =
-    s"The sequencer pruned the intervals before $firstReadable, or they predate the upgrade to " +
-      s"it. Request a range that starts at or after $firstReadable."
+    s"The sequencer does not keep the intervals before $firstReadable, or they predate the " +
+      s"upgrade to it. Request a range that starts at or after $firstReadable."
 
   def notOver(start: CantonTimestamp, end: CantonTimestamp): String =
     s"The interval [$start, $end) is not over yet, or the sequencer has not sequenced past its " +
       s"end. Request a range that ends at or before $start (or wait for long enough after " +
       s"$end and retry)."
-
-  private final case class UpgradeTimes(
-      currentFrom: Option[CantonTimestamp],
-      successorFrom: Option[CantonTimestamp],
-  )
 }

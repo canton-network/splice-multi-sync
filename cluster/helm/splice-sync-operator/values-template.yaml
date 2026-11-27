@@ -27,6 +27,13 @@ persistence:
 #  secretOverrides:
 #    postgresPassword: ""
 
+# Prunes the sequencer's data older than retentionPeriod, every pruningInterval (optional).
+# Participants offline for longer than retentionPeriod are disabled.
+# sequencerPruningConfig:
+#   enabled: true
+#   pruningInterval: "1h"
+#   retentionPeriod: "30d"
+
 # k8s affinity for all deployed pods (optional)
 # affinity:
 

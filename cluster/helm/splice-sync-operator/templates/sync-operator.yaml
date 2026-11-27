@@ -53,6 +53,14 @@ spec:
           value: {{ (.Values.auth).audience | quote }}
         - name: SPLICE_APP_SYNC_OPERATOR_AUTH_JWKS_URL
           value: {{ (.Values.auth).jwksUrl | quote }}
+        {{- if (.Values.sequencerPruningConfig).enabled }}
+        - name: ADDITIONAL_CONFIG_SEQUENCER_PRUNING
+          value: |
+            canton.sync-operator-apps.sync-operator.sequencer-pruning {
+              pruning-interval = {{ .Values.sequencerPruningConfig.pruningInterval | quote }}
+              retention-period = {{ .Values.sequencerPruningConfig.retentionPeriod | quote }}
+            }
+        {{- end }}
         {{- with .Values.persistence }}
         - name: ADDITIONAL_CONFIG_PERSISTENCE
           value: |

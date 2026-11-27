@@ -18,6 +18,7 @@ import org.lfdecentralizedtrust.splice.store.DomainTimeSynchronization
 import org.lfdecentralizedtrust.splice.syncoperator.SyncOperatorSynchronizerNode
 import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorLsuConfig,
+  SyncOperatorSequencerPruningConfig,
   SyncOperatorTrafficControlConfig,
 }
 
@@ -36,6 +37,7 @@ class SyncOperatorAutomationService(
     lsuDumpPath: Option[Path],
     trafficControlConfig: SyncOperatorTrafficControlConfig,
     trafficBalanceReconciliationDelay: NonNegativeFiniteDuration,
+    sequencerPruning: Option[SyncOperatorSequencerPruningConfig],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
     ec: ExecutionContextExecutor,
@@ -68,6 +70,19 @@ class SyncOperatorAutomationService(
       trafficBalanceReconciliationDelay,
     )
   )
+
+  sequencerPruning.foreach { pruning =>
+    registerTrigger(
+      new SequencerPruningTrigger(
+        triggerContext.copy(
+          config = triggerContext.config.copy(pollingInterval = pruning.pruningInterval)
+        ),
+        synchronizerNodeService,
+        synchronizerId,
+        pruning.retentionPeriod,
+      )
+    )
+  }
 
   registerLsuTriggers()
 
@@ -115,5 +130,6 @@ object SyncOperatorAutomationService extends AutomationServiceCompanion {
       aTrigger[DedicatedLsuAnnouncementTrigger],
       aTrigger[DedicatedLsuTrigger],
       aTrigger[LsuTransferTrafficTrigger],
+      aTrigger[SequencerPruningTrigger],
     )
 }

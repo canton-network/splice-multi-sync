@@ -11,14 +11,13 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.{MetricDoc, MetricsDocGenerator}
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import org.lfdecentralizedtrust.splice.admin.api.client.DamlGrpcClientMetrics
-import org.lfdecentralizedtrust.splice.automation.TriggerMetrics
+import org.lfdecentralizedtrust.splice.automation.{SequencerPruningMetrics, TriggerMetrics}
 import org.lfdecentralizedtrust.splice.scan.store.db.DbScanStoreMetrics
 import org.lfdecentralizedtrust.splice.scan.metrics.{
   RewardAccountingPruningMetrics,
   RewardComputationMetrics,
   ScanMediatorVerdictIngestionMetrics,
 }
-import org.lfdecentralizedtrust.splice.sv.automation.singlesv.SequencerPruningMetrics
 import org.lfdecentralizedtrust.splice.sv.automation.{
   AmuletPriceMetricsTrigger,
   ReportSvStatusMetricsExportTrigger,

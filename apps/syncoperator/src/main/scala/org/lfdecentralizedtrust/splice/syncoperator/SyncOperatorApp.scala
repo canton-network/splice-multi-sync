@@ -122,6 +122,7 @@ class SyncOperatorApp(
         config.lsuDumpPath,
         config.trafficControl,
         config.trafficBalanceReconciliationDelay,
+        config.sequencerPruning,
         loggerFactory,
       )
       verifier = config.auth match {
@@ -141,6 +142,7 @@ class SyncOperatorApp(
           synchronizerId,
           sequencerAdminConnection,
           synchronizerNodes.successor.map(_.sequencerAdminConnection),
+          config.sequencerPruning.map(_.retentionPeriod.asJava),
         ),
       )
       _ = adminRoutes.updateRoute(withTraceContext { implicit traceContext =>

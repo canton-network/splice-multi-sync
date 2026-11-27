@@ -455,6 +455,28 @@ class SpliceConfigTest extends AsyncWordSpec with BaseTest {
       syncOperator.trafficControl.baseEventCost.value shouldBe 0
       syncOperator.synchronizerNodes.successor shouldBe None
       syncOperator.lsu shouldBe None
+      syncOperator.sequencerPruning shouldBe None
+    }
+
+    "load sequencer pruning" in {
+      val syncOperatorTopology = ConfigFactory.parseFile(
+        new java.io.File("apps/app/src/test/resources/sync-operator-topology.conf")
+      )
+      val pruning = ConfigFactory.parseString(
+        """
+          |canton.sync-operator-apps.syncOperator.sequencer-pruning {
+          |  pruning-interval = "1h"
+          |  retention-period = "30d"
+          |}
+          """.stripMargin
+      )
+      val loaded =
+        SpliceConfig
+          .loadAndValidate(CantonConfig.mergeConfigs(config, Seq(syncOperatorTopology, pruning)))
+          .value
+      val sequencerPruning = loaded.syncOperatorsByString("syncOperator").sequencerPruning.value
+      sequencerPruning.pruningInterval shouldBe NonNegativeFiniteDuration.ofHours(1)
+      sequencerPruning.retentionPeriod shouldBe NonNegativeFiniteDuration.ofDays(30)
     }
 
     "load a scheduled upgrade and its successor node" in {
