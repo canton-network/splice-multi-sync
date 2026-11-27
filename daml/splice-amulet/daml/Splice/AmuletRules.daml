@@ -1932,8 +1932,18 @@ buyMemberTraffic eventLogCid csum trafficConfig purchase (trafficCostAmulet, tra
     numPurchases = 1
     amuletSpent = trafficCostAmulet
     usdSpent = trafficCostUsd
-  -- TODO(ChainSafe/canton-extending-mainnet#163): Given a paymaster's purchase, record its
-  -- non-zero `appActivity` and `assetActivity` through the CIP-0104 `ActivityRecorder`.
+  -- A paymaster's purchase records its activity through the ActivityRecorder hook of
+  -- https://github.com/canton-foundation/cips/blob/main/cip-0104/cip-0104.md#app-activity-recording-extension-hook.
+  -- Zero activity is left out, so that a purchase that earns none records nothing.
+  whenSome purchase.paymaster $ \receipt -> do
+    let nonZero activity = if activity > 0 then [(receipt.paymaster, activity)] else []
+        appActivity = nonZero receipt.appActivity
+        assetActivity = nonZero receipt.assetActivity
+    unless (null appActivity && null assetActivity) $ do
+      recorderCid <- create ActivityRecorder with dso = csum.dso
+      void $ exercise recorderCid ActivityRecorder_DsoRecordActivity with
+        appActivity
+        assetActivity
   pure MemberTrafficPurchaseResult with ..
 
 data AppTransferContext = AppTransferContext
