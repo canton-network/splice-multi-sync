@@ -11,6 +11,7 @@ paths:
     $ref: "../../../../common/src/main/openapi/common-external.yaml#/paths/~1readyz"
   /livez:
     $ref: "../../../../common/src/main/openapi/common-external.yaml#/paths/~1livez"
+  # TODO(ChainSafe/canton-extending-mainnet#152): replace this placeholder with the traffic report
   /v0/auth-check:
     get:
       description: |

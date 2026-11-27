@@ -16,6 +16,7 @@ object HttpSyncOperatorAppClient {
     override val createGenClientFn = (fn, host, ec, mat) => Client.httpClient(fn, host)(ec, mat)
   }
 
+  // TODO(ChainSafe/canton-extending-mainnet#152): replace this placeholder with the traffic report
   case object CheckAuth extends BaseCommand[http.CheckAuthResponse, definitions.CheckAuthResponse] {
 
     override def submitRequest(client: Client, headers: List[HttpHeader]) =

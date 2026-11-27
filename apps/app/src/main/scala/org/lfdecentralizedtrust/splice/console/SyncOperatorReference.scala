@@ -23,6 +23,7 @@ abstract class SyncOperatorAppReference(
 
   override def basePath = "/api/syncoperator"
 
+  // TODO(ChainSafe/canton-extending-mainnet#152): replace this placeholder with the traffic report
   @Help.Summary("Check the token: return the user it authenticates")
   def checkAuth(): definitions.CheckAuthResponse =
     consoleEnvironment.run {

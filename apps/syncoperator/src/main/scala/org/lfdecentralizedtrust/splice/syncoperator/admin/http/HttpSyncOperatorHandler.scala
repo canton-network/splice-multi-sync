@@ -11,6 +11,7 @@ import scala.concurrent.Future
 
 class HttpSyncOperatorHandler extends v0.SyncOperatorHandler[AuthenticatedRequest] {
 
+  // TODO(ChainSafe/canton-extending-mainnet#152): replace this placeholder with the traffic report
   override def checkAuth(
       respond: v0.SyncOperatorResource.CheckAuthResponse.type
   )()(extracted: AuthenticatedRequest): Future[v0.SyncOperatorResource.CheckAuthResponse] =
