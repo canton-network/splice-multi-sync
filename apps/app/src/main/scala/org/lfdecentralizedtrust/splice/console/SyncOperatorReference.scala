@@ -4,24 +4,30 @@
 package org.lfdecentralizedtrust.splice.console
 
 import com.digitalasset.canton.console.{BaseInspection, Help}
+import org.lfdecentralizedtrust.splice.auth.AuthUtil
 import org.lfdecentralizedtrust.splice.config.NetworkAppClientConfig
 import org.lfdecentralizedtrust.splice.environment.SpliceConsoleEnvironment
+import org.lfdecentralizedtrust.splice.http.v0.definitions
 import org.lfdecentralizedtrust.splice.syncoperator.{SyncOperatorApp, SyncOperatorAppBootstrap}
+import org.lfdecentralizedtrust.splice.syncoperator.admin.api.client.commands.HttpSyncOperatorAppClient
 import org.lfdecentralizedtrust.splice.syncoperator.automation.SyncOperatorAutomationService
 import org.lfdecentralizedtrust.splice.syncoperator.config.{
   SyncOperatorAppBackendConfig,
   SyncOperatorAppClientConfig,
 }
 
-/** Sync operator app reference. The app has no HTTP API of its own, so only the admin endpoints
-  * shared by every Splice app are available here.
-  */
 abstract class SyncOperatorAppReference(
     override val spliceConsoleEnvironment: SpliceConsoleEnvironment,
     override val name: String,
 ) extends HttpAppReference {
 
   override def basePath = "/api/syncoperator"
+
+  @Help.Summary("Check the token: return the user it authenticates")
+  def checkAuth(): definitions.CheckAuthResponse =
+    consoleEnvironment.run {
+      httpCommand(HttpSyncOperatorAppClient.CheckAuth)
+    }
 }
 
 final class SyncOperatorAppClientReference(
@@ -49,6 +55,15 @@ final class SyncOperatorAppBackendReference(
     consoleEnvironment.environment.syncOperators.getStarting(name)
 
   override protected val instanceType = "Sync Operator Backend"
+
+  override def token: Option[String] =
+    Some(
+      AuthUtil.testToken(
+        audience = AuthUtil.testAudience,
+        user = name,
+        secret = AuthUtil.testSecret,
+      )
+    )
 
   override def httpClientConfig = NetworkAppClientConfig(
     s"http://127.0.0.1:${config.clientAdminApi.port}"

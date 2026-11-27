@@ -1,0 +1,39 @@
+openapi: 3.0.0
+info:
+  title: Sync Operator API
+  version: 0.0.1
+tags:
+  - name: sync_operator
+servers:
+  - url: https://example.com/api/syncoperator
+paths:
+  /readyz:
+    $ref: "../../../../common/src/main/openapi/common-external.yaml#/paths/~1readyz"
+  /livez:
+    $ref: "../../../../common/src/main/openapi/common-external.yaml#/paths/~1livez"
+  /v0/auth-check:
+    get:
+      description: |
+        Checks the caller's token: returns the user it authenticates, or fails with 401.
+        A placeholder until the traffic report endpoint lands.
+      tags: [sync_operator]
+      x-jvm-package: external.sync_operator
+      operationId: "checkAuth"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CheckAuthResponse"
+
+components:
+  schemas:
+    CheckAuthResponse:
+      type: object
+      required:
+        - user
+      properties:
+        user:
+          description: The user the token authenticates, its `sub` claim.
+          type: string

@@ -11,7 +11,30 @@ chart:
   # Override for testing labels
   version: 0.1.1
   appVersion: 0.1.0
+set:
+  auth:
+    audience: "mock-audience"
+    jwksUrl: "https://mock-jwks.example.com/.well-known/jwks.json"
 tests:
+  - it: "sets the auth audience and JWKS URL"
+    set:
+      sequencerAddress: "dummy"
+      persistence.host: "dummy"
+    documentSelector:
+      path: kind
+      value: Deployment
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SPLICE_APP_SYNC_OPERATOR_AUTH_AUDIENCE
+            value: "mock-audience"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SPLICE_APP_SYNC_OPERATOR_AUTH_JWKS_URL
+            value: "https://mock-jwks.example.com/.well-known/jwks.json"
+
   - it: "sets the sequencer address"
     set:
       sequencerAddress: "mock-sequencer"
