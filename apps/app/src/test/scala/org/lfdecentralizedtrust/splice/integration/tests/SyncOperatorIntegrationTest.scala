@@ -58,6 +58,10 @@ class SyncOperatorIntegrationTest extends IntegrationTest {
       syncOperatorBackend.httpReady shouldBe true
     }
 
+    "accept the operator's token on its API" in { implicit env =>
+      syncOperatorBackend.checkAuth().user shouldBe syncOperatorBackend.name
+    }
+
     "take its synchronizer id from the sequencer it is configured with" in { implicit env =>
       // Alice's participant is the one still connected to splitwell in this topology.
       val served = aliceValidatorBackend.participantClientWithAdminToken.synchronizers
